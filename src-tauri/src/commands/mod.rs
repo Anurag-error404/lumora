@@ -1,0 +1,2040 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use chrono::Utc;
+use rusqlite::{params, Connection};
+use tauri::{AppHandle, Emitter, Manager, State};
+use uuid::Uuid;
+
+use crate::albums;
+use crate::diagnostics;
+use crate::duplicates;
+use crate::edit::{self, EditOps, EditResult, SaveMode};
+use crate::error::{AppError, AppResult};
+use crate::export;
+use crate::history::{self, HistoryAction};
+use crate::indexer;
+use crate::indexer::queue::IndexerQueue;
+use crate::ml;
+use crate::models::*;
+use crate::preferences::{self, Preferences, StorageSummary};
+use crate::saved_searches;
+use crate::search;
+use crate::semantic;
+use crate::smart;
+use crate::state::{AppState, VaultSession};
+use crate::thumbnails;
+use crate::trash;
+use crate::vault;
+use crate::views;
+use crate::watcher;
+
+#[tauri::command]
+pub fn get_library_stats(state: State<'_, AppState>) -> AppResult<LibraryStats> {
+    state.with_db(|conn| {
+        Ok(LibraryStats {
+            total_assets: scalar(conn, "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL")?,
+            total_images: scalar(
+                conn,
+                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND media_type='image'",
+            )?,
+            total_videos: scalar(
+                conn,
+                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND media_type='video'",
+            )?,
+            favorites: scalar(
+                conn,
+                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND favorite=1",
+            )?,
+            in_trash: scalar(
+                conn,
+                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NOT NULL",
+            )?,
+            album_count: scalar(conn, "SELECT COUNT(*) FROM albums")?,
+            tag_count: scalar(conn, "SELECT COUNT(*) FROM tags")?,
+            watched_folders: scalar(conn, "SELECT COUNT(*) FROM watched_folders")?,
+            trash_retention_days: trash::DEFAULT_RETENTION_DAYS,
+        })
+    })
+}
+
+fn scalar(conn: &Connection, sql: &str) -> AppResult<i64> {
+    Ok(conn.query_row(sql, [], |r| r.get(0))?)
+}
+
+fn push_history(
+    state: &AppState,
+    kind: &str,
+    label: impl Into<String>,
+    detail: Option<&str>,
+    undo: HistoryAction,
+    redo: HistoryAction,
+) -> AppResult<()> {
+    let label = label.into();
+    let entry = history::make_entry(kind, label.clone(), undo, redo);
+    let entry_id = entry.id.clone();
+    state.with_db(|conn| {
+        history::record_activity(conn, kind, &label, detail)?;
+        // Keep entry id aligned with DB activity when possible — store under same label/time.
+        let _ = entry_id;
+        Ok(())
+    })?;
+    state.history.lock().push(entry);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_folder(app: AppHandle, path: String) -> AppResult<ImportResult> {
+    import_paths(app, vec![path]).await
+}
+
+#[tauri::command]
+pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<ImportResult> {
+    if paths.is_empty() {
+        return Err(AppError::msg(
+            "select at least one file or folder to import",
+        ));
+    }
+
+    let roots: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    for root in &roots {
+        if !root.exists() {
+            return Err(AppError::msg(format!("path not found: {}", root.display())));
+        }
+        if root.is_file() && !indexer::is_supported_media(root) {
+            return Err(AppError::msg(format!(
+                "unsupported media file: {}",
+                root.display()
+            )));
+        }
+        if !root.is_file() && !root.is_dir() {
+            return Err(AppError::msg(format!(
+                "not a file or folder: {}",
+                root.display()
+            )));
+        }
+    }
+
+    // Extract owned paths so we don't hold `State<'_>` across threads.
+    let (db_path, thumbs) = {
+        let state = app.state::<AppState>();
+        (state.paths.db_path.clone(), state.paths.thumbs_dir.clone())
+    };
+
+    let label = if roots.len() == 1 {
+        roots[0].display().to_string()
+    } else {
+        format!("{} items", roots.len())
+    };
+    let _ = app.emit(
+        "import-progress",
+        ImportProgressEvent {
+            current: 0,
+            total: 0,
+            path: label.clone(),
+            phase: "scanning".into(),
+        },
+    );
+
+    // Run the heavy scan/hash/thumbnail work off the main thread so the UI
+    // stays responsive and progress events can render live.
+    let app_for_job = app.clone();
+    let roots_for_job = roots.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<ImportResult> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        let result = indexer::import_paths_with_progress(
+            &conn,
+            &roots_for_job,
+            &thumbs,
+            |current, total, file| {
+                let _ = app_for_job.emit(
+                    "import-progress",
+                    ImportProgressEvent {
+                        current,
+                        total,
+                        path: file.display().to_string(),
+                        phase: "indexing".into(),
+                    },
+                );
+            },
+        )?;
+
+        // Only watch directories — individual files don't create a watched root.
+        for root in &roots_for_job {
+            if root.is_dir() {
+                let _ = watcher::add_watched(&conn, root);
+            }
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("import task failed: {e}")))??;
+
+    if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
+        for root in &roots {
+            if root.is_dir() {
+                ws.add_root(root.clone());
+            }
+        }
+    }
+
+    // Newly imported photos may need CLIP embeddings.
+    if let Some(state) = app.try_state::<AppState>() {
+        state.embedder.kick();
+    }
+
+    let _ = app.emit(
+        "import-progress",
+        ImportProgressEvent {
+            current: result.scanned,
+            total: result.scanned,
+            path: label,
+            phase: "done".into(),
+        },
+    );
+
+    tracing::info!(?result, paths = ?paths, "media imported");
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn list_assets(
+    state: State<'_, AppState>,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| search::list_assets(conn, limit.min(500), offset, false))
+}
+
+#[tauri::command]
+pub fn search_assets(
+    state: State<'_, AppState>,
+    query: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| search::search_assets(conn, &query, limit.min(500), offset))
+}
+
+#[tauri::command]
+pub fn get_index_progress(state: State<'_, AppState>) -> AppResult<IndexProgress> {
+    Ok(state.indexer.progress())
+}
+
+#[tauri::command]
+pub fn get_developer_info(state: State<'_, AppState>) -> AppResult<DeveloperInfo> {
+    let thumbnail_stats = diagnostics::directory_stats(&state.paths.thumbs_dir);
+    let log_stats = diagnostics::directory_stats(&state.paths.logs_dir);
+    let recent_logs = diagnostics::latest_log_lines(&state.paths.logs_dir, 500)?;
+    let crash_logs = diagnostics::error_log_lines(&recent_logs, 100);
+    let database_size_bytes = std::fs::metadata(&state.paths.db_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let (schema_version, watched_folder_count, activity_count, export_count) =
+        state.with_db(|conn| {
+            Ok((
+                scalar(
+                    conn,
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                )?,
+                scalar(conn, "SELECT COUNT(*) FROM watched_folders")?,
+                scalar(conn, "SELECT COUNT(*) FROM activity_log")?,
+                scalar(conn, "SELECT COUNT(*) FROM exports")?,
+            ))
+        })?;
+
+    Ok(DeveloperInfo {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        build_profile: if cfg!(debug_assertions) {
+            "development".to_string()
+        } else {
+            "release".to_string()
+        },
+        debug_build: cfg!(debug_assertions),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        app_data_path: state.paths.app_data.display().to_string(),
+        database_path: state.paths.db_path.display().to_string(),
+        database_size_bytes,
+        schema_version,
+        thumbnails_path: state.paths.thumbs_dir.display().to_string(),
+        thumbnail_count: thumbnail_stats.file_count,
+        thumbnail_size_bytes: thumbnail_stats.size_bytes,
+        logs_path: state.paths.logs_dir.display().to_string(),
+        log_file_count: log_stats.file_count,
+        log_size_bytes: log_stats.size_bytes,
+        watched_folder_count,
+        activity_count,
+        export_count,
+        index_progress: state.indexer.progress(),
+        recent_logs,
+        crash_logs,
+    })
+}
+
+#[tauri::command]
+pub fn get_preferences(state: State<'_, AppState>) -> AppResult<Preferences> {
+    preferences::load(&state.paths.app_data)
+}
+
+#[tauri::command]
+pub fn set_preferences(
+    state: State<'_, AppState>,
+    prefs: Preferences,
+) -> AppResult<Preferences> {
+    preferences::save(&state.paths.app_data, &prefs)?;
+    Ok(prefs)
+}
+
+#[tauri::command]
+pub fn get_storage_summary(state: State<'_, AppState>) -> AppResult<StorageSummary> {
+    state.with_db(|conn| {
+        preferences::storage_summary(
+            conn,
+            &state.paths.app_data,
+            &state.paths.db_path,
+            &state.paths.thumbs_dir,
+            &state.paths.models_dir,
+            &state.paths.logs_dir,
+        )
+    })
+}
+
+/// Delete thumbnail cache files. Library entries stay intact; previews regenerate
+/// on demand / via rebuild.
+#[tauri::command]
+pub fn clear_thumbnail_cache(state: State<'_, AppState>) -> AppResult<u64> {
+    Ok(clear_thumbs_dir(&state.paths.thumbs_dir))
+}
+
+/// Clear the thumbnail cache, then regenerate missing previews for library images.
+#[tauri::command]
+pub fn rebuild_thumbnail_cache(state: State<'_, AppState>) -> AppResult<u32> {
+    let thumbs = state.paths.thumbs_dir.clone();
+    let _ = clear_thumbs_dir(&thumbs);
+    state.with_db(|conn| thumbnails::repair_missing_thumbnails(conn, &thumbs))
+}
+
+#[tauri::command]
+pub fn optimize_database(state: State<'_, AppState>) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute_batch("PRAGMA optimize; VACUUM;")?;
+        Ok(())
+    })
+}
+
+fn clear_thumbs_dir(thumbs: &std::path::Path) -> u64 {
+    let mut removed = 0u64;
+    if !thumbs.is_dir() {
+        return 0;
+    }
+    for entry in walkdir::WalkDir::new(thumbs)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+#[tauri::command]
+pub fn set_favorite(state: State<'_, AppState>, id: String, favorite: bool) -> AppResult<()> {
+    state.with_db(|conn| {
+        let changed = conn.execute(
+            "UPDATE assets SET favorite=?1 WHERE id=?2",
+            params![if favorite { 1 } else { 0 }, id],
+        )?;
+        if changed == 0 {
+            return Err(AppError::msg("asset not found"));
+        }
+        Ok(())
+    })?;
+    let label = if favorite {
+        "Added 1 photo to favourites"
+    } else {
+        "Removed 1 photo from favourites"
+    };
+    push_history(
+        &state,
+        "favorite",
+        label,
+        None,
+        HistoryAction::SetFavorites {
+            asset_ids: vec![id.clone()],
+            favorite: !favorite,
+        },
+        HistoryAction::SetFavorites {
+            asset_ids: vec![id],
+            favorite,
+        },
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_favorites(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    favorite: bool,
+) -> AppResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let count = state.with_db(|conn| {
+        let mut count = 0usize;
+        let value = if favorite { 1 } else { 0 };
+        for id in &ids {
+            count += conn.execute(
+                "UPDATE assets SET favorite=?1 WHERE id=?2",
+                params![value, id],
+            )?;
+        }
+        Ok(count)
+    })?;
+    let label = if favorite {
+        format!("Added {count} photo(s) to favourites")
+    } else {
+        format!("Removed {count} photo(s) from favourites")
+    };
+    push_history(
+        &state,
+        "favorite",
+        label,
+        None,
+        HistoryAction::SetFavorites {
+            asset_ids: ids.clone(),
+            favorite: !favorite,
+        },
+        HistoryAction::SetFavorites {
+            asset_ids: ids,
+            favorite,
+        },
+    )?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn set_rating(state: State<'_, AppState>, id: String, rating: i64) -> AppResult<()> {
+    if !(0..=5).contains(&rating) {
+        return Err(AppError::msg("rating must be 0-5"));
+    }
+    state.with_db(|conn| {
+        conn.execute(
+            "UPDATE assets SET rating=?1 WHERE id=?2",
+            params![rating, id],
+        )?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn set_color_label(
+    state: State<'_, AppState>,
+    id: String,
+    color_label: Option<String>,
+) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "UPDATE assets SET color_label=?1 WHERE id=?2",
+            params![color_label, id],
+        )?;
+        Ok(())
+    })
+}
+
+/// Bulk-rate assets (0 clears). Records an undoable history entry that
+/// restores each asset's previous rating.
+#[tauri::command]
+pub fn set_ratings(state: State<'_, AppState>, ids: Vec<String>, rating: i64) -> AppResult<usize> {
+    if !(0..=5).contains(&rating) {
+        return Err(AppError::msg("rating must be 0-5"));
+    }
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let (asset_ids, previous) = state.with_db(|conn| {
+        let mut asset_ids = Vec::new();
+        let mut previous = Vec::new();
+        for id in &ids {
+            let prev: Option<i64> = conn
+                .query_row("SELECT rating FROM assets WHERE id=?1", params![id], |r| {
+                    r.get(0)
+                })
+                .ok();
+            let Some(prev) = prev else { continue };
+            conn.execute(
+                "UPDATE assets SET rating=?1 WHERE id=?2",
+                params![rating, id],
+            )?;
+            asset_ids.push(id.clone());
+            previous.push(prev);
+        }
+        Ok((asset_ids, previous))
+    })?;
+    let count = asset_ids.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    let label = if rating == 0 {
+        format!("Cleared rating on {count} photo(s)")
+    } else {
+        format!("Rated {count} photo(s) {rating} star(s)")
+    };
+    push_history(
+        &state,
+        "rating",
+        label,
+        None,
+        HistoryAction::SetRatings {
+            asset_ids: asset_ids.clone(),
+            ratings: previous,
+        },
+        HistoryAction::SetRatings {
+            asset_ids: asset_ids.clone(),
+            ratings: vec![rating; count],
+        },
+    )?;
+    Ok(count)
+}
+
+/// Bulk-apply a colour label (None clears). Undo restores each asset's
+/// previous label.
+#[tauri::command]
+pub fn set_color_labels(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    color_label: Option<String>,
+) -> AppResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let (asset_ids, previous) = state.with_db(|conn| {
+        let mut asset_ids = Vec::new();
+        let mut previous = Vec::new();
+        for id in &ids {
+            let prev: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT color_label FROM assets WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .ok();
+            let Some(prev) = prev else { continue };
+            conn.execute(
+                "UPDATE assets SET color_label=?1 WHERE id=?2",
+                params![color_label, id],
+            )?;
+            asset_ids.push(id.clone());
+            previous.push(prev);
+        }
+        Ok((asset_ids, previous))
+    })?;
+    let count = asset_ids.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    let label = match &color_label {
+        Some(color) => format!("Labelled {count} photo(s) {color}"),
+        None => format!("Removed colour label from {count} photo(s)"),
+    };
+    push_history(
+        &state,
+        "label",
+        label,
+        None,
+        HistoryAction::SetColorLabels {
+            asset_ids: asset_ids.clone(),
+            labels: previous,
+        },
+        HistoryAction::SetColorLabels {
+            asset_ids: asset_ids.clone(),
+            labels: vec![color_label; count],
+        },
+    )?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> AppResult<Vec<Tag>> {
+    state.with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, COUNT(a.id)
+             FROM tags t
+             LEFT JOIN asset_tags at ON at.tag_id = t.id
+             LEFT JOIN assets a ON a.id = at.asset_id AND a.deleted_at IS NULL
+             GROUP BY t.id
+             ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Tag {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                asset_count: r.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn list_tag_assets(
+    state: State<'_, AppState>,
+    tag_id: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| search::list_assets_for_tag(conn, &tag_id, limit, offset))
+}
+
+/// Rating and colour-label facet counts for the Tags browsing page.
+#[tauri::command]
+pub fn get_library_facets(state: State<'_, AppState>) -> AppResult<LibraryFacets> {
+    state.with_db(|conn| {
+        let (ratings, color_labels) = search::facet_counts(conn)?;
+        Ok(LibraryFacets {
+            ratings,
+            color_labels,
+        })
+    })
+}
+
+/// List assets matching any combination of tags, ratings, and colour labels.
+#[tauri::command]
+pub fn list_tag_browse_assets(
+    state: State<'_, AppState>,
+    filter: TagBrowseFilter,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| search::list_assets_for_browse_filter(conn, &filter, limit, offset))
+}
+
+#[tauri::command]
+pub fn create_tag(state: State<'_, AppState>, name: String) -> AppResult<Tag> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::msg("tag name required"));
+    }
+    state.with_db(|conn| {
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO tags (id, name) VALUES (?1, ?2)",
+            params![id, name],
+        )?;
+        Ok(Tag {
+            id,
+            name,
+            asset_count: 0,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn tag_asset(state: State<'_, AppState>, asset_id: String, tag_id: String) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?1, ?2)",
+            params![asset_id, tag_id],
+        )?;
+        indexer::refresh_fts(conn, &asset_id)?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn untag_asset(state: State<'_, AppState>, asset_id: String, tag_id: String) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "DELETE FROM asset_tags WHERE asset_id=?1 AND tag_id=?2",
+            params![asset_id, tag_id],
+        )?;
+        indexer::refresh_fts(conn, &asset_id)?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn list_albums(state: State<'_, AppState>) -> AppResult<Vec<Album>> {
+    state.with_db(albums::list_albums)
+}
+
+#[tauri::command]
+pub fn list_saved_searches(state: State<'_, AppState>) -> AppResult<Vec<SavedSearch>> {
+    state.with_db(saved_searches::list)
+}
+
+#[tauri::command]
+pub fn record_recent_search(
+    state: State<'_, AppState>,
+    query: String,
+) -> AppResult<SavedSearch> {
+    state.with_db(|conn| saved_searches::record(conn, &query))
+}
+
+#[tauri::command]
+pub fn delete_saved_search(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.with_db(|conn| saved_searches::delete(conn, &id))
+}
+
+#[tauri::command]
+pub fn clear_recent_searches(state: State<'_, AppState>) -> AppResult<usize> {
+    state.with_db(saved_searches::clear)
+}
+
+/// Albums and tags currently associated with a single asset.
+#[tauri::command]
+pub fn get_asset_organisation(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<AssetOrganisation> {
+    state.with_db(|conn| {
+        let mut album_stmt = conn.prepare(
+            "SELECT
+                a.id,
+                a.name,
+                a.cover_asset_id,
+                a.created_at,
+                (
+                  SELECT COUNT(*)
+                  FROM album_assets aa2
+                  JOIN assets x ON x.id = aa2.asset_id AND x.deleted_at IS NULL
+                  WHERE aa2.album_id = a.id
+                ),
+                (
+                  SELECT c.thumbnail_path
+                  FROM assets c
+                  WHERE c.id = a.cover_asset_id AND c.deleted_at IS NULL
+                )
+             FROM albums a
+             JOIN album_assets aa ON aa.album_id = a.id
+             WHERE aa.asset_id = ?1
+             ORDER BY a.name COLLATE NOCASE",
+        )?;
+        let albums = album_stmt
+            .query_map(params![id], |r| {
+                Ok(Album {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    cover_asset_id: r.get(2)?,
+                    created_at: r.get(3)?,
+                    asset_count: r.get(4)?,
+                    cover_thumbnail_path: r.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut tag_stmt = conn.prepare(
+            "SELECT
+                t.id,
+                t.name,
+                (
+                  SELECT COUNT(*)
+                  FROM asset_tags at2
+                  JOIN assets x ON x.id = at2.asset_id AND x.deleted_at IS NULL
+                  WHERE at2.tag_id = t.id
+                )
+             FROM tags t
+             JOIN asset_tags at ON at.tag_id = t.id
+             WHERE at.asset_id = ?1
+             ORDER BY t.name COLLATE NOCASE",
+        )?;
+        let tags = tag_stmt
+            .query_map(params![id], |r| {
+                Ok(Tag {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    asset_count: r.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(AssetOrganisation { albums, tags })
+    })
+}
+
+#[tauri::command]
+pub fn create_album(state: State<'_, AppState>, name: String) -> AppResult<Album> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::msg("album name required"));
+    }
+    let album = state.with_db(|conn| {
+        let id = Uuid::new_v4().to_string();
+        let created_at = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO albums (id, name, created_at) VALUES (?1, ?2, ?3)",
+            params![id, name, created_at],
+        )?;
+        Ok(Album {
+            id,
+            name,
+            cover_asset_id: None,
+            cover_thumbnail_path: None,
+            created_at,
+            asset_count: 0,
+        })
+    })?;
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "album",
+            &format!("Created album “{}”", album.name),
+            Some(&album.id),
+        )
+    })?;
+    Ok(album)
+}
+
+#[tauri::command]
+pub fn rename_album(state: State<'_, AppState>, id: String, name: String) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "UPDATE albums SET name=?1 WHERE id=?2",
+            params![name.trim(), id],
+        )?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn delete_album(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute("DELETE FROM albums WHERE id=?1", params![id])?;
+        Ok(())
+    })?;
+    state.history.lock().invalidate_album(&id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_to_album(
+    state: State<'_, AppState>,
+    album_id: String,
+    asset_id: String,
+) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "INSERT OR IGNORE INTO album_assets (album_id, asset_id) VALUES (?1, ?2)",
+            params![album_id, asset_id],
+        )?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn add_assets_to_album(
+    state: State<'_, AppState>,
+    album_id: String,
+    asset_ids: Vec<String>,
+) -> AppResult<usize> {
+    if asset_ids.is_empty() {
+        return Ok(0);
+    }
+    let album_name: String = state.with_db(|conn| {
+        conn.query_row(
+            "SELECT name FROM albums WHERE id=?1",
+            params![album_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::msg("album not found"))
+    })?;
+    let count = state.with_db(|conn| {
+        let mut count = 0usize;
+        for asset_id in &asset_ids {
+            count += conn.execute(
+                "INSERT OR IGNORE INTO album_assets (album_id, asset_id) VALUES (?1, ?2)",
+                params![album_id, asset_id],
+            )?;
+        }
+        if let Some(first) = asset_ids.first() {
+            albums::ensure_cover(conn, &album_id, first)?;
+        }
+        Ok(count)
+    })?;
+    if count > 0 {
+        let detail = album_id.clone();
+        push_history(
+            &state,
+            "album",
+            format!("Added {count} photo(s) to “{album_name}”"),
+            Some(&detail),
+            HistoryAction::RemoveFromAlbum {
+                album_id: album_id.clone(),
+                asset_ids: asset_ids.clone(),
+            },
+            HistoryAction::AddToAlbum {
+                album_id,
+                asset_ids,
+            },
+        )?;
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn create_album_with_assets(
+    state: State<'_, AppState>,
+    name: String,
+    asset_ids: Vec<String>,
+) -> AppResult<Album> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::msg("album name required"));
+    }
+    let album = state.with_db(|conn| {
+        let id = Uuid::new_v4().to_string();
+        let created_at = Utc::now().to_rfc3339();
+        let cover = asset_ids.first().cloned();
+        conn.execute(
+            "INSERT INTO albums (id, name, cover_asset_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, name, cover, created_at],
+        )?;
+        let mut added = 0i64;
+        for asset_id in &asset_ids {
+            added += conn.execute(
+                "INSERT OR IGNORE INTO album_assets (album_id, asset_id) VALUES (?1, ?2)",
+                params![id, asset_id],
+            )? as i64;
+        }
+        let cover_thumbnail_path: Option<String> = cover.as_ref().and_then(|cid| {
+            conn.query_row(
+                "SELECT thumbnail_path FROM assets WHERE id = ?1",
+                params![cid],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten()
+        });
+        Ok(Album {
+            id,
+            name,
+            cover_asset_id: cover,
+            cover_thumbnail_path,
+            created_at,
+            asset_count: added,
+        })
+    })?;
+    if !asset_ids.is_empty() {
+        let count = asset_ids.len();
+        push_history(
+            &state,
+            "album",
+            format!("Created album “{}” with {count} photo(s)", album.name),
+            Some(&album.id),
+            HistoryAction::RemoveFromAlbum {
+                album_id: album.id.clone(),
+                asset_ids: asset_ids.clone(),
+            },
+            HistoryAction::AddToAlbum {
+                album_id: album.id.clone(),
+                asset_ids,
+            },
+        )?;
+    } else {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "album",
+                &format!("Created album “{}”", album.name),
+                Some(&album.id),
+            )
+        })?;
+    }
+    Ok(album)
+}
+
+#[tauri::command]
+pub fn tag_assets(
+    state: State<'_, AppState>,
+    tag_id: String,
+    asset_ids: Vec<String>,
+) -> AppResult<usize> {
+    state.with_db(|conn| {
+        let mut count = 0usize;
+        for asset_id in &asset_ids {
+            count += conn.execute(
+                "INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?1, ?2)",
+                params![asset_id, tag_id],
+            )?;
+            indexer::refresh_fts(conn, asset_id)?;
+        }
+        Ok(count)
+    })
+}
+
+#[tauri::command]
+pub fn create_tag_and_assign(
+    state: State<'_, AppState>,
+    name: String,
+    asset_ids: Vec<String>,
+) -> AppResult<Tag> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::msg("tag name required"));
+    }
+    state.with_db(|conn| {
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE",
+                params![name],
+                |r| r.get(0),
+            )
+            .ok();
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO tags (id, name) VALUES (?1, ?2)",
+                params![id, name],
+            )?;
+            id
+        };
+        for asset_id in &asset_ids {
+            conn.execute(
+                "INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?1, ?2)",
+                params![asset_id, id],
+            )?;
+            indexer::refresh_fts(conn, asset_id)?;
+        }
+        Ok(Tag {
+            id,
+            name,
+            asset_count: asset_ids.len() as i64,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn remove_from_album(
+    state: State<'_, AppState>,
+    album_id: String,
+    asset_id: String,
+) -> AppResult<()> {
+    state.with_db(|conn| {
+        conn.execute(
+            "DELETE FROM album_assets WHERE album_id=?1 AND asset_id=?2",
+            params![album_id, asset_id],
+        )?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn list_album_assets(
+    state: State<'_, AppState>,
+    album_id: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.path, a.hash, a.perceptual_hash, a.media_type, a.width, a.height, a.duration_ms,
+                    a.created_at, a.captured_at, a.indexed_at, a.favorite, a.rating, a.color_label,
+                    a.thumbnail_path, a.camera, a.lens, a.deleted_at
+             FROM assets a
+             JOIN album_assets aa ON aa.asset_id = a.id
+             WHERE aa.album_id = ?1 AND a.deleted_at IS NULL
+             ORDER BY COALESCE(a.captured_at, a.created_at) DESC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![album_id, limit, offset], search::map_asset)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn timeline_months(state: State<'_, AppState>) -> AppResult<Vec<TimelineMonth>> {
+    state.with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT CAST(strftime('%Y', COALESCE(captured_at, created_at)) AS INTEGER) AS y,
+                    CAST(strftime('%m', COALESCE(captured_at, created_at)) AS INTEGER) AS m,
+                    COUNT(*)
+             FROM assets
+             WHERE deleted_at IS NULL
+             GROUP BY y, m
+             ORDER BY y DESC, m DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(TimelineMonth {
+                year: r.get(0)?,
+                month: r.get::<_, i64>(1)? as u32,
+                count: r.get(2)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn list_assets_for_month(
+    state: State<'_, AppState>,
+    year: i32,
+    month: u32,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    let prefix = format!("{year:04}-{month:02}");
+    state.with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, path, hash, perceptual_hash, media_type, width, height, duration_ms,
+                    created_at, captured_at, indexed_at, favorite, rating, color_label,
+                    thumbnail_path, camera, lens, deleted_at
+             FROM assets
+             WHERE deleted_at IS NULL
+               AND strftime('%Y-%m', COALESCE(captured_at, created_at)) = ?1
+             ORDER BY COALESCE(captured_at, created_at) DESC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![prefix, limit, offset], search::map_asset)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn list_recent(
+    state: State<'_, AppState>,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, path, hash, perceptual_hash, media_type, width, height, duration_ms,
+                    created_at, captured_at, indexed_at, favorite, rating, color_label,
+                    thumbnail_path, camera, lens, deleted_at
+             FROM assets
+             WHERE deleted_at IS NULL
+             ORDER BY indexed_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], search::map_asset)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn list_recently_viewed(
+    state: State<'_, AppState>,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| views::list_recently_viewed(conn, limit, offset))
+}
+
+#[tauri::command]
+pub fn record_asset_view(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.with_db(|conn| views::record_view(conn, &id))
+}
+
+/// Assets belonging to a smart collection ("videos", "rawPhotos", "screenshots").
+#[tauri::command]
+pub fn list_smart_collection(
+    state: State<'_, AppState>,
+    kind: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    let collection = smart::SmartCollection::parse(&kind)?;
+    state.with_db(|conn| smart::list(conn, collection, limit, offset))
+}
+
+/// Item counts for every smart collection, keyed by collection id.
+#[tauri::command]
+pub fn smart_collection_counts(state: State<'_, AppState>) -> AppResult<SmartCounts> {
+    state.with_db(|conn| {
+        let mut counts = SmartCounts::new();
+        for kind in smart::SmartCollection::ALL {
+            counts.insert(kind.id().to_string(), smart::count(conn, kind)?);
+        }
+        Ok(counts)
+    })
+}
+
+/// What models are installed and whether semantic search can run yet.
+#[tauri::command]
+pub fn ml_status(state: State<'_, AppState>) -> AppResult<ml::MlStatus> {
+    let models_dir = state.paths.models_dir.clone();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+/// Download the semantic-search model bundle.
+///
+/// This is the only place in LUMORA that reaches the network, and it runs only
+/// from an explicit user action. Each file is checksum-verified before it is
+/// registered; a mismatch discards the download.
+#[tauri::command]
+pub async fn install_semantic_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let (db_path, models_dir) = {
+        let state = app.state::<AppState>();
+        (state.paths.db_path.clone(), state.paths.models_dir.clone())
+    };
+
+    let app_for_job = app.clone();
+    let dir_for_job = models_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        let entries: Vec<_> = ml::catalog::bundle(ml::catalog::SEMANTIC_BUNDLE).collect();
+        let total_files = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            let app_progress = app_for_job.clone();
+            let file_label = entry.file_name.to_string();
+            ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
+                let _ = app_progress.emit(
+                    "model-progress",
+                    ModelProgressEvent {
+                        model_id: file_label.clone(),
+                        file_index: index as u32 + 1,
+                        file_count: total_files as u32,
+                        downloaded: done,
+                        total,
+                    },
+                );
+            })?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("model install task failed: {e}")))??;
+
+    let state = app.state::<AppState>();
+    state.embedder.invalidate();
+    state.embedder.kick();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+/// Delete a model file, its registry row, and any vectors it produced.
+#[tauri::command]
+pub fn remove_ml_model(state: State<'_, AppState>, id: String) -> AppResult<ml::MlStatus> {
+    let models_dir = state.paths.models_dir.clone();
+    let status = state.with_db(|conn| {
+        ml::remove(conn, &models_dir, &id)?;
+        ml::status(conn, &models_dir)
+    })?;
+    state.embedder.invalidate();
+    Ok(status)
+}
+
+/// Drop every embedding without uninstalling models, so they can be rebuilt.
+#[tauri::command]
+pub fn clear_ml_embeddings(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(ml::clear_embeddings)?;
+    state.embedder.kick();
+    Ok(n)
+}
+
+/// Whether semantic search can run, and how much of the library is indexed.
+#[tauri::command]
+pub fn semantic_status(state: State<'_, AppState>) -> AppResult<SemanticStatus> {
+    state.with_db(|conn| {
+        let (embedded, total) = semantic::coverage(conn)?;
+        Ok(SemanticStatus {
+            model_ready: ml::semantic_ready(conn)?,
+            embedded,
+            total,
+        })
+    })
+}
+
+/// Live progress of the background embedding worker.
+#[tauri::command]
+pub fn embed_progress(state: State<'_, AppState>) -> AppResult<semantic::worker::EmbedProgress> {
+    state.embedder.progress()
+}
+
+/// Ask the embedder to resume (e.g. after import). Harmless if already running.
+#[tauri::command]
+pub fn kick_embedding(state: State<'_, AppState>) -> AppResult<()> {
+    state.embedder.kick();
+    Ok(())
+}
+
+/// Natural-language search over CLIP embeddings.
+///
+/// Returns an empty list (not an error) when the model is not installed, so the
+/// UI can fall back to FTS without branching on a special error code.
+#[tauri::command]
+pub async fn semantic_search(
+    app: AppHandle,
+    query: String,
+    limit: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    let state = app.state::<AppState>();
+    let prefs = preferences::load(&state.paths.app_data)?;
+    if !prefs.ai.semantic_search {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 500) as usize;
+    let embedder = Arc::clone(&state.embedder);
+    let db_path = state.paths.db_path.clone();
+
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<AssetSummary>> {
+        let Some(engine) = embedder.engine()? else {
+            return Ok(Vec::new());
+        };
+        let embedding = semantic::worker::embed_query(&engine, &query)?;
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let hits = semantic::search_by_vector(&conn, &embedding, limit)?;
+        if hits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = hits.into_iter().map(|(id, _)| id).collect();
+        list_assets_preserving_order(&conn, &ids)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("semantic search task failed: {e}")))?
+}
+
+/// Fetch assets by id, preserving the caller's order (search ranking).
+fn list_assets_preserving_order(
+    conn: &Connection,
+    ids: &[String],
+) -> AppResult<Vec<AssetSummary>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut by_id = std::collections::HashMap::with_capacity(ids.len());
+    {
+        let placeholders = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, path, hash, perceptual_hash, media_type, width, height, duration_ms,
+                    created_at, captured_at, indexed_at, favorite, rating, color_label,
+                    thumbnail_path, camera, lens, deleted_at
+             FROM assets
+             WHERE deleted_at IS NULL AND id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), search::map_asset)?;
+        for row in rows.flatten() {
+            by_id.insert(row.id.clone(), row);
+        }
+    }
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+#[tauri::command]
+pub fn find_duplicates(state: State<'_, AppState>) -> AppResult<Vec<DuplicateGroup>> {
+    state.with_db(duplicates::all_duplicates)
+}
+
+#[tauri::command]
+pub fn list_assets_by_ids(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<Vec<AssetSummary>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    state.with_db(|conn| {
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, path, hash, perceptual_hash, media_type, width, height, duration_ms,
+                    created_at, captured_at, indexed_at, favorite, rating, color_label,
+                    thumbnail_path, camera, lens, deleted_at
+             FROM assets
+             WHERE id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|v| v as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.query_map(param_refs.as_slice(), search::map_asset)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+}
+
+#[tauri::command]
+pub fn soft_delete_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let count = state.with_db(|conn| trash::soft_delete(conn, &ids))?;
+    push_history(
+        &state,
+        "trash",
+        format!("Moved {count} item(s) to trash"),
+        None,
+        HistoryAction::Restore {
+            asset_ids: ids.clone(),
+        },
+        HistoryAction::SoftDelete { asset_ids: ids },
+    )?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn restore_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
+    state.with_db(|conn| trash::restore(conn, &ids))
+}
+
+#[tauri::command]
+pub fn list_trash(
+    state: State<'_, AppState>,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| trash::list_trash(conn, limit, offset))
+}
+
+#[tauri::command]
+pub fn purge_trash(state: State<'_, AppState>) -> AppResult<usize> {
+    let expired_ids: Vec<String> = state.with_db(|conn| {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(trash::DEFAULT_RETENTION_DAYS))
+            .to_rfc3339();
+        let mut stmt =
+            conn.prepare("SELECT id FROM assets WHERE deleted_at IS NOT NULL AND deleted_at < ?1")?;
+        let rows = stmt.query_map(params![cutoff], |r| r.get(0))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })?;
+    let count = state.with_db(|conn| trash::purge_expired(conn, trash::DEFAULT_RETENTION_DAYS))?;
+    let dropped = state.history.lock().invalidate_assets(&expired_ids);
+    if dropped > 0 {
+        tracing::info!(dropped, "cleared undo/redo entries for purged trash");
+    }
+    if count > 0 {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "trash",
+                &format!(
+                    "Auto-removed {count} item(s) from trash after {} days (files on disk kept)",
+                    trash::DEFAULT_RETENTION_DAYS
+                ),
+                None,
+            )?;
+            Ok(())
+        })?;
+        tracing::info!(count, "purged expired trash entries");
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn empty_trash(state: State<'_, AppState>) -> AppResult<trash::PermanentDeleteResult> {
+    let trashed_ids: Vec<String> = state.with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT id FROM assets WHERE deleted_at IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })?;
+    let result = state.with_db(trash::empty_trash)?;
+    let dropped = state.history.lock().invalidate_assets(&trashed_ids);
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "trash",
+            &format!(
+                "Emptied trash · permanently deleted {} item(s)",
+                result.removed_from_library
+            ),
+            None,
+        )?;
+        Ok(())
+    })?;
+    if dropped > 0 {
+        tracing::info!(dropped, "cleared undo/redo entries for emptied trash");
+    }
+    tracing::info!(
+        removed = result.removed_from_library,
+        files = result.files_deleted,
+        "emptied trash"
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn permanently_delete_assets(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    delete_files: bool,
+) -> AppResult<trash::PermanentDeleteResult> {
+    if ids.is_empty() {
+        return Err(AppError::msg("no assets selected"));
+    }
+    let result = state.with_db(|conn| trash::permanently_delete(conn, &ids, delete_files))?;
+    let dropped = state.history.lock().invalidate_assets(&ids);
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "trash",
+            &format!(
+                "Permanently deleted {} item(s){}",
+                result.removed_from_library,
+                if delete_files {
+                    " (files removed from disk)"
+                } else {
+                    ""
+                }
+            ),
+            None,
+        )?;
+        Ok(())
+    })?;
+    if dropped > 0 {
+        tracing::info!(
+            dropped,
+            count = ids.len(),
+            "cleared undo/redo entries for permanently deleted assets"
+        );
+    }
+    tracing::info!(
+        removed = result.removed_from_library,
+        files = result.files_deleted,
+        delete_files,
+        "permanent delete from trash"
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn export_assets_zip(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    dest: String,
+) -> AppResult<ExportResult> {
+    let dest_path = PathBuf::from(&dest);
+    let result = state.with_db(|conn| export::export_assets_to_zip(conn, &ids, &dest_path))?;
+    let note = if result.missing > 0 || !result.errors.is_empty() {
+        Some(format!(
+            "{} missing · {} warning(s)",
+            result.missing,
+            result.errors.len()
+        ))
+    } else {
+        None
+    };
+    state.with_db(|conn| {
+        history::record_export(
+            conn,
+            &result.path,
+            ids.len() as u32,
+            result.exported,
+            result.missing,
+            note.as_deref(),
+        )?;
+        history::record_activity(
+            conn,
+            "export",
+            &format!("Exported {} file(s) to {}", result.exported, result.path),
+            Some(&result.path),
+        )?;
+        Ok(())
+    })?;
+    tracing::info!(
+        path = %result.path,
+        exported = result.exported,
+        missing = result.missing,
+        "exported selection to zip"
+    );
+    Ok(result)
+}
+
+/// Apply rotate / crop / exposure, then save over the original or as a sibling copy.
+/// Clears CLIP embeddings for the resulting asset and resumes background embedding.
+#[tauri::command]
+pub fn apply_image_edit(
+    state: State<'_, AppState>,
+    asset_id: String,
+    ops: EditOps,
+    mode: SaveMode,
+) -> AppResult<EditResult> {
+    let thumbs = state.paths.thumbs_dir.clone();
+    let result = state.with_db(|conn| edit::apply_edit(conn, &thumbs, &asset_id, &ops, mode))?;
+    let label = match result.mode {
+        SaveMode::Replace => format!("Edited “{}”", edit_file_name(&result.asset.path)),
+        SaveMode::Copy => format!(
+            "Saved edited copy “{}”",
+            edit_file_name(&result.asset.path)
+        ),
+    };
+    let _ = state.with_db(|conn| {
+        history::record_activity(conn, "edit", &label, Some(&result.asset.id))
+    });
+    state.embedder.kick();
+    Ok(result)
+}
+
+fn edit_file_name(path: &str) -> String {
+    PathBuf::from(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+#[tauri::command]
+pub fn get_history(state: State<'_, AppState>) -> AppResult<HistorySnapshot> {
+    let activity = state.with_db(|conn| {
+        let mut stacks = state.history.lock();
+        stacks.prune_invalid(conn);
+        history::list_activity(conn, 100)
+    })?;
+    let stacks = state.history.lock();
+    Ok(HistorySnapshot {
+        can_undo: stacks.can_undo(),
+        can_redo: stacks.can_redo(),
+        undo_stack: stacks.list_undo(),
+        redo_stack: stacks.list_redo(),
+        activity,
+    })
+}
+
+#[tauri::command]
+pub fn list_exports(state: State<'_, AppState>, limit: u32) -> AppResult<Vec<ExportRecord>> {
+    state.with_db(|conn| history::list_exports(conn, limit.clamp(1, 200)))
+}
+
+#[tauri::command]
+pub fn undo_last(state: State<'_, AppState>) -> AppResult<bool> {
+    let entry = state.with_db(|conn| {
+        let mut stacks = state.history.lock();
+        Ok(stacks.pop_valid_undo(conn))
+    })?;
+    match entry {
+        Some(entry) => {
+            state.with_db(|conn| {
+                history::apply_action(conn, &entry.undo)?;
+                history::record_activity(
+                    conn,
+                    "undo",
+                    &format!("Undo: {}", entry.label),
+                    Some(&entry.id),
+                )?;
+                Ok(())
+            })?;
+            state.history.lock().redo.push(entry);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub fn redo_last(state: State<'_, AppState>) -> AppResult<bool> {
+    let entry = state.with_db(|conn| {
+        let mut stacks = state.history.lock();
+        Ok(stacks.pop_valid_redo(conn))
+    })?;
+    match entry {
+        Some(entry) => {
+            state.with_db(|conn| {
+                history::apply_action(conn, &entry.redo)?;
+                history::record_activity(
+                    conn,
+                    "redo",
+                    &format!("Redo: {}", entry.label),
+                    Some(&entry.id),
+                )?;
+                Ok(())
+            })?;
+            state.history.lock().undo.push(entry);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub fn list_watched_folders(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    state.with_db(watcher::list_watched)
+}
+
+#[tauri::command]
+pub fn remove_watched_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<bool> {
+    let root = PathBuf::from(&path);
+    let removed = state.with_db(|conn| watcher::remove_watched(conn, &root))?;
+    if removed {
+        if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
+            ws.remove_root(&root);
+        }
+    }
+    Ok(removed)
+}
+
+// ---------------------------------------------------------------------------
+// Privacy vault (encrypted "locked folder")
+// ---------------------------------------------------------------------------
+
+fn vault_status_snapshot(state: &AppState) -> AppResult<VaultStatus> {
+    let session = state.vault.lock().as_ref().map(|s| s.vault_id.clone());
+    state.with_db(|conn| {
+        let total = vault::total_locked_count(conn)?;
+        let configured = vault::is_configured(conn)?;
+        if let Some(ref vault_id) = session {
+            let summaries = vault::list_vaults(conn, Some(vault_id))?;
+            let active = summaries.iter().find(|v| v.id == *vault_id);
+            Ok(VaultStatus {
+                configured,
+                unlocked: true,
+                recovery_configured: active.map(|v| v.recovery_configured).unwrap_or(false),
+                vault_id: Some(vault_id.clone()),
+                vault_name: active.map(|v| v.name.clone()),
+                vault_path: active.map(|v| v.path.clone()),
+                locked_count: active.map(|v| v.locked_count).unwrap_or(0),
+                total_locked_count: total,
+            })
+        } else {
+            Ok(VaultStatus {
+                configured,
+                unlocked: false,
+                recovery_configured: false,
+                vault_id: None,
+                vault_name: None,
+                vault_path: None,
+                locked_count: total,
+                total_locked_count: total,
+            })
+        }
+    })
+}
+
+#[tauri::command]
+pub fn vault_status(state: State<'_, AppState>) -> AppResult<VaultStatus> {
+    vault_status_snapshot(&state)
+}
+
+#[tauri::command]
+pub fn list_vaults(state: State<'_, AppState>) -> AppResult<Vec<VaultSummary>> {
+    let active = state.vault.lock().as_ref().map(|s| s.vault_id.clone());
+    state.with_db(|conn| vault::list_vaults(conn, active.as_deref()))
+}
+
+#[tauri::command]
+pub fn setup_vault(
+    state: State<'_, AppState>,
+    name: String,
+    vault_path: String,
+    password: String,
+) -> AppResult<VaultSetupResult> {
+    let outcome = state.with_db(|conn| vault::setup(conn, &name, &vault_path, &password))?;
+    *state.vault.lock() = Some(VaultSession {
+        vault_id: outcome.vault_id.clone(),
+        master_key: outcome.master_key,
+    });
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "vault",
+            &format!("Created locked vault “{name}”"),
+            Some(&vault_path),
+        )
+    })?;
+    tracing::info!(name = %name, "locked vault set up and unlocked");
+    Ok(VaultSetupResult {
+        status: vault_status_snapshot(&state)?,
+        recovery_code: outcome.recovery_code,
+    })
+}
+
+#[tauri::command]
+pub fn unlock_vault(
+    state: State<'_, AppState>,
+    vault_id: String,
+    password: String,
+) -> AppResult<VaultStatus> {
+    let key = state.with_db(|conn| vault::unlock(conn, &vault_id, &password))?;
+    *state.vault.lock() = Some(VaultSession {
+        vault_id,
+        master_key: key,
+    });
+    vault_status_snapshot(&state)
+}
+
+/// Reset a forgotten password using the one-time recovery code, then unlock.
+#[tauri::command]
+pub fn recover_vault(
+    state: State<'_, AppState>,
+    vault_id: String,
+    recovery_code: String,
+    new_password: String,
+) -> AppResult<VaultStatus> {
+    let key =
+        state.with_db(|conn| vault::recover(conn, &vault_id, &recovery_code, &new_password))?;
+    *state.vault.lock() = Some(VaultSession {
+        vault_id: vault_id.clone(),
+        master_key: key,
+    });
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "vault",
+            "Reset locked vault password with recovery code",
+            Some(&vault_id),
+        )
+    })?;
+    vault_status_snapshot(&state)
+}
+
+/// Add a recovery code to a vault created before this feature existed.
+#[tauri::command]
+pub fn enable_vault_recovery(state: State<'_, AppState>) -> AppResult<String> {
+    let (vault_id, key) = state.vault_session()?;
+    let code = state.with_db(|conn| vault::enable_recovery(conn, &vault_id, &key))?;
+    state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "vault",
+            "Enabled locked vault recovery",
+            Some(&vault_id),
+        )
+    })?;
+    Ok(code)
+}
+
+#[tauri::command]
+pub fn lock_vault(state: State<'_, AppState>) -> AppResult<VaultStatus> {
+    // Dropping the session zeroizes the in-memory master key.
+    *state.vault.lock() = None;
+    vault_status_snapshot(&state)
+}
+
+#[tauri::command]
+pub fn lock_assets_to_vault(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    vault_id: String,
+) -> AppResult<LockResult> {
+    if ids.is_empty() {
+        return Err(AppError::msg("no items selected"));
+    }
+    let key = state.require_vault(&vault_id)?;
+    let result = state.with_db(|conn| vault::lock_assets(conn, &vault_id, &key, &ids))?;
+    if result.locked > 0 {
+        state.history.lock().invalidate_assets(&ids);
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!("Moved {} item(s) to a locked vault", result.locked),
+                Some(&vault_id),
+            )
+        })?;
+    }
+    Ok(result)
+}
+
+/// Move an entire library album into the vault, keeping it grouped.
+#[tauri::command]
+pub fn lock_album_to_vault(
+    state: State<'_, AppState>,
+    album_id: String,
+    vault_id: String,
+) -> AppResult<LockResult> {
+    let key = state.require_vault(&vault_id)?;
+    // Capture members first: they leave the library, so any undo entry that
+    // still points at them has to go with them.
+    let member_ids: Vec<String> = state.with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT asset_id FROM album_assets WHERE album_id = ?1")?;
+        let rows = stmt.query_map(params![album_id], |r| r.get(0))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })?;
+
+    let result = state.with_db(|conn| vault::lock_album(conn, &vault_id, &key, &album_id))?;
+    if result.locked > 0 {
+        let mut stacks = state.history.lock();
+        stacks.invalidate_album(&album_id);
+        stacks.invalidate_assets(&member_ids);
+        drop(stacks);
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!(
+                    "Moved an album ({} item(s)) to a locked vault",
+                    result.locked
+                ),
+                Some(&vault_id),
+            )
+        })?;
+    }
+    Ok(result)
+}
+
+/// Move an entire folder from disk into the vault, keeping it grouped.
+#[tauri::command]
+pub fn lock_folder_to_vault(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    vault_id: String,
+) -> AppResult<LockResult> {
+    let key = state.require_vault(&vault_id)?;
+    let root = PathBuf::from(&path);
+    let result = state.with_db(|conn| vault::lock_folder(conn, &vault_id, &key, &root))?;
+
+    if result.locked > 0 {
+        // The folder's contents are gone, so stop watching it for changes.
+        let unwatched = state.with_db(|conn| watcher::remove_watched(conn, &root))?;
+        if unwatched {
+            if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
+                ws.remove_root(&root);
+            }
+        }
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!(
+                    "Moved a folder ({} item(s)) to a locked vault",
+                    result.locked
+                ),
+                Some(&path),
+            )
+        })?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn list_locked_albums(state: State<'_, AppState>) -> AppResult<Vec<LockedAlbum>> {
+    let (vault_id, key) = state.vault_session()?;
+    state.with_db(|conn| vault::list_locked_albums(conn, &vault_id, &key))
+}
+
+/// List locked items. Omitting `albumId` returns the loose items that aren't
+/// inside a locked group.
+#[tauri::command]
+pub fn list_locked_assets(
+    state: State<'_, AppState>,
+    album_id: Option<String>,
+) -> AppResult<Vec<LockedAsset>> {
+    // Require an unlocked session before revealing vault contents.
+    let (vault_id, key) = state.vault_session()?;
+    state.with_db(|conn| vault::list_locked(conn, &vault_id, &key, album_id.as_deref()))
+}
+
+#[tauri::command]
+pub fn vault_thumb(state: State<'_, AppState>, id: String) -> AppResult<Option<String>> {
+    let (vault_id, key) = state.vault_session()?;
+    state.with_db(|conn| vault::decrypt_thumb(conn, &vault_id, &key, &id))
+}
+
+#[tauri::command]
+pub fn vault_media(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    let (vault_id, key) = state.vault_session()?;
+    state.with_db(|conn| vault::decrypt_media(conn, &vault_id, &key, &id))
+}
+
+#[tauri::command]
+pub fn move_out_locked_assets(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    dest: String,
+) -> AppResult<MoveOutResult> {
+    if ids.is_empty() {
+        return Err(AppError::msg("no items selected"));
+    }
+    let (vault_id, key) = state.vault_session()?;
+    let result = state.with_db(|conn| vault::move_out(conn, &vault_id, &key, &ids, &dest))?;
+    if result.restored > 0 {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!("Moved {} item(s) out of a locked vault", result.restored),
+                Some(&dest),
+            )
+        })?;
+    }
+    Ok(result)
+}
+
+/// Move an entire locked group out, recreating its folder structure at `dest`.
+#[tauri::command]
+pub fn move_out_locked_album(
+    state: State<'_, AppState>,
+    album_id: String,
+    dest: String,
+) -> AppResult<MoveOutResult> {
+    let (vault_id, key) = state.vault_session()?;
+    let result =
+        state.with_db(|conn| vault::move_out_album(conn, &vault_id, &key, &album_id, &dest))?;
+    if result.restored > 0 {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!(
+                    "Moved a locked folder ({} item(s)) out of the vault",
+                    result.restored
+                ),
+                Some(&dest),
+            )
+        })?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn delete_locked_album(state: State<'_, AppState>, album_id: String) -> AppResult<usize> {
+    let (vault_id, key) = state.vault_session()?;
+    let removed =
+        state.with_db(|conn| vault::delete_locked_album(conn, &vault_id, &key, &album_id))?;
+    if removed > 0 {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!("Permanently deleted a locked folder ({removed} item(s))"),
+                None,
+            )
+        })?;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub fn delete_locked_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
+    if ids.is_empty() {
+        return Err(AppError::msg("no items selected"));
+    }
+    // Deleting blobs does not need the key, but require unlock to avoid
+    // destructive actions while the vault is locked.
+    let (vault_id, key) = state.vault_session()?;
+    let removed = state.with_db(|conn| vault::delete_locked(conn, &vault_id, &key, &ids))?;
+    if removed > 0 {
+        state.with_db(|conn| {
+            history::record_activity(
+                conn,
+                "vault",
+                &format!("Permanently deleted {removed} item(s) from a locked vault"),
+                None,
+            )
+        })?;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub fn convert_file_src(path: String) -> AppResult<String> {
+    // Frontend should use Tauri convertFileSrc; this helps debug.
+    Ok(path)
+}
+
+/// Bootstrap helper used from lib setup.
+pub fn bootstrap_indexer(db_path: PathBuf, thumbs: PathBuf) -> Arc<IndexerQueue> {
+    IndexerQueue::new(db_path, thumbs)
+}

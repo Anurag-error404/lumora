@@ -1,0 +1,838 @@
+import { useCallback, useEffect, useState } from "react";
+import { PageHeader } from "../../components/PageHeader";
+import { formatBytes } from "../../lib/format";
+import {
+  api,
+  type Preferences,
+  type StorageSummary,
+  type VaultStatus,
+} from "../../lib/tauri";
+import { AiModelsPanel } from "./AiModelsPanel";
+import {
+  ChoiceRow,
+  SelectRow,
+  SettingsBlock,
+  SETTINGS_NAV,
+  SliderRow,
+  ToggleRow,
+  type PrefsUpdater,
+  type SettingsSectionId,
+} from "./settingsUi";
+
+const SHORTCUTS: { action: string; keys: string }[] = [
+  { action: "Next photo", keys: "→" },
+  { action: "Previous photo", keys: "←" },
+  { action: "Favorite", keys: "F" },
+  { action: "Rate 0–5", keys: "0–5" },
+  { action: "Delete / Restore", keys: "Delete" },
+  { action: "Open / close viewer", keys: "Space" },
+  { action: "Select all", keys: "⌘A" },
+  { action: "Undo", keys: "⌘Z" },
+  { action: "Redo", keys: "⌘⇧Z" },
+  { action: "Close panels", keys: "Esc" },
+];
+
+/** Multi-page Settings shell — user preferences only; diagnostics stay in Developer. */
+export function SettingsView({
+  prefs,
+  loading,
+  update,
+  watchedFolders,
+  watchedLoading,
+  busy,
+  onAddFolder,
+  onRemoveFolder,
+  onRefreshWatched,
+  onOpenPath,
+  onOpenLocked,
+  vaultStatus,
+  appVersion,
+}: {
+  prefs: Preferences | null;
+  loading: boolean;
+  update: PrefsUpdater;
+  watchedFolders: string[];
+  watchedLoading: boolean;
+  busy: boolean;
+  onAddFolder: () => void;
+  onRemoveFolder: (path: string) => void;
+  onRefreshWatched: () => void;
+  onOpenPath: (path: string, reveal?: boolean) => void;
+  onOpenLocked: () => void;
+  vaultStatus: VaultStatus | null;
+  appVersion: string;
+}) {
+  const [section, setSection] = useState<SettingsSectionId>("general");
+  const [storage, setStorage] = useState<StorageSummary | null>(null);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageMsg, setStorageMsg] = useState<string | null>(null);
+
+  const refreshStorage = useCallback(async () => {
+    try {
+      setStorage(await api.getStorageSummary());
+    } catch (e) {
+      setStorageMsg(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (section === "storage") void refreshStorage();
+  }, [section, refreshStorage]);
+
+  const navLabel = SETTINGS_NAV.find((n) => n.id === section)?.label ?? "Settings";
+
+  return (
+    <div className="settings-page">
+      <PageHeader
+        title="Settings"
+        description="Preferences that shape how LUMORA looks and behaves. Technical diagnostics live under Developer."
+      />
+
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SETTINGS_NAV.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={section === item.id ? "is-active" : ""}
+              onClick={() => setSection(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="settings-content" aria-live="polite">
+          <h2 className="settings-section-title">{navLabel}</h2>
+
+          {loading || !prefs ? (
+            <div className="developer-loading" role="status">
+              <span className="spinner" aria-hidden="true" />
+              Loading preferences…
+            </div>
+          ) : section === "general" ? (
+            <GeneralSection prefs={prefs} update={update} />
+          ) : section === "appearance" ? (
+            <AppearanceSection prefs={prefs} update={update} />
+          ) : section === "library" ? (
+            <LibrarySection
+              prefs={prefs}
+              update={update}
+              folders={watchedFolders}
+              loading={watchedLoading}
+              busy={busy}
+              onAdd={onAddFolder}
+              onRemove={onRemoveFolder}
+              onRefresh={onRefreshWatched}
+            />
+          ) : section === "ai" ? (
+            <AiSection prefs={prefs} update={update} />
+          ) : section === "privacy" ? (
+            <PrivacySection
+              prefs={prefs}
+              update={update}
+              vaultStatus={vaultStatus}
+              onOpenLocked={onOpenLocked}
+            />
+          ) : section === "storage" ? (
+            <StorageSection
+              storage={storage}
+              busy={storageBusy}
+              message={storageMsg}
+              onRefresh={() => void refreshStorage()}
+              onOpenPath={onOpenPath}
+              onClearCache={async () => {
+                if (
+                  !window.confirm(
+                    "Clear thumbnail cache?\n\nPreviews will regenerate as you browse. Your photos are not affected.",
+                  )
+                )
+                  return;
+                setStorageBusy(true);
+                setStorageMsg(null);
+                try {
+                  const n = await api.clearThumbnailCache();
+                  setStorageMsg(`Cleared ${n} cached preview(s).`);
+                  await refreshStorage();
+                } catch (e) {
+                  setStorageMsg(String(e));
+                } finally {
+                  setStorageBusy(false);
+                }
+              }}
+              onRebuild={async () => {
+                if (
+                  !window.confirm(
+                    "Rebuild thumbnail cache?\n\nThis clears previews and regenerates them for your library. It may take a while on large collections.",
+                  )
+                )
+                  return;
+                setStorageBusy(true);
+                setStorageMsg(null);
+                try {
+                  const n = await api.rebuildThumbnailCache();
+                  setStorageMsg(`Rebuilt ${n} thumbnail(s).`);
+                  await refreshStorage();
+                } catch (e) {
+                  setStorageMsg(String(e));
+                } finally {
+                  setStorageBusy(false);
+                }
+              }}
+              onOptimize={async () => {
+                setStorageBusy(true);
+                setStorageMsg(null);
+                try {
+                  await api.optimizeDatabase();
+                  setStorageMsg("Database optimized.");
+                  await refreshStorage();
+                } catch (e) {
+                  setStorageMsg(String(e));
+                } finally {
+                  setStorageBusy(false);
+                }
+              }}
+            />
+          ) : section === "performance" ? (
+            <PerformanceSection prefs={prefs} update={update} />
+          ) : section === "shortcuts" ? (
+            <ShortcutsSection />
+          ) : section === "importExport" ? (
+            <ImportExportSection prefs={prefs} update={update} />
+          ) : section === "updates" ? (
+            <UpdatesSection appVersion={appVersion} />
+          ) : (
+            <AboutSection appVersion={appVersion} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GeneralSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  const g = prefs.general;
+  return (
+    <>
+      <SettingsBlock title="Startup">
+        <ToggleRow
+          label="Restore previous session"
+          description="Remember the last view when the app opens (applied on next launch)."
+          checked={g.restorePreviousSession}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.restorePreviousSession = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Behavior">
+        <ToggleRow
+          label="Double click opens viewer"
+          description="When on, a single click selects; double-click opens the viewer."
+          checked={g.doubleClickOpensViewer}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.doubleClickOpensViewer = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Confirm before deleting"
+          description="Ask before moving photos to Trash."
+          checked={g.confirmBeforeDeleting}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.confirmBeforeDeleting = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Automatically reveal imported photos"
+          checked={g.revealImportedPhotos}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.revealImportedPhotos = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Language & region">
+        <SelectRow
+          label="Language"
+          value={g.language}
+          options={[{ value: "en", label: "English" }]}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.language = v;
+              return p;
+            })
+          }
+        />
+        <SelectRow
+          label="Date format"
+          value={g.dateFormat}
+          options={[
+            { value: "dd/mm/yyyy", label: "DD/MM/YYYY" },
+            { value: "mm/dd/yyyy", label: "MM/DD/YYYY" },
+            { value: "yyyy-mm-dd", label: "YYYY-MM-DD" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.general.dateFormat = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function AppearanceSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  const a = prefs.appearance;
+  return (
+    <>
+      <SettingsBlock title="Grid">
+        <SliderRow
+          label="Thumbnail size"
+          description="Small → Large"
+          value={a.thumbnailSize}
+          min={100}
+          max={280}
+          step={10}
+          format={(n) => `${n}px`}
+          onChange={(v) =>
+            void update((p) => {
+              p.appearance.thumbnailSize = v;
+              return p;
+            })
+          }
+        />
+        <ChoiceRow
+          label="Density"
+          value={a.density}
+          options={[
+            { value: "comfortable", label: "Comfortable" },
+            { value: "compact", label: "Compact" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.appearance.density = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Motion">
+        <ToggleRow
+          label="Enable animations"
+          checked={a.animations}
+          onChange={(v) =>
+            void update((p) => {
+              p.appearance.animations = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Smooth scrolling"
+          checked={a.smoothScrolling}
+          onChange={(v) =>
+            void update((p) => {
+              p.appearance.smoothScrolling = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function LibrarySection({
+  prefs,
+  update,
+  folders,
+  loading,
+  busy,
+  onAdd,
+  onRemove,
+  onRefresh,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+  folders: string[];
+  loading: boolean;
+  busy: boolean;
+  onAdd: () => void;
+  onRemove: (path: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <>
+      <SettingsBlock title="Library locations">
+        <div className="settings-folder-list">
+          {loading && folders.length === 0 ? (
+            <p className="muted">Loading folders…</p>
+          ) : folders.length === 0 ? (
+            <p className="muted">
+              No watched folders yet. Add a folder to keep the library in sync.
+            </p>
+          ) : (
+            <ul>
+              {folders.map((path) => {
+                const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+                return (
+                  <li key={path}>
+                    <div>
+                      <strong>{name}</strong>
+                      <span className="muted developer-path">{path}</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onRemove(path)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="settings-inline-actions">
+            <button className="primary" type="button" disabled={busy} onClick={onAdd}>
+              + Add Folder
+            </button>
+            <button type="button" disabled={busy || loading} onClick={onRefresh}>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </SettingsBlock>
+      <SettingsBlock title="Watching">
+        <ToggleRow
+          label="Automatically watch folders"
+          description="Index new and changed files as they appear on disk."
+          checked={prefs.library.watchFoldersEnabled}
+          onChange={(v) =>
+            void update((p) => {
+              p.library.watchFoldersEnabled = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function AiSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  return (
+    <>
+      <SettingsBlock title="AI processing">
+        <ToggleRow
+          label="Semantic Search"
+          description="Natural-language search with on-device CLIP embeddings."
+          checked={prefs.ai.semanticSearch}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.semanticSearch = v;
+              return p;
+            })
+          }
+        />
+        <ChoiceRow
+          label="Background processing"
+          description="Pause stops new embedding work until you resume."
+          value={prefs.ai.backgroundProcessing === "paused" ? "paused" : "always"}
+          options={[
+            { value: "always", label: "Always" },
+            { value: "paused", label: "Paused" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.backgroundProcessing = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Models">
+        <AiModelsPanel />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function PrivacySection({
+  prefs,
+  update,
+  vaultStatus,
+  onOpenLocked,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+  vaultStatus: VaultStatus | null;
+  onOpenLocked: () => void;
+}) {
+  const p = prefs.privacy;
+  return (
+    <>
+      <SettingsBlock title="Locked folder">
+        <div className="settings-vault-card">
+          <div>
+            <strong>
+              {vaultStatus?.configured
+                ? vaultStatus.unlocked
+                  ? "Unlocked"
+                  : "Locked"
+                : "Not set up"}
+            </strong>
+            <p className="muted">
+              Encrypted vault for private albums and photos. Keys never leave this
+              machine.
+            </p>
+          </div>
+          <button type="button" className="primary" onClick={onOpenLocked}>
+            Open Locked folder
+          </button>
+        </div>
+      </SettingsBlock>
+      <SettingsBlock title="Metadata">
+        <ToggleRow
+          label="Preserve GPS"
+          checked={p.preserveGps}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.preserveGps = v;
+              return cur;
+            })
+          }
+        />
+        <ToggleRow
+          label="Preserve EXIF"
+          checked={p.preserveExif}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.preserveExif = v;
+              return cur;
+            })
+          }
+        />
+        <ToggleRow
+          label="Strip metadata on export"
+          checked={p.stripMetadataOnExport}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.stripMetadataOnExport = v;
+              return cur;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Crash reports">
+        <p className="muted settings-note">
+          LUMORA never sends crash reports or analytics. Diagnostics stay in local
+          log files under Developer.
+        </p>
+      </SettingsBlock>
+    </>
+  );
+}
+
+function StorageSection({
+  storage,
+  busy,
+  message,
+  onRefresh,
+  onOpenPath,
+  onClearCache,
+  onRebuild,
+  onOptimize,
+}: {
+  storage: StorageSummary | null;
+  busy: boolean;
+  message: string | null;
+  onRefresh: () => void;
+  onOpenPath: (path: string, reveal?: boolean) => void;
+  onClearCache: () => Promise<void>;
+  onRebuild: () => Promise<void>;
+  onOptimize: () => Promise<void>;
+}) {
+  return (
+    <>
+      <SettingsBlock title="Storage">
+        {!storage ? (
+          <div className="developer-loading" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Measuring storage…
+          </div>
+        ) : (
+          <dl className="settings-storage-list">
+            <div>
+              <dt>Library database</dt>
+              <dd>{formatBytes(storage.databaseBytes)}</dd>
+            </div>
+            <div>
+              <dt>Thumbnail cache</dt>
+              <dd>
+                {formatBytes(storage.thumbnailBytes)}
+                <span className="muted"> · {storage.thumbnailCount} files</span>
+              </dd>
+            </div>
+            <div>
+              <dt>AI models</dt>
+              <dd>{formatBytes(storage.modelsBytes)}</dd>
+            </div>
+            <div>
+              <dt>AI embeddings</dt>
+              <dd>{formatBytes(storage.embeddingsBytes)}</dd>
+            </div>
+            <div>
+              <dt>Logs</dt>
+              <dd>{formatBytes(storage.logsBytes)}</dd>
+            </div>
+          </dl>
+        )}
+        {message && <p className="muted">{message}</p>}
+        <div className="settings-inline-actions">
+          <button type="button" disabled={busy} onClick={() => void onClearCache()}>
+            Clear Thumbnail Cache
+          </button>
+          <button type="button" disabled={busy} onClick={() => void onRebuild()}>
+            Rebuild Cache
+          </button>
+          <button type="button" disabled={busy} onClick={() => void onOptimize()}>
+            Optimize Database
+          </button>
+          <button type="button" disabled={busy} onClick={onRefresh}>
+            Refresh
+          </button>
+        </div>
+      </SettingsBlock>
+      {storage && (
+        <SettingsBlock title="Folders">
+          <div className="settings-path-actions">
+            <button type="button" onClick={() => onOpenPath(storage.appDataPath)}>
+              Open Data Folder
+            </button>
+            <button type="button" onClick={() => onOpenPath(storage.thumbsPath)}>
+              Open Cache Folder
+            </button>
+            <button type="button" onClick={() => onOpenPath(storage.modelsPath)}>
+              Open Models Folder
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenPath(storage.databasePath, true)}
+            >
+              Show Database
+            </button>
+          </div>
+        </SettingsBlock>
+      )}
+    </>
+  );
+}
+
+function PerformanceSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  const perf = prefs.performance;
+  return (
+    <>
+      <SettingsBlock title="CPU usage">
+        <ChoiceRow
+          label="Profile"
+          description="Hints for background indexing intensity."
+          value={perf.cpuProfile}
+          options={[
+            { value: "low", label: "Low" },
+            { value: "balanced", label: "Balanced" },
+            { value: "maximum", label: "Maximum" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.performance.cpuProfile = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Indexing">
+        <ToggleRow
+          label="Pause on battery"
+          checked={perf.pauseOnBattery}
+          onChange={(v) =>
+            void update((p) => {
+              p.performance.pauseOnBattery = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Memory">
+        <ChoiceRow
+          label="Thumbnail cache budget"
+          value={String(perf.thumbnailCacheMb)}
+          options={[
+            { value: "512", label: "512 MB" },
+            { value: "1024", label: "1 GB" },
+            { value: "2048", label: "2 GB" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.performance.thumbnailCacheMb = Number(v);
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function ShortcutsSection() {
+  return (
+    <SettingsBlock title="Keyboard shortcuts">
+      <ul className="settings-shortcuts">
+        {SHORTCUTS.map((row) => (
+          <li key={row.action}>
+            <span>{row.action}</span>
+            <kbd>{row.keys}</kbd>
+          </li>
+        ))}
+      </ul>
+    </SettingsBlock>
+  );
+}
+
+function ImportExportSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  const ie = prefs.importExport;
+  return (
+    <>
+      <SettingsBlock title="Import">
+        <ToggleRow
+          label="Skip duplicates"
+          checked={ie.skipDuplicates}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.skipDuplicates = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Preserve folder structure"
+          checked={ie.preserveFolderStructure}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.preserveFolderStructure = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Export">
+        <SliderRow
+          label="JPEG quality"
+          value={ie.jpegQuality}
+          min={60}
+          max={100}
+          format={(n) => `${n}%`}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.jpegQuality = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Strip metadata"
+          checked={ie.stripMetadata}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.stripMetadata = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+    </>
+  );
+}
+
+function UpdatesSection({ appVersion }: { appVersion: string }) {
+  return (
+    <SettingsBlock title="Updates">
+      <div className="settings-about-hero">
+        <strong>LUMORA</strong>
+        <span>v{appVersion}</span>
+      </div>
+      <p className="muted settings-note">
+        Updates are manual for now. Install a new build when you choose — nothing
+        checks or downloads in the background.
+      </p>
+    </SettingsBlock>
+  );
+}
+
+function AboutSection({ appVersion }: { appVersion: string }) {
+  return (
+    <SettingsBlock title="About">
+      <div className="settings-about-hero">
+        <strong>LUMORA</strong>
+        <span className="muted">your memories your machine.</span>
+        <span>Version {appVersion}</span>
+      </div>
+      <dl className="settings-storage-list">
+        <div>
+          <dt>License</dt>
+          <dd>See repository LICENSE</dd>
+        </div>
+        <div>
+          <dt>Privacy</dt>
+          <dd>Everything stays on your machine</dd>
+        </div>
+        <div>
+          <dt>Network</dt>
+          <dd>Only when you download AI models</dd>
+        </div>
+      </dl>
+    </SettingsBlock>
+  );
+}

@@ -1,0 +1,887 @@
+import { useMemo, useState, useEffect } from "react";
+import { Icon } from "./components/icons";
+import { PageHeader } from "./components/PageHeader";
+import { AlbumPickBar } from "./components/layout/AlbumPickBar";
+import { DropDock } from "./components/layout/DropDock";
+import { ImportProgressBar } from "./components/layout/ImportProgressBar";
+import { SelectionBar } from "./components/layout/SelectionBar";
+import { Sidebar } from "./components/layout/Sidebar";
+import { StatusBar } from "./components/layout/StatusBar";
+import { Toolbar } from "./components/layout/Toolbar";
+import { AlbumModal } from "./components/modals/AlbumModal";
+import { ImportModal } from "./components/modals/ImportModal";
+import { TagModal } from "./components/modals/TagModal";
+import { VaultPickerDialog } from "./components/modals/VaultPickerDialog";
+import { ActivityView } from "./features/activity/ActivityView";
+import { AlbumDetailHeader } from "./features/albums/AlbumDetailHeader";
+import { AlbumsGridView } from "./features/albums/AlbumsGridView";
+import { DeveloperView } from "./features/developer/DeveloperView";
+import { DuplicatesView } from "./features/duplicates/DuplicatesView";
+import { ExportsView } from "./features/exports/ExportsView";
+import { SettingsView } from "./features/settings/SettingsView";
+import { RecentSearchesView } from "./features/search/RecentSearchesView";
+import { AssetEmptyState } from "./features/library/AssetEmptyState";
+import { LibraryGrid } from "./features/library/LibraryGrid";
+import { MediaInfoPanel } from "./features/media-info/MediaInfoPanel";
+import { TagFilterBoard } from "./features/tags/TagFilterBoard";
+import { TimelineView } from "./features/timeline/TimelineView";
+import { HomeView } from "./features/home/HomeView";
+import { LockedFolderView } from "./features/vault/LockedFolderView";
+import { MediaViewer } from "./features/viewer/MediaViewer";
+import { WatchedFoldersView } from "./features/watched/WatchedFoldersView";
+import { useAlbums } from "./hooks/useAlbums";
+import { useAlbumWorkflows } from "./hooks/useAlbumWorkflows";
+import { useAssetActions } from "./hooks/useAssetActions";
+import { useDeveloperInfo } from "./hooks/useDeveloperInfo";
+import { useDuplicates } from "./hooks/useDuplicates";
+import { useExportsFeed } from "./hooks/useExportsFeed";
+import { useHistoryFeed } from "./hooks/useHistoryFeed";
+import { useImportFlow } from "./hooks/useImportFlow";
+import { useImportProgress } from "./hooks/useImportProgress";
+import { useIndexProgress } from "./hooks/useIndexProgress";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useLibraryAssets } from "./hooks/useLibraryAssets";
+import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
+import { usePreferences } from "./hooks/usePreferences";
+import { useRecentSearches } from "./hooks/useRecentSearches";
+import { useTagBrowse } from "./hooks/useTagBrowse";
+import { useTagWorkflows } from "./hooks/useTagWorkflows";
+import { useTimeline } from "./hooks/useTimeline";
+import { useVault } from "./hooks/useVault";
+import { useViewer } from "./hooks/useViewer";
+import { useWatchedFolders } from "./hooks/useWatchedFolders";
+import { api, type AssetSummary } from "./lib/tauri";
+import { LIBRARY_PAGE_META } from "./lib/pageMeta";
+import type { AlbumPickTarget, View } from "./types/app";
+import "./styles/app.css";
+
+export default function App() {
+  const [view, setView] = useState<View>("home");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [homeRecent, setHomeRecent] = useState<AssetSummary[]>([]);
+  const [pickingForAlbum, setPickingForAlbum] = useState<AlbumPickTarget | null>(
+    null,
+  );
+  const [vaultPick, setVaultPick] = useState<
+    | { kind: "assets"; ids: string[] }
+    | { kind: "album"; albumId: string; albumName: string }
+    | null
+  >(null);
+
+  const { albums, activeAlbum, setActiveAlbum, refreshAlbums } = useAlbums({
+    view,
+    setError,
+  });
+
+  const {
+    tags,
+    tagBrowse,
+    tagBrowseActive,
+    ratingCounts,
+    colorCounts,
+    tagBrowseSummary,
+    refreshTags,
+    toggleTagFilter,
+    toggleRatingFilter,
+    toggleColorFilter,
+    clearTagBrowse,
+  } = useTagBrowse({ view, setError, setSelected });
+
+  const {
+    timeline,
+    timelineAssets,
+    setTimelineAssets,
+    timelineVisibleCount,
+    timelineLoading,
+    timelineSentinelRef,
+    timelineKey,
+    visibleTimelineMonths,
+    timelineYears,
+    timelineScaleYears,
+    visibleTimelineAssetCount,
+    timelineFlatAssets,
+    jumpToYear,
+    selectTimelineGroup,
+  } = useTimeline({ view, setError, selected, setSelected });
+
+  const { dupes, dupeAssets, setDupeAssets, loadDuplicates, dupeAssetList } =
+    useDuplicates({ view, setError });
+
+  const { history, refreshHistory } = useHistoryFeed({ view, setError });
+  const { exports, refreshExports } = useExportsFeed({ view, setError });
+  const { developerInfo, developerLoading, refreshDeveloperInfo } =
+    useDeveloperInfo({ view, setError });
+  const {
+    prefs,
+    loading: prefsLoading,
+    update: updatePrefs,
+  } = usePreferences({ setError });
+  const {
+    recentSearches,
+    record: recordRecentSearch,
+    remove: removeRecentSearch,
+    clear: clearRecentSearches,
+  } = useRecentSearches({ view, setError });
+
+  const {
+    assets,
+    setAssets,
+    stats,
+    smartCounts,
+    refreshStats,
+    hasMore,
+    loadAssets,
+    loadMoreAssets,
+  } = useLibraryAssets({
+    view,
+    query,
+    activeAlbum,
+    tagBrowse,
+    refreshHistory,
+    refreshExports,
+    refreshDeveloperInfo,
+    setTimelineAssets,
+    setError,
+    semanticSearchEnabled: prefs?.ai.semanticSearch ?? true,
+  });
+
+  const {
+    folders: watchedFolders,
+    loading: watchedLoading,
+    refresh: refreshWatched,
+    addFolder: addWatchedFolder,
+    removeFolder: removeWatchedFolder,
+  } = useWatchedFolders({
+    view,
+    setError,
+    setBusy,
+    onImported: loadAssets,
+  });
+
+  const vault = useVault({ view, setError });
+
+  const progress = useIndexProgress();
+  const { importProgress, setImportProgress, importPct } = useImportProgress();
+
+  const {
+    lightboxId,
+    setLightboxId,
+    infoAssetId,
+    setInfoAssetId,
+    lightboxAsset,
+    infoAsset,
+    viewerList,
+    viewerIndex,
+    showPrevMedia,
+    showNextMedia,
+  } = useViewer({
+    assets,
+    timelineAssets,
+    timelineFlatAssets,
+    dupeAssets,
+    dupeAssetList,
+    homeRecent,
+    loadMoreAssets,
+  });
+
+  const selectedIds = useMemo(() => [...selected], [selected]);
+  const hasSelection = selectedIds.length > 0;
+
+  function toggleSelection(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function submitSearch() {
+    const q = query.trim();
+    if (view === "home" || view === "savedSearches") setView("library");
+    if (q) {
+      try {
+        await recordRecentSearch(q);
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+    await loadAssets();
+  }
+
+  // Live search already reloads on query change; debounce a recent-history
+  // write so typing doesn't spam the DB, but settled queries are remembered.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) return;
+    const id = window.setTimeout(() => {
+      void recordRecentSearch(q).catch(() => undefined);
+    }, 750);
+    return () => window.clearTimeout(id);
+  }, [query, recordRecentSearch]);
+
+  function runRecentSearch(search: { query: string } | string) {
+    const q = typeof search === "string" ? search : search.query;
+    setQuery(q);
+    setView("library");
+    setSelected(new Set());
+    void recordRecentSearch(q).catch((e) => setError(String(e)));
+  }
+
+  function selectAllVisible() {
+    if (view === "timeline") {
+      setSelected(
+        new Set(
+          visibleTimelineMonths.flatMap(
+            (month) =>
+              timelineAssets[timelineKey(month)]?.map((asset) => asset.id) ?? [],
+          ),
+        ),
+      );
+      return;
+    }
+    setSelected(new Set(assets.map((a) => a.id)));
+  }
+
+  async function moveSelectionToLocked() {
+    if (!selectedIds.length) return;
+    if (!vault.status?.configured || vault.vaults.length === 0) {
+      setView("locked");
+      vault.startCreate();
+      setError("Create a vault first, then move items in.");
+      return;
+    }
+    setVaultPick({ kind: "assets", ids: selectedIds });
+  }
+
+  async function moveAlbumToLocked(albumId: string, albumName: string) {
+    if (!vault.status?.configured || vault.vaults.length === 0) {
+      setView("locked");
+      vault.startCreate();
+      setError("Create a vault first, then lock the album.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Move “${albumName}” and all of its items into an encrypted vault?\n\nThe original media files will be removed.`,
+      )
+    ) {
+      return;
+    }
+    setVaultPick({ kind: "album", albumId, albumName });
+  }
+
+  async function confirmVaultPick(vaultId: string, password?: string) {
+    if (!vaultPick) return;
+    setBusy(true);
+    try {
+      if (password) {
+        await vault.unlock(vaultId, password);
+      }
+
+      if (vaultPick.kind === "assets") {
+        const result = await api.lockAssetsToVault(vaultPick.ids, vaultId);
+        clearSelection();
+        setLightboxId(null);
+        await loadAssets();
+        await refreshStats();
+        await vault.refreshStatus();
+        await vault.refreshLocked();
+        void refreshHistory();
+        const warn = result.errors.length
+          ? ` · ${result.errors.slice(0, 2).join("; ")}`
+          : "";
+        setError(`Moved ${result.locked} item(s) to the Locked folder${warn}`);
+      } else {
+        const result = await api.lockAlbumToVault(vaultPick.albumId, vaultId);
+        await Promise.all([
+          refreshAlbums(),
+          loadAssets(),
+          refreshStats(),
+          vault.refreshStatus(),
+          vault.refreshLocked(),
+        ]);
+        void refreshHistory();
+        const warn = result.errors.length
+          ? ` · ${result.errors.slice(0, 2).join("; ")}`
+          : "";
+        setError(
+          `Moved “${vaultPick.albumName}” (${result.locked} item(s)) to the Locked folder${warn}`,
+        );
+      }
+      setVaultPick(null);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const {
+    toggleFavorite,
+    favoriteSelected,
+    rateSelected,
+    labelSelected,
+    rateAsset,
+    labelAsset,
+    deleteSelected,
+    cleanupDupeGroup,
+    cleanupAllDupes,
+    restoreSelected,
+    permanentlyDeleteSelected,
+    emptyTrash,
+    openExportInFolder,
+    openLocalPath,
+    exportSelectedZip,
+    undo,
+    redo,
+  } = useAssetActions({
+    view,
+    assets,
+    setAssets,
+    stats,
+    selected,
+    selectedIds,
+    setSelected,
+    setLightboxId,
+    setTimelineAssets,
+    setDupeAssets,
+    dupes,
+    loadDuplicates,
+    refreshStats,
+    refreshHistory,
+    refreshExports,
+    loadAssets,
+    setError,
+    setBusy,
+    confirmBeforeDeleting: prefs?.general.confirmBeforeDeleting ?? true,
+  });
+
+  const {
+    gridRef,
+    marquee,
+    onGridPointerDown,
+    onGridPointerMove,
+    onGridPointerUp,
+    cancelMarquee,
+  } = useMarqueeSelection({
+    selected,
+    setSelected,
+    pickingForAlbum,
+    onOpenAsset: setLightboxId,
+    onToggleAsset: toggleSelection,
+    doubleClickOpensViewer: prefs?.general.doubleClickOpensViewer ?? false,
+  });
+
+  const {
+    albumModal,
+    setAlbumModal,
+    albumName,
+    setAlbumName,
+    draggingIds,
+    dropAlbumId,
+    setDropAlbumId,
+    onAssetDragStart,
+    onAssetDragEnd,
+    dropOnAlbum,
+    dropOnNewAlbum,
+    startPickingForAlbum,
+    cancelAlbumPick,
+    confirmAlbumPick,
+    openCreateAlbumModal,
+    openMoveAlbumModal,
+    submitAlbumModal,
+    moveToExistingAlbum,
+  } = useAlbumWorkflows({
+    albums,
+    refreshAlbums,
+    refreshHistory,
+    loadAssets,
+    selected,
+    selectedIds,
+    setSelected,
+    setActiveAlbum,
+    setView,
+    setError,
+    pickingForAlbum,
+    setPickingForAlbum,
+    cancelMarquee,
+  });
+
+  const { tagModal, setTagModal, tagName, setTagName, submitTagModal, applyExistingTag } =
+    useTagWorkflows({ selectedIds, refreshTags, loadAssets, setError });
+
+  const { importModal, setImportModal, onImportFiles, onImportFolder } =
+    useImportFlow({ setBusy, setImportProgress, loadAssets, setError });
+
+  useKeyboardShortcuts({
+    albumModal,
+    tagModal,
+    importModal,
+    infoAssetId,
+    setInfoAssetId,
+    lightboxId,
+    lightboxAsset,
+    setLightboxId,
+    showNextMedia,
+    showPrevMedia,
+    toggleFavorite,
+    rateAsset,
+    selectedIds,
+    pickingForAlbum,
+    cancelAlbumPick,
+    clearSelection,
+    setAlbumModal,
+    setTagModal,
+    setImportModal,
+    view,
+    restoreSelected,
+    deleteSelected,
+    assets,
+    favoriteSelected,
+    rateSelected,
+    selectAllVisible,
+    undo,
+    redo,
+  });
+
+  function handleNavigate(id: View) {
+    setView(id);
+    if (id === "albums") {
+      setActiveAlbum(null);
+    }
+    if (id !== "library" || !pickingForAlbum) {
+      setSelected(new Set());
+    }
+    if (id !== "library" && id !== "albums") {
+      setPickingForAlbum(null);
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar
+        view={view}
+        stats={stats}
+        albumCount={albums.length}
+        tagCount={tags.length}
+        savedSearchCount={recentSearches.length}
+        exportCount={exports.length}
+        lockedCount={vault.status?.totalLockedCount ?? 0}
+        smartCounts={smartCounts}
+        busy={busy}
+        onImport={() => setImportModal(true)}
+        onNavigate={handleNavigate}
+      />
+
+      <div className="main">
+        <Toolbar
+          query={query}
+          onQueryChange={setQuery}
+          onSubmitSearch={() => void submitSearch()}
+          recentSearches={recentSearches}
+          onPickRecent={runRecentSearch}
+          canUndo={!!history?.canUndo}
+          canRedo={!!history?.canRedo}
+          onUndo={() => void undo()}
+          onRedo={() => void redo()}
+          isTrashView={view === "trash"}
+          emptyTrashDisabled={!stats?.inTrash && assets.length === 0}
+          onEmptyTrash={() => void emptyTrash()}
+        />
+
+        {importProgress && (
+          <ImportProgressBar progress={importProgress} pct={importPct} />
+        )}
+
+        {pickingForAlbum && (
+          <AlbumPickBar
+            target={pickingForAlbum}
+            selectedCount={selectedIds.length}
+            onCancel={cancelAlbumPick}
+            onConfirm={() => void confirmAlbumPick()}
+          />
+        )}
+
+        {hasSelection && !pickingForAlbum && (
+          <SelectionBar
+            selectedCount={selectedIds.length}
+            isTrashView={view === "trash"}
+            busy={busy}
+            onClearSelection={clearSelection}
+            onRestore={() => void restoreSelected()}
+            onPermanentDelete={(deleteFiles) =>
+              void permanentlyDeleteSelected(deleteFiles)
+            }
+            onFavorite={(favorite) => void favoriteSelected(favorite)}
+            onOpenTagModal={() => {
+              setTagName("");
+              setTagModal(true);
+            }}
+            onExportZip={() => void exportSelectedZip()}
+            onOpenMoveAlbum={openMoveAlbumModal}
+            onMoveToLocked={() => void moveSelectionToLocked()}
+            onDelete={() => void deleteSelected()}
+            onSelectAllVisible={selectAllVisible}
+            onRate={(rating) => void rateSelected(rating)}
+            onLabel={(color) => void labelSelected(color)}
+          />
+        )}
+
+        <div className="content">
+          {error && <p className="muted">{error}</p>}
+
+          {view === "trash" && (
+            <div className="trash-banner" role="note">
+              <Icon name="trash" className="trash-banner-icon" />
+              <span>
+                Items in trash are removed from the library after{" "}
+                <strong>{stats?.trashRetentionDays ?? 30} days</strong>.
+                Original files stay on disk unless you delete them explicitly
+                or empty the trash.
+              </span>
+            </div>
+          )}
+
+          {view === "albums" && activeAlbum && (
+            <AlbumDetailHeader
+              album={albums.find((a) => a.id === activeAlbum) ?? null}
+              hasSelection={hasSelection}
+              onBack={() => {
+                setActiveAlbum(null);
+                setSelected(new Set());
+              }}
+              onStartPicking={startPickingForAlbum}
+              onOpenMoveAlbum={openMoveAlbumModal}
+            />
+          )}
+
+          {view === "tags" && (
+            <TagFilterBoard
+              tags={tags}
+              tagBrowse={tagBrowse}
+              tagBrowseActive={tagBrowseActive}
+              ratingCounts={ratingCounts}
+              colorCounts={colorCounts}
+              tagBrowseSummary={tagBrowseSummary}
+              onToggleTag={toggleTagFilter}
+              onToggleRating={toggleRatingFilter}
+              onToggleColor={toggleColorFilter}
+              onClearAll={clearTagBrowse}
+            />
+          )}
+
+          {view === "timeline" && (
+            <TimelineView
+              timelineYears={timelineYears}
+              timelineScaleYears={timelineScaleYears}
+              timelineAssets={timelineAssets}
+              timelineKey={timelineKey}
+              timelineLoading={timelineLoading}
+              timelineVisibleCount={timelineVisibleCount}
+              timelineTotal={timeline.length}
+              sentinelRef={timelineSentinelRef}
+              selected={selected}
+              onJumpToYear={jumpToYear}
+              onSelectMonth={(month) => void selectTimelineGroup(month)}
+              onImport={() => setImportModal(true)}
+              onAssetDragStart={onAssetDragStart}
+              onAssetDragEnd={onAssetDragEnd}
+              onToggleSelect={toggleSelection}
+              onOpen={setLightboxId}
+              onToggleFavorite={(asset) => void toggleFavorite(asset)}
+              onShowInfo={setInfoAssetId}
+            />
+          )}
+
+          {view === "timeline" ? null : view === "home" ? (
+            <HomeView
+              stats={stats}
+              smartCounts={smartCounts}
+              recent={homeRecent}
+              onRecentLoaded={setHomeRecent}
+              onNavigate={handleNavigate}
+              onImport={() => setImportModal(true)}
+              onOpenAsset={setLightboxId}
+            />
+          ) : view === "locked" ? (
+            <LockedFolderView
+              status={vault.status}
+              vaults={vault.vaults}
+              lockedAlbums={vault.lockedAlbums}
+              lockedAssets={vault.lockedAssets}
+              thumbs={vault.thumbs}
+              openAlbumId={vault.openAlbumId}
+              onOpenAlbum={vault.openAlbum}
+              pendingUnlockId={vault.pendingUnlockId}
+              creating={vault.creating}
+              browsingContents={vault.browsingContents}
+              onOpenVault={vault.openVault}
+              onStartCreate={vault.startCreate}
+              onCancelCreate={vault.cancelCreate}
+              onCancelUnlock={vault.cancelUnlock}
+              onBackToVaultList={vault.backToVaultList}
+              onFinishSetup={vault.finishSetup}
+              onSetup={vault.setup}
+              onUnlock={vault.unlock}
+              onRecover={vault.recover}
+              onEnableRecovery={vault.enableRecovery}
+              onLock={vault.lock}
+              refreshLocked={vault.refreshLocked}
+              refreshStatus={vault.refreshStatus}
+              setError={setError}
+            />
+          ) : view === "watched" ? (
+            <WatchedFoldersView
+              folders={watchedFolders}
+              loading={watchedLoading}
+              busy={busy}
+              onRefresh={() => void refreshWatched()}
+              onAdd={() => void addWatchedFolder()}
+              onRemove={(path) => void removeWatchedFolder(path)}
+            />
+          ) : view === "settings" ? (
+            <SettingsView
+              prefs={prefs}
+              loading={prefsLoading}
+              update={updatePrefs}
+              watchedFolders={watchedFolders}
+              watchedLoading={watchedLoading}
+              busy={busy}
+              onAddFolder={() => void addWatchedFolder()}
+              onRemoveFolder={(path) => void removeWatchedFolder(path)}
+              onRefreshWatched={() => void refreshWatched()}
+              onOpenPath={(path, reveal) => void openLocalPath(path, reveal)}
+              onOpenLocked={() => setView("locked")}
+              vaultStatus={vault.status}
+              appVersion={developerInfo?.appVersion ?? "—"}
+            />
+          ) : view === "savedSearches" ? (
+            <RecentSearchesView
+              searches={recentSearches}
+              onRun={runRecentSearch}
+              onDelete={(search) => {
+                void removeRecentSearch(search.id).catch((e) =>
+                  setError(String(e)),
+                );
+              }}
+              onClear={() => {
+                if (
+                  !window.confirm(
+                    "Clear all recent searches?\n\nYour photo library is not affected.",
+                  )
+                ) {
+                  return;
+                }
+                void clearRecentSearches().catch((e) => setError(String(e)));
+              }}
+            />
+          ) : view === "developer" ? (
+            <DeveloperView
+              info={developerInfo}
+              loading={developerLoading}
+              onRefresh={() => void refreshDeveloperInfo()}
+              onOpenPath={(path, reveal) => void openLocalPath(path, reveal)}
+              onViewActivity={() => setView("activity")}
+            />
+          ) : view === "activity" ? (
+            <ActivityView
+              history={history}
+              onUndo={() => void undo()}
+              onRedo={() => void redo()}
+              onRefresh={() => void refreshHistory()}
+            />
+          ) : view === "exports" ? (
+            <ExportsView
+              exports={exports}
+              onRefresh={() => void refreshExports()}
+              onOpenInFolder={(path) => void openExportInFolder(path)}
+              onBrowseLibrary={() => setView("library")}
+            />
+          ) : view === "albums" && !activeAlbum ? (
+            <AlbumsGridView
+              albums={albums}
+              onCreateAlbum={openCreateAlbumModal}
+              onLockAlbum={(album) => void moveAlbumToLocked(album.id, album.name)}
+              lockBusy={busy}
+              onOpenAlbum={(albumId) => {
+                setActiveAlbum(albumId);
+                setSelected(new Set());
+              }}
+            />
+          ) : view === "duplicates" ? (
+            <DuplicatesView
+              dupes={dupes}
+              dupeAssets={dupeAssets}
+              onRefresh={() => void loadDuplicates()}
+              onCleanupAll={() => void cleanupAllDupes()}
+              onCleanupGroup={(group, keepId) =>
+                void cleanupDupeGroup(group, keepId)
+              }
+              onPreview={setLightboxId}
+              onShowInfo={setInfoAssetId}
+              onBrowseLibrary={() => setView("library")}
+            />
+          ) : (
+            <>
+              {LIBRARY_PAGE_META[view] && !(view === "albums" && activeAlbum) && (
+                <PageHeader
+                  title={LIBRARY_PAGE_META[view]!.title}
+                  description={LIBRARY_PAGE_META[view]!.description}
+                />
+              )}
+              {assets.length === 0 ? (
+            <AssetEmptyState
+              view={view}
+              albums={albums}
+              activeAlbum={activeAlbum}
+              tagBrowseActive={tagBrowseActive}
+              onClearTagBrowse={clearTagBrowse}
+              query={query}
+              onClearSearch={() => setQuery("")}
+              isPicking={!!pickingForAlbum}
+              onImport={() => setImportModal(true)}
+              onBrowseLibrary={() => setView("library")}
+              onStartPicking={startPickingForAlbum}
+            />
+          ) : (
+            <LibraryGrid
+              assets={assets}
+              gridRef={gridRef}
+              onNearEnd={hasMore ? loadMoreAssets : undefined}
+              onPointerDown={onGridPointerDown}
+              onPointerMove={onGridPointerMove}
+              onPointerUp={onGridPointerUp}
+              marquee={marquee}
+              selected={selected}
+              isTrashView={view === "trash"}
+              trashRetentionDays={stats?.trashRetentionDays ?? 30}
+              onAssetDragStart={onAssetDragStart}
+              onAssetDragEnd={onAssetDragEnd}
+              onToggleSelect={toggleSelection}
+              onToggleFavorite={(asset) => void toggleFavorite(asset)}
+              onShowInfo={setInfoAssetId}
+            />
+          )}
+            </>
+          )}
+        </div>
+
+        <StatusBar
+          selectedCount={selectedIds.length}
+          isTimelineView={view === "timeline"}
+          visibleTimelineAssetCount={visibleTimelineAssetCount}
+          assetCount={assets.length}
+          progress={progress}
+          isPicking={!!pickingForAlbum}
+        />
+      </div>
+
+      {draggingIds.length > 0 && (
+        <DropDock
+          draggingCount={draggingIds.length}
+          albums={albums}
+          dropAlbumId={dropAlbumId}
+          setDropAlbumId={setDropAlbumId}
+          onDropAlbum={(album) => void dropOnAlbum(album)}
+          onDropNew={dropOnNewAlbum}
+        />
+      )}
+
+      {lightboxAsset && (
+        <MediaViewer
+          asset={lightboxAsset}
+          index={viewerIndex}
+          total={viewerList.length}
+          onClose={() => setLightboxId(null)}
+          onPrev={showPrevMedia}
+          onNext={showNextMedia}
+          onRate={rateAsset}
+          onLabel={labelAsset}
+          onToggleFavorite={toggleFavorite}
+          onShowInfo={() => setInfoAssetId(lightboxAsset.id)}
+          onEdited={(result) => {
+            setAssets((rows) => {
+              if (result.mode === "replace") {
+                return rows.map((a) =>
+                  a.id === result.asset.id ? result.asset : a,
+                );
+              }
+              return [result.asset, ...rows.filter((a) => a.id !== result.asset.id)];
+            });
+            setLightboxId(result.asset.id);
+            void refreshStats();
+            void refreshHistory();
+            setError(
+              result.mode === "copy"
+                ? `Saved copy${result.embeddingQueued ? " · re-embedding queued" : ""}`
+                : `Saved edits${result.embeddingQueued ? " · re-embedding queued" : ""}`,
+            );
+          }}
+        />
+      )}
+
+      {infoAsset && (
+        <MediaInfoPanel
+          asset={infoAsset}
+          onClose={() => setInfoAssetId(null)}
+        />
+      )}
+
+      {albumModal && (
+        <AlbumModal
+          mode={albumModal}
+          selectedCount={selectedIds.length}
+          albums={albums}
+          name={albumName}
+          onNameChange={setAlbumName}
+          onClose={() => setAlbumModal(null)}
+          onSubmit={() => void submitAlbumModal()}
+          onPickExisting={(albumId) => void moveToExistingAlbum(albumId)}
+        />
+      )}
+
+      {tagModal && (
+        <TagModal
+          selectedCount={selectedIds.length}
+          tags={tags}
+          name={tagName}
+          onNameChange={setTagName}
+          onClose={() => setTagModal(false)}
+          onSubmit={() => void submitTagModal()}
+          onApplyExisting={(tag) => void applyExistingTag(tag)}
+        />
+      )}
+
+      {importModal && (
+        <ImportModal
+          onClose={() => setImportModal(false)}
+          onChooseFiles={() => void onImportFiles()}
+          onChooseFolder={() => void onImportFolder()}
+        />
+      )}
+
+      {vaultPick && (
+        <VaultPickerDialog
+          vaults={vault.vaults}
+          title={
+            vaultPick.kind === "album"
+              ? `Lock “${vaultPick.albumName}”`
+              : "Move to Locked folder"
+          }
+          busy={busy}
+          onCancel={() => setVaultPick(null)}
+          onConfirm={confirmVaultPick}
+        />
+      )}
+    </div>
+  );
+}
