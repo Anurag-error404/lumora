@@ -14,11 +14,8 @@ use crate::error::AppResult;
 use crate::faces::engine::DetectedFace;
 use crate::indexer;
 use crate::ml::{self, catalog::ModelKind, vector};
-use crate::search::{self, map_asset};
+use crate::search::map_asset;
 use crate::models::AssetSummary;
-
-pub const DET_MODEL_ID: &str = "face-scrfd-10g";
-pub const REC_MODEL_ID: &str = "face-arcface-w600k-r50";
 
 #[derive(Debug, Clone)]
 pub struct FaceModelPaths {
@@ -82,10 +79,6 @@ pub fn faces_ready_bundle(conn: &Connection, bundle: &str) -> AppResult<bool> {
         }
     }
     Ok(true)
-}
-
-pub fn model_paths(conn: &Connection) -> AppResult<FaceModelPaths> {
-    model_paths_for(conn, ml::catalog::FACES_BUNDLE)
 }
 
 pub fn model_paths_for(conn: &Connection, bundle: &str) -> AppResult<FaceModelPaths> {
@@ -163,6 +156,9 @@ pub fn store_detections(
         };
 
         let assigned = cluster::assign(conn, &det.embedding)?;
+        if assigned.created {
+            tracing::debug!(person = %assigned.person_id, "created new face cluster");
+        }
         conn.execute(
             "INSERT INTO faces (id, asset_id, person_id, bbox_x, bbox_y, bbox_w, bbox_h,
                                 score, embedding, crop_path, detected_at)
@@ -514,7 +510,7 @@ mod tests {
         cluster::rename(&conn, &people[0].id, "Jordan").unwrap();
         indexer::refresh_fts(&conn, "a1").unwrap();
 
-        let found = search::search_assets(&conn, "Jordan", 10, 0).unwrap();
+        let found = crate::search::search_assets(&conn, "Jordan", 10, 0).unwrap();
         assert!(
             found.iter().any(|a| a.id == "a1"),
             "named person should be FTS-searchable"
@@ -578,11 +574,11 @@ mod tests {
         let person = list_people(&conn).unwrap().remove(0);
         cluster::rename(&conn, &person.id, "Priya").unwrap();
         indexer::refresh_fts(&conn, "a1").unwrap();
-        assert!(!search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty());
+        assert!(!crate::search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty());
 
         set_ignored(&conn, &person.id, true).unwrap();
         assert!(
-            search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty(),
+            crate::search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty(),
             "ignored people should drop out of FTS"
         );
     }

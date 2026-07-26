@@ -318,10 +318,11 @@ button .nav-icon {
 }
 
 .brand-icon {
-  width: 22px;
-  height: 22px;
-  fill: var(--accent);
+  width: 1.375rem;
+  height: 1.375rem;
+  object-fit: contain;
   flex-shrink: 0;
+  display: block;
 }
 
 .sidebar-footer {
@@ -4944,6 +4945,9 @@ button .nav-icon {
 
 .home-brand {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   font-family: var(--font-display);
   font-size: clamp(3rem, 7vw, 4.75rem);
   font-weight: 800;
@@ -4951,6 +4955,13 @@ button .nav-icon {
   line-height: 0.95;
   color: var(--brand);
   animation: home-brand-in 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.home-brand-icon {
+  width: 0.72em;
+  height: 0.72em;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 @keyframes home-brand-in {

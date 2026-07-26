@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::catalog::{
-    self, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, SEMANTIC_BUNDLE, TAGS_BUNDLE,
+    FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, SEMANTIC_BUNDLE, TAGS_BUNDLE,
     TAGS_BUNDLE_MEDIUM,
 };
 
@@ -37,10 +37,12 @@ impl Capability {
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "semanticSearch" | "semantic" | "clip" => Some(Self::SemanticSearch),
+            "semanticSearch" | "semantic" | "clip" | "embeddings" => Some(Self::SemanticSearch),
             "ocr" | "text" => Some(Self::Ocr),
             "faces" | "people" => Some(Self::Faces),
-            "autoTags" | "tags" | "objectDetection" => Some(Self::AutoTags),
+            "autoTags" | "tags" | "objectDetection" | "auto_tags" | "object_detection" => {
+                Some(Self::AutoTags)
+            }
             "duplicates" => Some(Self::Duplicates),
             "blurDetection" | "blur" => Some(Self::BlurDetection),
             _ => None,
@@ -231,7 +233,7 @@ mod tests {
         for o in LIBRARY {
             if let Some(bundle) = o.bundle {
                 assert!(
-                    catalog::bundle(bundle).next().is_some(),
+                    crate::ml::catalog::bundle(bundle).next().is_some(),
                     "{} references unknown bundle {bundle}",
                     o.id
                 );

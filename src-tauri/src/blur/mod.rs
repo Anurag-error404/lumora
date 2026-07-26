@@ -10,7 +10,7 @@ use image::{DynamicImage, GenericImageView, GrayImage};
 use rusqlite::{params, Connection};
 
 use crate::error::AppResult;
-use crate::models::{AssetSummary, BlurryAsset};
+use crate::models::BlurryAsset;
 use crate::search;
 use crate::thumbnails;
 

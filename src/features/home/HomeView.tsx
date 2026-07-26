@@ -101,7 +101,16 @@ export function HomeView({
       <section className="home-hero">
         <div className="home-hero-copy">
           <p className="home-kicker">Local photo library</p>
-          <h1 className="home-brand">LUMORA</h1>
+          <h1 className="home-brand">
+            <img
+              className="home-brand-icon"
+              src="/lumora-icon-tp.png"
+              width={40}
+              height={40}
+              alt=""
+            />
+            LUMORA
+          </h1>
           <p className="home-tagline">your memories your machine.</p>
           <div className="home-hero-actions">
             <button className="primary" onClick={onImport}>

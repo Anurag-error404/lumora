@@ -15,10 +15,6 @@ use crate::error::AppResult;
 use crate::indexer;
 use crate::ml::{self, catalog::ModelKind};
 
-pub const DET_MODEL_ID: &str = "ocr-ppv4-det";
-pub const REC_MODEL_ID: &str = "ocr-ppv4-rec";
-pub const DICT_MODEL_ID: &str = "ocr-ppv4-dict";
-
 #[derive(Debug, Clone)]
 pub struct OcrModelPaths {
     pub det: PathBuf,
@@ -65,10 +61,6 @@ pub fn ocr_ready_bundle(conn: &Connection, bundle: &str) -> AppResult<bool> {
         }
     }
     Ok(true)
-}
-
-pub fn model_paths(conn: &Connection) -> AppResult<OcrModelPaths> {
-    model_paths_for(conn, ml::catalog::OCR_BUNDLE)
 }
 
 pub fn model_paths_for(conn: &Connection, bundle: &str) -> AppResult<OcrModelPaths> {

@@ -32,9 +32,8 @@ jobs:
           - platform: macos-latest
             label: macOS Apple Silicon
             args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            label: macOS Intel
-            args: --target x86_64-apple-darwin
+          # Intel Mac (x86_64) omitted: ort download-binaries has no
+          # x86_64-apple-darwin artifacts (Apple Silicon only).
           - platform: ubuntu-22.04
             label: Linux x64
             args: ''
@@ -61,7 +60,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -75,6 +74,8 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ad-hoc sign so Apple Silicon Gatekeeper doesn't report the app as "damaged".
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: v__VERSION__
           releaseName: LUMORA v__VERSION__
@@ -85,11 +86,21 @@ jobs:
 
             | Platform | File |
             | --- | --- |
-            | macOS (Apple Silicon / Intel) | `.dmg` |
+            | macOS (Apple Silicon) | `.dmg` |
             | Windows | `.exe` (NSIS) or `.msi` |
             | Linux | `.AppImage` or `.deb` |
 
-            Builds are unsigned. On macOS, if Gatekeeper blocks the app: right-click the app → Open.
+            ### macOS note
+
+            Builds are **ad-hoc signed** (not Apple-notarized). After installing from the `.dmg`:
+
+            1. Open **System Settings → Privacy & Security** and click **Open Anyway** if prompted, **or**
+            2. In Terminal:
+               ```bash
+               xattr -cr /Applications/LUMORA.app
+               ```
+
+            macOS Intel is not shipped: the ONNX Runtime build we use has no x86_64-apple-darwin prebuilts.
           releaseDraft: false
           prerelease: false
           generateReleaseNotes: true

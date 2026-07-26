@@ -175,7 +175,16 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <h1 className="brand">LUMORA</h1>
+        <h1 className="brand">
+          <img
+            className="brand-icon"
+            src="/lumora-icon-tp.png"
+            width={22}
+            height={22}
+            alt=""
+          />
+          LUMORA
+        </h1>
         <p className="muted">your memories your machine.</p>
         <button className="primary sidebar-import" onClick={onImport} disabled={busy}>
           {busy ? "Importing…" : "+ Import photos"}

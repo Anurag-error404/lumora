@@ -1,6 +1,6 @@
 //! PP-OCRv4 ONNX inference: detection + recognition + CTC decode.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, RgbaImage};
@@ -448,6 +448,7 @@ pub fn ctc_greedy_decode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn charset_index_zero_is_blank() {

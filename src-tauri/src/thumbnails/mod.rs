@@ -131,12 +131,6 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
     Ok(repaired)
 }
 
-/// Simple average hash (aHash) — no ML; used for near-duplicate grouping.
-pub fn perceptual_hash(path: &Path) -> AppResult<String> {
-    let img = open_oriented(path)?;
-    Ok(perceptual_hash_from_image(&img))
-}
-
 /// aHash from an already-decoded image (avoids a second full decode on import).
 pub fn perceptual_hash_from_image(img: &DynamicImage) -> String {
     let small = img

@@ -1874,20 +1874,24 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
     let mut want_faces = false;
     let mut want_tags = false;
     for kind in &kinds {
-        match kind.as_str() {
-            "semantic" | "clip" | "embeddings" => want_semantic = true,
-            "ocr" | "text" => want_ocr = true,
-            "faces" | "people" => want_faces = true,
-            "tags" | "auto_tags" | "object_detection" => want_tags = true,
-            "all" => {
-                want_semantic = true;
-                want_ocr = true;
-                want_faces = true;
-                want_tags = true;
+        if kind == "all" {
+            want_semantic = true;
+            want_ocr = true;
+            want_faces = true;
+            want_tags = true;
+            continue;
+        }
+        match ml::library::Capability::from_str(kind) {
+            Some(ml::library::Capability::SemanticSearch) => want_semantic = true,
+            Some(ml::library::Capability::Ocr) => want_ocr = true,
+            Some(ml::library::Capability::Faces) => want_faces = true,
+            Some(ml::library::Capability::AutoTags) => want_tags = true,
+            Some(ml::library::Capability::Duplicates | ml::library::Capability::BlurDetection) => {
+                // Native capabilities — nothing to reprocess in AI queues.
             }
-            other => {
+            None => {
                 return Err(AppError::msg(format!(
-                    "unknown reprocess kind: {other} (use semantic, ocr, faces, tags, or all)"
+                    "unknown reprocess kind: {kind} (use semantic, ocr, faces, tags, or all)"
                 )));
             }
         }

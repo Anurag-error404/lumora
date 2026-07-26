@@ -15,9 +15,6 @@ use crate::error::AppResult;
 use crate::indexer;
 use crate::ml::{self, catalog::ModelKind};
 
-pub const MODEL_ID: &str = "mobilenetv4-small-in1k";
-pub const LABELS_ID: &str = "mobilenetv4-in1k-labels";
-
 #[derive(Debug, Clone)]
 pub struct TagsModelPaths {
     pub model: PathBuf,
@@ -68,10 +65,6 @@ pub fn tags_ready_bundle(conn: &Connection, bundle: &str) -> AppResult<bool> {
         }
     }
     Ok(true)
-}
-
-pub fn model_paths(conn: &Connection) -> AppResult<TagsModelPaths> {
-    model_paths_for(conn, ml::catalog::TAGS_BUNDLE, 224)
 }
 
 pub fn model_paths_for(
@@ -232,16 +225,6 @@ pub fn invalidate_asset(conn: &Connection, asset_id: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Joined label string for FTS (first synonym of each WordNet-style label).
-pub fn fts_auto_tags(conn: &Connection, asset_id: &str) -> AppResult<String> {
-    let labels = list_for_asset(conn, asset_id)?;
-    Ok(labels
-        .iter()
-        .map(|l| display_label(&l.label))
-        .collect::<Vec<_>>()
-        .join(" "))
-}
-
 pub fn display_label(raw: &str) -> String {
     raw.split(',')
         .next()
@@ -275,7 +258,7 @@ mod tests {
             &conn,
             "a1",
             &[("golden retriever".into(), 0.9), ("dog".into(), 0.4)],
-            MODEL_ID,
+            "mobilenetv4-small-in1k",
         )
         .unwrap();
         let labels = list_for_asset(&conn, "a1").unwrap();
