@@ -9,7 +9,9 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { StatusBar } from "./components/layout/StatusBar";
 import { Toolbar } from "./components/layout/Toolbar";
 import { AlbumModal } from "./components/modals/AlbumModal";
+import { DeleteAlbumDialog } from "./components/modals/DeleteAlbumDialog";
 import { ImportModal } from "./components/modals/ImportModal";
+import { PersonModal } from "./components/modals/PersonModal";
 import { TagModal } from "./components/modals/TagModal";
 import { VaultPickerDialog } from "./components/modals/VaultPickerDialog";
 import { ActivityView } from "./features/activity/ActivityView";
@@ -23,6 +25,7 @@ import { RecentSearchesView } from "./features/search/RecentSearchesView";
 import { AssetEmptyState } from "./features/library/AssetEmptyState";
 import { LibraryGrid } from "./features/library/LibraryGrid";
 import { MediaInfoPanel } from "./features/media-info/MediaInfoPanel";
+import { PeopleView } from "./features/people/PeopleView";
 import { TagFilterBoard } from "./features/tags/TagFilterBoard";
 import { TimelineView } from "./features/timeline/TimelineView";
 import { HomeView } from "./features/home/HomeView";
@@ -42,6 +45,7 @@ import { useIndexProgress } from "./hooks/useIndexProgress";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibraryAssets } from "./hooks/useLibraryAssets";
 import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
+import { usePeople } from "./hooks/usePeople";
 import { usePreferences } from "./hooks/usePreferences";
 import { useRecentSearches } from "./hooks/useRecentSearches";
 import { useTagBrowse } from "./hooks/useTagBrowse";
@@ -50,7 +54,7 @@ import { useTimeline } from "./hooks/useTimeline";
 import { useVault } from "./hooks/useVault";
 import { useViewer } from "./hooks/useViewer";
 import { useWatchedFolders } from "./hooks/useWatchedFolders";
-import { api, type AssetSummary } from "./lib/tauri";
+import { api, type Album, type AssetSummary, type Person } from "./lib/tauri";
 import { LIBRARY_PAGE_META } from "./lib/pageMeta";
 import type { AlbumPickTarget, View } from "./types/app";
 import "./styles/app.css";
@@ -70,8 +74,23 @@ export default function App() {
     | { kind: "album"; albumId: string; albumName: string }
     | null
   >(null);
+  const [deleteAlbumTarget, setDeleteAlbumTarget] = useState<Album | null>(null);
+  const [personModal, setPersonModal] = useState<Person | null>(null);
+  const [personName, setPersonName] = useState("");
 
   const { albums, activeAlbum, setActiveAlbum, refreshAlbums } = useAlbums({
+    view,
+    setError,
+  });
+
+  const {
+    people,
+    ignoredPeople,
+    activePerson,
+    setActivePerson,
+    refreshPeople,
+    setPersonIgnored,
+  } = usePeople({
     view,
     setError,
   });
@@ -139,6 +158,7 @@ export default function App() {
     view,
     query,
     activeAlbum,
+    activePerson,
     tagBrowse,
     refreshHistory,
     refreshExports,
@@ -261,11 +281,14 @@ export default function App() {
     setVaultPick({ kind: "assets", ids: selectedIds });
   }
 
+  function createLockedVault() {
+    setView("locked");
+    vault.startCreate();
+  }
+
   async function moveAlbumToLocked(albumId: string, albumName: string) {
     if (!vault.status?.configured || vault.vaults.length === 0) {
-      setView("locked");
-      vault.startCreate();
-      setError("Create a vault first, then lock the album.");
+      setError("Create a locked vault first, then add this album to it.");
       return;
     }
     if (
@@ -276,6 +299,41 @@ export default function App() {
       return;
     }
     setVaultPick({ kind: "album", albumId, albumName });
+  }
+
+  async function performDeleteAlbum(album: Album, deleteAssets: boolean) {
+    setBusy(true);
+    try {
+      const trashed = await api.deleteAlbum(album.id, deleteAssets);
+      setDeleteAlbumTarget(null);
+      setActiveAlbum(null);
+      setSelected(new Set());
+      await Promise.all([refreshAlbums(), loadAssets(), refreshStats()]);
+      void refreshHistory();
+      setError(
+        deleteAssets
+          ? `Deleted “${album.name}” and moved ${trashed} item(s) to trash`
+          : `Deleted album “${album.name}” · photos kept in library`,
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function requestDeleteAlbum(album: Album) {
+    if (album.assetCount === 0) {
+      if (
+        window.confirm(
+          `Delete empty album “${album.name}”?\n\nThis cannot be undone.`,
+        )
+      ) {
+        void performDeleteAlbum(album, false);
+      }
+      return;
+    }
+    setDeleteAlbumTarget(album);
   }
 
   async function confirmVaultPick(vaultId: string, password?: string) {
@@ -458,6 +516,9 @@ export default function App() {
     if (id === "albums") {
       setActiveAlbum(null);
     }
+    if (id === "people") {
+      setActivePerson(null);
+    }
     if (id !== "library" || !pickingForAlbum) {
       setSelected(new Set());
     }
@@ -473,6 +534,7 @@ export default function App() {
         stats={stats}
         albumCount={albums.length}
         tagCount={tags.length}
+        peopleCount={people.length}
         savedSearchCount={recentSearches.length}
         exportCount={exports.length}
         lockedCount={vault.status?.totalLockedCount ?? 0}
@@ -555,12 +617,19 @@ export default function App() {
             <AlbumDetailHeader
               album={albums.find((a) => a.id === activeAlbum) ?? null}
               hasSelection={hasSelection}
+              hasVaults={(vault.vaults.length ?? 0) > 0}
+              lockBusy={busy}
               onBack={() => {
                 setActiveAlbum(null);
                 setSelected(new Set());
               }}
               onStartPicking={startPickingForAlbum}
               onOpenMoveAlbum={openMoveAlbumModal}
+              onCreateLockedVault={createLockedVault}
+              onAddToExistingVault={(album) =>
+                void moveAlbumToLocked(album.id, album.name)
+              }
+              onDeleteAlbum={requestDeleteAlbum}
             />
           )}
 
@@ -710,11 +779,26 @@ export default function App() {
             <AlbumsGridView
               albums={albums}
               onCreateAlbum={openCreateAlbumModal}
-              onLockAlbum={(album) => void moveAlbumToLocked(album.id, album.name)}
-              lockBusy={busy}
               onOpenAlbum={(albumId) => {
                 setActiveAlbum(albumId);
                 setSelected(new Set());
+              }}
+            />
+          ) : view === "people" && !activePerson ? (
+            <PeopleView
+              people={people}
+              ignoredPeople={ignoredPeople}
+              onRefresh={() => void refreshPeople()}
+              onOpenPerson={(personId) => {
+                setActivePerson(personId);
+                setSelected(new Set());
+              }}
+              onNamePerson={(person) => {
+                setPersonModal(person);
+                setPersonName(person.name ?? "");
+              }}
+              onSetIgnored={(personId, ignored) => {
+                void setPersonIgnored(personId, ignored);
               }}
             />
           ) : view === "duplicates" ? (
@@ -732,10 +816,43 @@ export default function App() {
             />
           ) : (
             <>
-              {LIBRARY_PAGE_META[view] && !(view === "albums" && activeAlbum) && (
+              {LIBRARY_PAGE_META[view] &&
+                !(view === "albums" && activeAlbum) &&
+                !(view === "people" && activePerson) && (
                 <PageHeader
                   title={LIBRARY_PAGE_META[view]!.title}
                   description={LIBRARY_PAGE_META[view]!.description}
+                />
+              )}
+              {view === "people" && activePerson && (
+                <PageHeader
+                  title={
+                    people.find((p) => p.id === activePerson)?.name?.trim() ||
+                    "Unnamed person"
+                  }
+                  description="Photos this person appears in."
+                  actions={
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelected(new Set());
+                          void setPersonIgnored(activePerson, true);
+                        }}
+                      >
+                        Ignore this person
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActivePerson(null);
+                          setSelected(new Set());
+                        }}
+                      >
+                        Back to people
+                      </button>
+                    </>
+                  }
                 />
               )}
               {assets.length === 0 ? (
@@ -849,6 +966,53 @@ export default function App() {
         />
       )}
 
+      {deleteAlbumTarget && (
+        <DeleteAlbumDialog
+          album={deleteAlbumTarget}
+          busy={busy}
+          onCancel={() => setDeleteAlbumTarget(null)}
+          onConfirm={(deleteAssets) =>
+            void performDeleteAlbum(deleteAlbumTarget, deleteAssets)
+          }
+        />
+      )}
+
+      {personModal && (
+        <PersonModal
+          person={personModal}
+          people={people}
+          name={personName}
+          onNameChange={setPersonName}
+          onClose={() => setPersonModal(null)}
+          onSubmit={() => {
+            void (async () => {
+              try {
+                await api.renamePerson(personModal.id, personName);
+                setPersonModal(null);
+                await refreshPeople();
+              } catch (e) {
+                setError(String(e));
+              }
+            })();
+          }}
+          onMergeInto={(intoId) => {
+            void (async () => {
+              try {
+                await api.mergePeople(intoId, personModal.id);
+                setPersonModal(null);
+                if (activePerson === personModal.id) {
+                  setActivePerson(intoId);
+                }
+                await refreshPeople();
+                void loadAssets();
+              } catch (e) {
+                setError(String(e));
+              }
+            })();
+          }}
+        />
+      )}
+
       {tagModal && (
         <TagModal
           selectedCount={selectedIds.length}
@@ -874,7 +1038,7 @@ export default function App() {
           vaults={vault.vaults}
           title={
             vaultPick.kind === "album"
-              ? `Lock “${vaultPick.albumName}”`
+              ? `Add “${vaultPick.albumName}” to vault`
               : "Move to Locked folder"
           }
           busy={busy}

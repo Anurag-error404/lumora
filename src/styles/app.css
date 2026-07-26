@@ -2104,6 +2104,16 @@ button .nav-icon {
   color: var(--text-muted) !important;
 }
 
+.media-info-ocr-text {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-weight: 500;
+  line-height: 1.45;
+  max-height: 14rem;
+  overflow: auto;
+}
+
 .media-info-block {
   margin-bottom: 0.7rem;
   padding: 0.8rem;
@@ -2246,6 +2256,35 @@ button .nav-icon {
   text-align: left;
   border-color: transparent;
   border-radius: var(--radius);
+}
+
+.delete-album-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.delete-album-options > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  text-align: left;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.delete-album-options > button strong {
+  font-weight: 600;
+}
+
+.delete-album-options > button small {
+  font-weight: 400;
+  font-size: 0.8rem;
 }
 
 /* Lightbox --------------------------------------------------------------- */
@@ -2889,6 +2928,7 @@ button .nav-icon {
 }
 
 .albums-page,
+.people-page,
 .exports-page,
 .watched-page,
 .saved-searches-page {
@@ -2985,6 +3025,8 @@ button .nav-icon {
 .album-cover-open {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0.65rem;
   width: 100%;
   padding: 0;
@@ -3038,8 +3080,10 @@ button .nav-icon {
 .album-cover-info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.1rem;
   padding: 0 0.15rem;
+  text-align: left;
 }
 
 .album-cover-name {
@@ -3050,14 +3094,138 @@ button .nav-icon {
   white-space: nowrap;
 }
 
-.album-lock-button {
-  align-self: flex-start;
-  margin-left: 0.15rem;
+.person-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1.25rem 1rem;
+}
+
+.person-cover-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.person-cover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-cover-media {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px rgba(60, 64, 67, 0.08);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.person-cover-card:hover .person-cover-media {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-1);
+}
+
+.person-cover-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.person-cover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0 0.15rem;
+  text-align: center;
+}
+
+.person-cover-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-name-button {
+  align-self: center;
   padding: 0.3rem 0.65rem;
   color: var(--accent);
   background: var(--accent-soft);
   border-color: transparent;
   font-size: 0.74rem;
+}
+
+.person-cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.person-ignore-button {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.74rem;
+}
+
+.person-cover-card-ignored .person-cover-media {
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+
+.people-ignored {
+  margin-top: 2.25rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.people-ignored h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.people-ignored p {
+  margin: 0 0 1.25rem;
+  font-size: 0.82rem;
+}
+
+.media-info-face-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.media-info-face-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 72px;
+}
+
+.media-info-face-chip img {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-sunken);
+}
+
+.media-info-face-chip button {
+  font-size: 0.68rem;
+  padding: 0.15rem 0.4rem;
 }
 
 .album-detail-head {

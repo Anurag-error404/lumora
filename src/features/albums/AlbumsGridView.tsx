@@ -9,14 +9,10 @@ export function AlbumsGridView({
   albums,
   onCreateAlbum,
   onOpenAlbum,
-  onLockAlbum,
-  lockBusy,
 }: {
   albums: Album[];
   onCreateAlbum: () => void;
   onOpenAlbum: (albumId: string) => void;
-  onLockAlbum: (album: Album) => void;
-  lockBusy: boolean;
 }) {
   return (
     <div className="albums-page">
@@ -49,30 +45,21 @@ export function AlbumsGridView({
                   className="album-cover-open"
                   onClick={() => onOpenAlbum(album.id)}
                 >
-                <div className="album-cover-media">
-                  <SafeImage
-                    src={cover}
-                    alt=""
-                    loading="lazy"
-                    fallback={<MediaFallback type="album" />}
-                  />
-                </div>
-                <div className="album-cover-info">
-                  <span className="album-cover-name">{album.name}</span>
-                  <span className="muted">
-                    {album.assetCount}{" "}
-                    {album.assetCount === 1 ? "item" : "items"}
-                  </span>
-                </div>
-                </button>
-                <button
-                  type="button"
-                  className="album-lock-button"
-                  onClick={() => onLockAlbum(album)}
-                  disabled={lockBusy || album.assetCount === 0}
-                  title={`Move ${album.name} to the Locked folder`}
-                >
-                  Lock album
+                  <div className="album-cover-media">
+                    <SafeImage
+                      src={cover}
+                      alt=""
+                      loading="lazy"
+                      fallback={<MediaFallback type="album" />}
+                    />
+                  </div>
+                  <div className="album-cover-info">
+                    <span className="album-cover-name">{album.name}</span>
+                    <span className="muted">
+                      {album.assetCount}{" "}
+                      {album.assetCount === 1 ? "item" : "items"}
+                    </span>
+                  </div>
                 </button>
               </article>
             );

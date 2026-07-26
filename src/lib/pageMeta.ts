@@ -54,4 +54,19 @@ export const LIBRARY_PAGE_META: Partial<
     description:
       "Wide and tall stitched shots — anything at least twice as long as it is deep.",
   },
+  documents: {
+    title: "Documents",
+    description:
+      "Photos with substantial on-device OCR text — scans, notes, and pages that read like documents.",
+  },
+  receipts: {
+    title: "Receipts",
+    description:
+      "Photos whose extracted text looks like a receipt or invoice (totals, tax, currency tokens).",
+  },
+  people: {
+    title: "People",
+    description:
+      "Faces grouped on-device. Name a person once to browse every photo they appear in.",
+  },
 };

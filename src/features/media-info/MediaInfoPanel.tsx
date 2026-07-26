@@ -6,9 +6,12 @@ import { formatDuration, formatMediaDate } from "../../lib/format";
 import { labelHex } from "../../lib/labels";
 import {
   api,
+  fileSrc,
   thumbSrc,
   type AssetOrganisation,
   type AssetSummary,
+  type AssetText,
+  type FaceBox,
 } from "../../lib/tauri";
 
 export function MediaInfoPanel({
@@ -23,6 +26,10 @@ export function MediaInfoPanel({
   );
   const [loadingOrg, setLoadingOrg] = useState(true);
   const [orgError, setOrgError] = useState<string | null>(null);
+  const [assetText, setAssetText] = useState<AssetText | null>(null);
+  const [loadingText, setLoadingText] = useState(true);
+  const [faces, setFaces] = useState<FaceBox[]>([]);
+  const [loadingFaces, setLoadingFaces] = useState(true);
 
   const name = asset.path.split(/[/\\]/).pop() ?? asset.path;
   const folder = asset.path.replace(/[/\\][^/\\]+$/, "") || asset.path;
@@ -55,6 +62,62 @@ export function MediaInfoPanel({
       cancelled = true;
     };
   }, [asset.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingText(true);
+    void api
+      .getAssetText(asset.id)
+      .then((data) => {
+        if (!cancelled) setAssetText(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetText(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingText(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingFaces(true);
+    void api
+      .listAssetFaces(asset.id)
+      .then((data) => {
+        if (!cancelled) setFaces(data);
+      })
+      .catch(() => {
+        if (!cancelled) setFaces([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingFaces(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
+  async function detachFace(faceId: string) {
+    try {
+      await api.detachFace(faceId);
+      setFaces(await api.listAssetFaces(asset.id));
+    } catch {
+      // Keep existing chips; detach is best-effort from the info panel.
+    }
+  }
+
+  async function setFaceIgnored(personId: string, ignored: boolean) {
+    try {
+      await api.setPersonIgnored(personId, ignored);
+      setFaces(await api.listAssetFaces(asset.id));
+    } catch {
+      // Keep existing chips; ignoring is best-effort from the info panel.
+    }
+  }
 
   return (
     <>
@@ -264,6 +327,94 @@ export function MediaInfoPanel({
               )}
             </div>
             {orgError && <p className="muted media-info-empty">{orgError}</p>}
+          </section>
+
+          <section className="media-info-section">
+            <h3>People in this photo</h3>
+            {loadingFaces ? (
+              <p className="muted media-info-empty">Checking faces…</p>
+            ) : faces.length > 0 ? (
+              <ul className="media-info-face-chips">
+                {faces.map((face) => {
+                  const crop = face.cropPath ? fileSrc(face.cropPath) : null;
+                  return (
+                    <li key={face.id} className="media-info-face-chip">
+                      <SafeImage
+                        src={crop}
+                        alt=""
+                        fallback={<MediaFallback type="album" />}
+                      />
+                      <span className="muted">
+                        {face.personIgnored
+                          ? "Ignored"
+                          : face.personName?.trim() || "Unnamed"}
+                      </span>
+                      {face.personIgnored ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            face.personId &&
+                            void setFaceIgnored(face.personId, false)
+                          }
+                          title="Show this person in People and search again"
+                        >
+                          Stop ignoring
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void detachFace(face.id)}
+                            title="Split this face into its own person"
+                          >
+                            Not this person
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              face.personId &&
+                              void setFaceIgnored(face.personId, true)
+                            }
+                            title="Hide this face and skip it in future imports"
+                          >
+                            Ignore
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="muted media-info-empty">
+                No faces detected yet. Install face models in Settings to enable
+                on-device recognition.
+              </p>
+            )}
+          </section>
+
+          <section className="media-info-section">
+            <h3>Extracted text</h3>
+            {loadingText ? (
+              <p className="muted media-info-empty">Checking OCR…</p>
+            ) : assetText?.text?.trim() ? (
+              <div className="media-info-kv">
+                <div className="media-info-row stacked">
+                  <span>
+                    OCR
+                    {assetText.confidence > 0
+                      ? ` · ${Math.round(assetText.confidence * 100)}% confidence`
+                      : ""}
+                  </span>
+                  <strong className="media-info-ocr-text">{assetText.text}</strong>
+                </div>
+              </div>
+            ) : (
+              <p className="muted media-info-empty">
+                No text extracted yet. Install OCR models in Settings to enable
+                on-device recognition.
+              </p>
+            )}
           </section>
 
           <section className="media-info-section">

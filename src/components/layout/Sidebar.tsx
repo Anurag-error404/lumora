@@ -47,7 +47,7 @@ const NAV_SECTIONS: readonly NavSection[] = [
   {
     heading: "Discover",
     items: [
-      { id: "people", label: "People", icon: "person", soon: true },
+      { id: "people", label: "People", icon: "person" },
       { id: "places", label: "Places", icon: "place", soon: true },
       { id: "tags", label: "Tags", icon: "label" },
       { id: "albums", label: "Albums", icon: "album" },
@@ -62,8 +62,8 @@ const NAV_SECTIONS: readonly NavSection[] = [
       { id: "panoramas", label: "Panoramas", icon: "panorama" },
       { id: "videos", label: "Videos", icon: "play" },
       { id: "rawPhotos", label: "RAW photos", icon: "camera" },
-      { id: "documents", label: "Documents", icon: "document", soon: true },
-      { id: "receipts", label: "Receipts", icon: "receipt", soon: true },
+      { id: "documents", label: "Documents", icon: "document" },
+      { id: "receipts", label: "Receipts", icon: "receipt" },
     ],
   },
   {
@@ -109,6 +109,7 @@ export function Sidebar({
   smartCounts,
   albumCount,
   tagCount,
+  peopleCount,
   savedSearchCount,
   exportCount,
   lockedCount,
@@ -121,6 +122,7 @@ export function Sidebar({
   smartCounts: SmartCounts | null;
   albumCount: number;
   tagCount: number;
+  peopleCount: number;
   savedSearchCount: number;
   exportCount: number;
   lockedCount: number;
@@ -151,6 +153,8 @@ export function Sidebar({
         return albumCount;
       case "tags":
         return tagCount;
+      case "people":
+        return peopleCount;
       case "savedSearches":
         return savedSearchCount;
       case "locked":

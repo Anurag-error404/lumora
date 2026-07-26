@@ -6,11 +6,13 @@ mod duplicates;
 pub mod error;
 mod edit;
 mod export;
+mod faces;
 mod history;
 mod indexer;
 mod logging;
 mod ml;
 mod models;
+mod ocr;
 mod preferences;
 mod saved_searches;
 mod search;
@@ -66,7 +68,22 @@ pub fn run() {
                 paths.db_path.clone(),
                 paths.models_dir.clone(),
             );
-            let state = AppState::new(paths, conn, Arc::clone(&indexer), Arc::clone(&embedder));
+            let ocr = ocr::worker::OcrWorker::new(
+                paths.db_path.clone(),
+                paths.app_data.clone(),
+            );
+            let faces = faces::worker::FaceWorker::new(
+                paths.db_path.clone(),
+                paths.app_data.clone(),
+            );
+            let state = AppState::new(
+                paths,
+                conn,
+                Arc::clone(&indexer),
+                Arc::clone(&embedder),
+                Arc::clone(&ocr),
+                Arc::clone(&faces),
+            );
 
             let watch_service = Arc::new(watcher::WatcherService::new());
             let roots = state
@@ -134,6 +151,26 @@ pub fn run() {
             embed_progress,
             kick_embedding,
             semantic_search,
+            install_ocr_models,
+            ocr_status,
+            ocr_progress,
+            kick_ocr,
+            clear_ocr_text,
+            get_asset_text,
+            install_face_models,
+            faces_status,
+            faces_progress,
+            kick_faces,
+            clear_face_data,
+            list_people,
+            list_ignored_people,
+            set_person_ignored,
+            list_person_assets,
+            rename_person,
+            merge_people,
+            detach_face,
+            list_asset_faces,
+            recluster_faces,
             find_duplicates,
             list_assets_by_ids,
             soft_delete_assets,

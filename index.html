@@ -2,18 +2,269 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="LUMORA — your memories your machine. Local-first photo & video library with on-device AI search, faces, OCR, and an encrypted vault. Nothing leaves your computer."
+    />
+    <meta name="theme-color" content="#2f6f5e" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <title>LUMORA</title>
+    <link rel="stylesheet" href="styles.css" />
+    <title>LUMORA — your memories your machine</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="LUMORA home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">LUMORA</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#stack">Stack</a>
+        <a
+          class="nav-cta"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-brand">
+        <div class="hero-copy">
+          <p class="hero-brand" id="hero-brand">LUMORA</p>
+          <h1 class="hero-tagline">your memories your machine.</h1>
+          <p class="hero-lede">
+            A local-first photo &amp; video library for archives that stay on
+            your disk — organise a million assets, search by meaning, and keep
+            every byte offline.
+          </p>
+          <div class="hero-actions">
+            <a
+              class="btn btn-primary"
+              href="https://github.com/Anurag-error404/lumora"
+              rel="noopener noreferrer"
+              >View on GitHub</a
+            >
+            <a class="btn btn-ghost" href="#features">Explore features</a>
+          </div>
+        </div>
+
+        <div class="hero-stage" aria-hidden="true">
+          <div class="hero-grid">
+            <div class="tile t1"></div>
+            <div class="tile t2"></div>
+            <div class="tile t3"></div>
+            <div class="tile t4"></div>
+            <div class="tile t5"></div>
+            <div class="tile t6"></div>
+            <div class="tile t7"></div>
+            <div class="tile t8"></div>
+            <div class="tile t9"></div>
+            <div class="tile t10"></div>
+            <div class="tile t11"></div>
+            <div class="tile t12"></div>
+          </div>
+          <div class="hero-veil"></div>
+        </div>
+      </section>
+
+      <section class="section intro" aria-labelledby="intro-heading">
+        <h2 id="intro-heading">Google Photos convenience. Zero cloud.</h2>
+        <p>
+          Built for archive and professional users who need filesystem-scale
+          indexing, fast search, and on-device intelligence — without uploading a
+          single frame.
+        </p>
+      </section>
+
+      <section class="section features" id="features" aria-labelledby="features-heading">
+        <header class="section-head">
+          <h2 id="features-heading">Everything in the library</h2>
+          <p>Phase 1 baseline plus shipped on-device AI — all local.</p>
+        </header>
+
+        <div class="feature-blocks">
+          <article class="feature reveal">
+            <h3>Library &amp; indexing</h3>
+            <ul>
+              <li>Import folders recursively; originals stay where they are</li>
+              <li>Watched folders with live add / change / remove</li>
+              <li>Incremental indexing — hash, EXIF, thumbnails</li>
+              <li>Photos and videos in one library</li>
+              <li>Built for large collections (up to 1M assets)</li>
+              <li>Virtualised grid that stays scrollable at scale</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Organisation</h3>
+            <ul>
+              <li>Manual albums — create, rename, drag &amp; drop</li>
+              <li>Tags, favourites, 1–5 ratings, colour labels</li>
+              <li>Timeline by year and month</li>
+              <li>Recently added and recently viewed</li>
+              <li>Home overview of your library</li>
+              <li>Smart collections: Videos, RAW, Screenshots, Selfies, Panoramas</li>
+              <li>Documents &amp; Receipts collections driven by OCR</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Search</h3>
+            <ul>
+              <li>Full-text search (FTS5) across filename, tags, metadata</li>
+              <li>Structured filters — <code>camera:</code>, <code>rating&gt;</code>, <code>before:</code>, <code>after:</code></li>
+              <li>Natural-language semantic search with on-device CLIP</li>
+              <li>Semantic results blend with FTS instead of replacing it</li>
+              <li>Recent search history in the toolbar and Discover</li>
+              <li>Find text inside screenshots and documents via OCR</li>
+              <li>Search people by name once faces are labelled</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>On-device intelligence</h3>
+            <ul>
+              <li>CLIP ViT-B/32 embeddings for “find by description”</li>
+              <li>People view — detect, cluster, name, merge, ignore</li>
+              <li>RapidOCR PP-OCRv4 text extraction into the search index</li>
+              <li>Background inference that never blocks browsing</li>
+              <li>Model registry — install, verify, remove when you want</li>
+              <li>App works fully with zero models installed</li>
+              <li>Derived data (embeddings, faces, OCR) deletable anytime</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Duplicates &amp; cleanup</h3>
+            <ul>
+              <li>Exact duplicates via SHA-256</li>
+              <li>Near-duplicates via perceptual hash clustering</li>
+              <li>Soft trash with 30-day retention</li>
+              <li>Undo / redo for destructive library actions</li>
+              <li>Safer cleanup flows through trash, not permanent delete</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Editing &amp; export</h3>
+            <ul>
+              <li>Rotate, flip, aspect-ratio crop, exposure (±2 EV)</li>
+              <li>Save as replace (with confirmation) or save as copy</li>
+              <li>ZIP export of selected assets</li>
+              <li>Activity log and exports history</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Encrypted vault</h3>
+            <ul>
+              <li>Argon2id key derivation + XChaCha20-Poly1305</li>
+              <li>Recovery code for vault unlock</li>
+              <li>Lock albums and folders behind the vault</li>
+              <li>Encrypted metadata for vaulted content</li>
+            </ul>
+          </article>
+
+          <article class="feature reveal">
+            <h3>Settings &amp; control</h3>
+            <ul>
+              <li>Settings: General, Appearance, Library, AI Features, Privacy, Storage, Performance, Shortcuts, Import &amp; Export, Updates, About</li>
+              <li>Toggles for semantic search, OCR, face recognition, watch folders</li>
+              <li>Storage summary, clear / rebuild cache, optimise database</li>
+              <li>Developer page for diagnostics only — paths, indexer, logs</li>
+              <li>Local-only diagnostic logs — never uploaded</li>
+              <li>Keyboard-first browsing: preview, rate, favourite, select, trash</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section privacy" id="privacy" aria-labelledby="privacy-heading">
+        <div class="privacy-panel reveal">
+          <h2 id="privacy-heading">Nothing leaves the machine</h2>
+          <p>
+            Core features work with zero network. Models download only when you
+            ask. Inference, indexing, search, logs, and crash reports stay on
+            disk. No telemetry. No analytics. No hosted APIs for your photos.
+          </p>
+          <ul class="privacy-points">
+            <li>On-device ONNX Runtime (CoreML on macOS, CPU elsewhere)</li>
+            <li>User-initiated model downloads with SHA-256 verification</li>
+            <li>Embeddings, faces, and OCR text rebuildable without touching originals</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section stack" id="stack" aria-labelledby="stack-heading">
+        <header class="section-head">
+          <h2 id="stack-heading">Desktop-native stack</h2>
+          <p>Small binary, Rust backend, React UI — open source.</p>
+        </header>
+        <dl class="stack-list reveal">
+          <div>
+            <dt>Shell</dt>
+            <dd>Tauri v2</dd>
+          </div>
+          <div>
+            <dt>UI</dt>
+            <dd>React + TypeScript</dd>
+          </div>
+          <div>
+            <dt>Backend</dt>
+            <dd>Rust</dd>
+          </div>
+          <div>
+            <dt>Database</dt>
+            <dd>SQLite + FTS5</dd>
+          </div>
+          <div>
+            <dt>ML</dt>
+            <dd>ONNX Runtime · CLIP · OCR · Faces</dd>
+          </div>
+          <div>
+            <dt>Platforms</dt>
+            <dd>macOS first · Windows &amp; Linux next</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="section cta-band" aria-labelledby="cta-heading">
+        <h2 id="cta-heading">Build it. Fork it. Keep your archive.</h2>
+        <p>Clone the repo and run the desktop app locally with Bun + Rust.</p>
+        <a
+          class="btn btn-primary"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+          >Open repository</a
+        >
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <span class="brand-name">LUMORA</span>
+        <span class="footer-tag">your memories your machine.</span>
+      </div>
+      <p class="footer-meta">
+        Open source ·
+        <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </p>
+    </footer>
+
+    <script src="site.js" defer></script>
   </body>
 </html>

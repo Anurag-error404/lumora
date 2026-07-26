@@ -12,6 +12,9 @@ const MIGRATION_006: &str = include_str!("../../migrations/006_vault_groups.sql"
 const MIGRATION_007: &str = include_str!("../../migrations/007_multi_vault.sql");
 const MIGRATION_008: &str = include_str!("../../migrations/008_ml_phase2.sql");
 const MIGRATION_009: &str = include_str!("../../migrations/009_saved_searches.sql");
+const MIGRATION_010: &str = include_str!("../../migrations/010_ocr.sql");
+const MIGRATION_011: &str = include_str!("../../migrations/011_faces.sql");
+const MIGRATION_012: &str = include_str!("../../migrations/012_face_ignore.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -155,6 +158,65 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         conn.execute_batch(MIGRATION_009)?;
         conn.execute("INSERT INTO schema_migrations (version) VALUES (9)", [])?;
         tracing::info!("applied migration 009_saved_searches");
+    }
+
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 10 {
+        conn.execute_batch(MIGRATION_010)?;
+        // Repopulate FTS so the new ocr_text column is present for every asset.
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM assets WHERE deleted_at IS NULL")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        for id in ids {
+            crate::indexer::refresh_fts(conn, &id)?;
+        }
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (10)", [])?;
+        tracing::info!("applied migration 010_ocr");
+    }
+
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 11 {
+        conn.execute_batch(MIGRATION_011)?;
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM assets WHERE deleted_at IS NULL")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        for id in ids {
+            crate::indexer::refresh_fts(conn, &id)?;
+        }
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (11)", [])?;
+        tracing::info!("applied migration 011_faces");
+    }
+
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 12 {
+        conn.execute_batch(MIGRATION_012)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (12)", [])?;
+        tracing::info!("applied migration 012_face_ignore");
     }
 
     Ok(())
@@ -303,21 +365,22 @@ mod tests {
         assert!(tables.iter().any(|t| t == "albums"));
         assert!(tables.iter().any(|t| t == "tags"));
         assert!(tables.iter().any(|t| t == "watched_folders"));
-        // Faces/people land with the face slice, not with the Phase 2 schema.
-        assert!(!tables.iter().any(|t| t == "faces"));
-        assert!(!tables.iter().any(|t| t == "people"));
+        // Faces/people shipped with migration 011.
+        assert!(tables.iter().any(|t| t == "faces"));
+        assert!(tables.iter().any(|t| t == "people"));
 
         let version: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 12);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
         assert!(tables.iter().any(|t| t == "asset_embeddings"));
         assert!(tables.iter().any(|t| t == "ml_jobs"));
+        assert!(tables.iter().any(|t| t == "asset_text"));
         assert!(tables.iter().any(|t| t == "exports"));
         assert!(tables.iter().any(|t| t == "activity_log"));
         assert!(tables.iter().any(|t| t == "asset_views"));
@@ -333,6 +396,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 9);
+        assert_eq!(version2, 12);
     }
 }

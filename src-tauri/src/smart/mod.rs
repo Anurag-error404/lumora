@@ -38,15 +38,19 @@ pub enum SmartCollection {
     Screenshots,
     Selfies,
     Panoramas,
+    Documents,
+    Receipts,
 }
 
 impl SmartCollection {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::Videos,
         Self::RawPhotos,
         Self::Screenshots,
         Self::Selfies,
         Self::Panoramas,
+        Self::Documents,
+        Self::Receipts,
     ];
 
     pub fn parse(value: &str) -> AppResult<Self> {
@@ -56,6 +60,8 @@ impl SmartCollection {
             "screenshots" => Ok(Self::Screenshots),
             "selfies" => Ok(Self::Selfies),
             "panoramas" => Ok(Self::Panoramas),
+            "documents" => Ok(Self::Documents),
+            "receipts" => Ok(Self::Receipts),
             other => Err(AppError::msg(format!("unknown smart collection: {other}"))),
         }
     }
@@ -68,12 +74,17 @@ impl SmartCollection {
             Self::Screenshots => "screenshots",
             Self::Selfies => "selfies",
             Self::Panoramas => "panoramas",
+            Self::Documents => "documents",
+            Self::Receipts => "receipts",
         }
     }
 
     fn query(self) -> CollectionQuery {
-        let predicate = match self {
-            Self::Videos => "a.media_type = 'video'".to_string(),
+        match self {
+            Self::Videos => CollectionQuery {
+                joins: "",
+                predicate: "a.media_type = 'video'".to_string(),
+            },
             // Matched on extension: RAW files usually can't be decoded, so
             // there is no metadata signal to rely on.
             Self::RawPhotos => {
@@ -82,35 +93,70 @@ impl SmartCollection {
                     .map(|ext| format!("LOWER(a.path) LIKE '%.{ext}'"))
                     .collect::<Vec<_>>()
                     .join(" OR ");
-                format!("a.media_type = 'image' AND ({exts})")
+                CollectionQuery {
+                    joins: "",
+                    predicate: format!("a.media_type = 'image' AND ({exts})"),
+                }
             }
             // Screenshots carry no camera EXIF, and both macOS and Windows name
             // them (or their folder) predictably. Requiring both keeps real
             // photos that merely live in a "Screenshots" folder out.
-            Self::Screenshots => "a.media_type = 'image'
+            Self::Screenshots => CollectionQuery {
+                joins: "",
+                predicate: "a.media_type = 'image'
                  AND a.camera IS NULL
                  AND (LOWER(a.path) LIKE '%screenshot%'
                       OR LOWER(a.path) LIKE '%screen shot%')"
-                .to_string(),
+                    .to_string(),
+            },
             // Phones record the front camera in the lens description
             // ("iPhone 15 Pro front camera 2.69mm f/2.2"). The filename fallback
             // catches exports that dropped the lens tag.
-            Self::Selfies => "a.media_type = 'image'
+            Self::Selfies => CollectionQuery {
+                joins: "",
+                predicate: "a.media_type = 'image'
                  AND (LOWER(COALESCE(a.lens, '')) LIKE '%front%'
                       OR LOWER(a.path) LIKE '%selfie%')"
-                .to_string(),
+                    .to_string(),
+            },
             // Orientation-agnostic: stitched verticals are panoramas too.
-            Self::Panoramas => format!(
-                "a.media_type = 'image'
+            Self::Panoramas => CollectionQuery {
+                joins: "",
+                predicate: format!(
+                    "a.media_type = 'image'
                  AND a.width IS NOT NULL AND a.height IS NOT NULL
                  AND MIN(a.width, a.height) > 0
                  AND (CAST(MAX(a.width, a.height) AS REAL)
                       / MIN(a.width, a.height)) >= {PANORAMA_ASPECT}"
-            ),
-        };
-        CollectionQuery {
-            joins: "",
-            predicate,
+                ),
+            },
+            // Dense OCR text — documents, slides, notes.
+            Self::Documents => CollectionQuery {
+                joins: "JOIN asset_text atx ON atx.asset_id = a.id",
+                predicate: "a.media_type = 'image'
+                 AND LENGTH(TRIM(atx.text)) >= 200
+                 AND atx.confidence >= 0.35"
+                    .to_string(),
+            },
+            // Receipt-like OCR keywords / currency tokens.
+            Self::Receipts => CollectionQuery {
+                joins: "JOIN asset_text atx ON atx.asset_id = a.id",
+                predicate: "a.media_type = 'image'
+                 AND atx.confidence >= 0.30
+                 AND (
+                   LOWER(atx.text) LIKE '%receipt%'
+                   OR LOWER(atx.text) LIKE '%invoice%'
+                   OR LOWER(atx.text) LIKE '%subtotal%'
+                   OR LOWER(atx.text) LIKE '%total%'
+                   OR LOWER(atx.text) LIKE '%tax%'
+                   OR LOWER(atx.text) LIKE '%amount%'
+                   OR atx.text LIKE '%$%'
+                   OR atx.text LIKE '%€%'
+                   OR atx.text LIKE '%£%'
+                   OR atx.text LIKE '%₹%'
+                 )"
+                .to_string(),
+            },
         }
     }
 }
@@ -314,6 +360,34 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(count(&conn, SmartCollection::Panoramas).unwrap(), 0);
+    }
+
+    #[test]
+    fn documents_and_receipts_use_asset_text() {
+        let (_dir, conn) = open();
+        seed(&conn, "d1", "/m/notes.png", "image", None);
+        seed(&conn, "r1", "/m/shop.png", "image", None);
+        seed(&conn, "p1", "/m/photo.png", "image", Some("Canon"));
+
+        let long = "word ".repeat(50); // 250 chars-ish of text
+        conn.execute(
+            "INSERT INTO asset_text (asset_id, text, lang, confidence, created_at)
+             VALUES ('d1', ?1, 'en', 0.8, '2026-01-01')",
+            params![long],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO asset_text (asset_id, text, lang, confidence, created_at)
+             VALUES ('r1', 'Store Receipt\nSubtotal 12.00\nTax 1.00\nTotal $13.00', 'en', 0.7, '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        let docs = list(&conn, SmartCollection::Documents, 50, 0).unwrap();
+        assert_eq!(ids(&docs), ["d1"]);
+        let receipts = list(&conn, SmartCollection::Receipts, 50, 0).unwrap();
+        assert!(ids(&receipts).contains(&"r1"));
+        assert!(!ids(&receipts).contains(&"p1"));
     }
 
     #[test]

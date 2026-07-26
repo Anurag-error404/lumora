@@ -30,6 +30,7 @@ export function useLibraryAssets({
   view,
   query,
   activeAlbum,
+  activePerson,
   tagBrowse,
   refreshHistory,
   refreshExports,
@@ -41,6 +42,7 @@ export function useLibraryAssets({
   view: View;
   query: string;
   activeAlbum: string | null;
+  activePerson?: string | null;
   tagBrowse: TagBrowseFilter;
   refreshHistory: () => Promise<void>;
   refreshExports: () => Promise<void>;
@@ -86,6 +88,11 @@ export function useLibraryAssets({
           ? api.listAlbumAssets(activeAlbum, PAGE_SIZE, offset)
           : [];
       }
+      if (view === "people") {
+        return activePerson
+          ? api.listPersonAssets(activePerson, PAGE_SIZE, offset)
+          : [];
+      }
       if (view === "tags") {
         const hasFilter =
           tagBrowse.tagIds.length > 0 ||
@@ -114,7 +121,7 @@ export function useLibraryAssets({
       }
       return api.listAssets(PAGE_SIZE, offset);
     },
-    [view, query, activeAlbum, tagBrowse, semanticSearchEnabled],
+    [view, query, activeAlbum, activePerson, tagBrowse, semanticSearchEnabled],
   );
 
   const loadAssets = useCallback(async () => {

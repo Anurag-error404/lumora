@@ -7,8 +7,10 @@ use rusqlite::Connection;
 use zeroize::Zeroize;
 
 use crate::error::AppResult;
+use crate::faces::worker::FaceWorker;
 use crate::history::HistoryStacks;
 use crate::indexer::queue::IndexerQueue;
+use crate::ocr::worker::OcrWorker;
 use crate::semantic::worker::EmbedWorker;
 
 /// An unlocked vault session: holds the vault id and decrypted master key in
@@ -33,6 +35,8 @@ pub struct AppPaths {
     /// On-device ML models. User-visible and safe to delete: removing this
     /// directory only disables AI features, it never harms the library.
     pub models_dir: PathBuf,
+    /// Face crop chips (separate from thumbs so cache clears don't wipe them).
+    pub faces_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -40,17 +44,20 @@ impl AppPaths {
         let thumbs_dir = app_data.join("thumbs");
         let logs_dir = app_data.join("logs");
         let models_dir = app_data.join("models");
+        let faces_dir = app_data.join("faces");
         let db_path = app_data.join("library.db");
         std::fs::create_dir_all(&app_data)?;
         std::fs::create_dir_all(&thumbs_dir)?;
         std::fs::create_dir_all(&logs_dir)?;
         std::fs::create_dir_all(&models_dir)?;
+        std::fs::create_dir_all(&faces_dir)?;
         Ok(Self {
             app_data,
             db_path,
             thumbs_dir,
             logs_dir,
             models_dir,
+            faces_dir,
         })
     }
 
@@ -65,6 +72,8 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub indexer: Arc<IndexerQueue>,
     pub embedder: Arc<EmbedWorker>,
+    pub ocr: Arc<OcrWorker>,
+    pub faces: Arc<FaceWorker>,
     pub history: Mutex<HistoryStacks>,
     /// `Some` while the privacy vault is unlocked for this session.
     pub vault: Mutex<Option<VaultSession>>,
@@ -76,12 +85,16 @@ impl AppState {
         db: Connection,
         indexer: Arc<IndexerQueue>,
         embedder: Arc<EmbedWorker>,
+        ocr: Arc<OcrWorker>,
+        faces: Arc<FaceWorker>,
     ) -> Self {
         Self {
             paths,
             db: Mutex::new(db),
             indexer,
             embedder,
+            ocr,
+            faces,
             history: Mutex::new(HistoryStacks::default()),
             vault: Mutex::new(None),
         }

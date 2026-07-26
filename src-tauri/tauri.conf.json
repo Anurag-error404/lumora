@@ -5,7 +5,7 @@
   "identifier": "com.photovault.ai",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1420/app.html",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },

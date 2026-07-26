@@ -158,7 +158,9 @@ export type SmartCollectionKind =
   | "rawPhotos"
   | "screenshots"
   | "selfies"
-  | "panoramas";
+  | "panoramas"
+  | "documents"
+  | "receipts";
 
 export const SMART_COLLECTION_KINDS: readonly SmartCollectionKind[] = [
   "videos",
@@ -166,6 +168,8 @@ export const SMART_COLLECTION_KINDS: readonly SmartCollectionKind[] = [
   "screenshots",
   "selfies",
   "panoramas",
+  "documents",
+  "receipts",
 ];
 
 /** Counts keyed by collection id; the backend always returns every key. */
@@ -193,16 +197,14 @@ export type ModelInfo = {
 
 export type MlStatus = {
   semanticReady: boolean;
+  ocrReady: boolean;
+  facesReady: boolean;
   models: ModelInfo[];
   semanticDownloadBytes: number;
+  ocrDownloadBytes: number;
+  facesDownloadBytes: number;
   installedBytes: number;
   modelsDir: string;
-};
-
-export type SemanticStatus = {
-  modelReady: boolean;
-  embedded: number;
-  total: number;
 };
 
 export type EmbedProgress = {
@@ -212,6 +214,76 @@ export type EmbedProgress = {
   running: boolean;
   lastPath: string | null;
   modelReady: boolean;
+};
+
+export type OcrProgress = {
+  pending: number;
+  done: number;
+  total: number;
+  running: boolean;
+  lastPath: string | null;
+  modelReady: boolean;
+};
+
+export type OcrStatus = {
+  modelReady: boolean;
+  enabled: boolean;
+  done: number;
+  total: number;
+};
+
+export type AssetText = {
+  assetId: string;
+  text: string;
+  lang: string | null;
+  confidence: number;
+  createdAt: string;
+};
+
+export type FacesProgress = {
+  pending: number;
+  done: number;
+  total: number;
+  running: boolean;
+  lastPath: string | null;
+  modelReady: boolean;
+};
+
+export type FacesStatus = {
+  modelReady: boolean;
+  enabled: boolean;
+  done: number;
+  total: number;
+  peopleCount: number;
+};
+
+export type Person = {
+  id: string;
+  name: string | null;
+  faceCount: number;
+  coverCropPath: string | null;
+  createdAt: string;
+  ignored: boolean;
+};
+
+export type FaceBox = {
+  id: string;
+  assetId: string;
+  personId: string | null;
+  personName: string | null;
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  score: number;
+  cropPath: string | null;
+  personIgnored: boolean;
+};
+
+export type SemanticStatus = {
+  modelReady: boolean;
+  embedded: number;
+  total: number;
 };
 
 export type ModelProgressEvent = {
@@ -455,7 +527,12 @@ export const api = {
   createAlbumWithAssets: (name: string, assetIds: string[]) =>
     invoke<Album>("create_album_with_assets", { name, assetIds, asset_ids: assetIds }),
   renameAlbum: (id: string, name: string) => invoke<void>("rename_album", { id, name }),
-  deleteAlbum: (id: string) => invoke<void>("delete_album", { id }),
+  deleteAlbum: (id: string, deleteAssets = false) =>
+    invoke<number>("delete_album", {
+      id,
+      deleteAssets,
+      delete_assets: deleteAssets,
+    }),
   addToAlbum: (albumId: string, assetId: string) =>
     invoke<void>("add_to_album", {
       albumId,
@@ -505,6 +582,57 @@ export const api = {
   kickEmbedding: () => invoke<void>("kick_embedding"),
   semanticSearch: (query: string, limit: number) =>
     invoke<AssetSummary[]>("semantic_search", { query, limit }),
+  installOcrModels: () => invoke<MlStatus>("install_ocr_models"),
+  ocrStatus: () => invoke<OcrStatus>("ocr_status"),
+  ocrProgress: () => invoke<OcrProgress>("ocr_progress"),
+  kickOcr: () => invoke<void>("kick_ocr"),
+  clearOcrText: () => invoke<number>("clear_ocr_text"),
+  getAssetText: (assetId: string) =>
+    invoke<AssetText | null>("get_asset_text", {
+      assetId,
+      asset_id: assetId,
+    }),
+  installFaceModels: () => invoke<MlStatus>("install_face_models"),
+  facesStatus: () => invoke<FacesStatus>("faces_status"),
+  facesProgress: () => invoke<FacesProgress>("faces_progress"),
+  kickFaces: () => invoke<void>("kick_faces"),
+  clearFaceData: () => invoke<number>("clear_face_data"),
+  listPeople: () => invoke<Person[]>("list_people"),
+  listIgnoredPeople: () => invoke<Person[]>("list_ignored_people"),
+  setPersonIgnored: (personId: string, ignored: boolean) =>
+    invoke<void>("set_person_ignored", {
+      personId,
+      person_id: personId,
+      ignored,
+    }),
+  listPersonAssets: (personId: string, limit: number, offset: number) =>
+    invoke<AssetSummary[]>("list_person_assets", {
+      personId,
+      person_id: personId,
+      limit,
+      offset,
+    }),
+  renamePerson: (personId: string, name: string) =>
+    invoke<void>("rename_person", {
+      personId,
+      person_id: personId,
+      name,
+    }),
+  mergePeople: (intoId: string, fromId: string) =>
+    invoke<void>("merge_people", {
+      intoId,
+      into_id: intoId,
+      fromId,
+      from_id: fromId,
+    }),
+  detachFace: (faceId: string) =>
+    invoke<string>("detach_face", { faceId, face_id: faceId }),
+  listAssetFaces: (assetId: string) =>
+    invoke<FaceBox[]>("list_asset_faces", {
+      assetId,
+      asset_id: assetId,
+    }),
+  reclusterFaces: () => invoke<number>("recluster_faces"),
   findDuplicates: () => invoke<DuplicateGroup[]>("find_duplicates"),
   listAssetsByIds: (ids: string[]) =>
     invoke<AssetSummary[]>("list_assets_by_ids", { ids }),

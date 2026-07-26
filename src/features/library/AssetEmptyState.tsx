@@ -168,6 +168,36 @@ export function AssetEmptyState({
       />
     );
   }
+  if (view === "documents") {
+    return (
+      <EmptyState
+        icon="document"
+        title="No documents yet"
+        description="Install OCR models in Settings → AI Features, then photos with substantial extracted text appear here."
+        action={{ label: "Browse library", onClick: onBrowseLibrary }}
+      />
+    );
+  }
+  if (view === "receipts") {
+    return (
+      <EmptyState
+        icon="receipt"
+        title="No receipts yet"
+        description="After OCR runs, photos whose text looks like a receipt or invoice (totals, tax, currency) collect here."
+        action={{ label: "Browse library", onClick: onBrowseLibrary }}
+      />
+    );
+  }
+  if (view === "people") {
+    return (
+      <EmptyState
+        icon="person"
+        title="No photos for this person"
+        description="Open another person from Discover → People, or wait for face detection to finish in Settings."
+        action={{ label: "Browse library", onClick: onBrowseLibrary }}
+      />
+    );
+  }
   if (view === "trash") {
     return (
       <EmptyState

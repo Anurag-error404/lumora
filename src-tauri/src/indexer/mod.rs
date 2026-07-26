@@ -292,18 +292,37 @@ fn file_created_at(path: &Path) -> Option<String> {
     Some(datetime.to_rfc3339())
 }
 
-/// `(path, camera, lens, tag names)`
-type FtsRow = (String, Option<String>, Option<String>, Option<String>);
-
+/// `(path, camera, lens, tag names, ocr, people)` — kept for call-site docs.
 pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
-    let row: Option<FtsRow> = conn
+    let row: Option<(
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = conn
         .query_row(
             "SELECT path, camera, lens,
                 (SELECT GROUP_CONCAT(t.name, ' ') FROM asset_tags at
-                 JOIN tags t ON t.id = at.tag_id WHERE at.asset_id = assets.id)
+                 JOIN tags t ON t.id = at.tag_id WHERE at.asset_id = assets.id),
+                (SELECT text FROM asset_text WHERE asset_id = assets.id),
+                (SELECT GROUP_CONCAT(p.name, ' ') FROM faces f
+                 JOIN people p ON p.id = f.person_id
+                 WHERE f.asset_id = assets.id AND p.ignored = 0
+                   AND p.name IS NOT NULL AND TRIM(p.name) != '')
              FROM assets WHERE id = ?1",
             params![asset_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .ok();
 
@@ -312,19 +331,22 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
         params![asset_id],
     )?;
 
-    if let Some((path, camera, lens, tags)) = row {
+    if let Some((path, camera, lens, tags, ocr_text, people)) = row {
         let filename = Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         conn.execute(
-            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
             params![
                 asset_id,
                 filename,
                 tags.unwrap_or_default(),
                 camera.unwrap_or_default(),
-                lens.unwrap_or_default()
+                lens.unwrap_or_default(),
+                ocr_text.unwrap_or_default(),
+                people.unwrap_or_default()
             ],
         )?;
     }

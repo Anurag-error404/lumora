@@ -11,6 +11,18 @@ pub enum ModelKind {
     ClipImage,
     /// Encodes a text query into the same space.
     ClipText,
+    /// PP-OCR text detection (DBNet).
+    OcrDetect,
+    /// PP-OCR text recognition (CRNN/SVTR) or its character dictionary.
+    OcrRecognize,
+    /// Combined OCR job kind in `ml_jobs` (detect + recognize pipeline).
+    Ocr,
+    /// SCRFD face detection.
+    FaceDetect,
+    /// ArcFace face embedding.
+    FaceEmbed,
+    /// Combined faces job kind in `ml_jobs` (detect + embed + cluster).
+    Faces,
 }
 
 impl ModelKind {
@@ -18,6 +30,12 @@ impl ModelKind {
         match self {
             Self::ClipImage => "clip_image",
             Self::ClipText => "clip_text",
+            Self::OcrDetect => "ocr_detect",
+            Self::OcrRecognize => "ocr_recognize",
+            Self::Ocr => "ocr",
+            Self::FaceDetect => "face_detect",
+            Self::FaceEmbed => "face_embed",
+            Self::Faces => "faces",
         }
     }
 }
@@ -43,6 +61,13 @@ pub struct CatalogEntry {
 /// Semantic search bundle: CLIP ViT-B/32, exported to ONNX by Qdrant.
 /// 512-dimensional shared image/text space, MIT licensed.
 pub const SEMANTIC_BUNDLE: &str = "clip-vit-b32";
+
+/// On-device OCR bundle: RapidOCR's PP-OCRv4 mobile det+rec + charset.
+pub const OCR_BUNDLE: &str = "rapidocr-ppv4";
+
+/// On-device faces bundle: InsightFace buffalo_l (SCRFD-10G + ArcFace w600k_r50).
+/// Non-commercial research licence — see InsightFace model zoo.
+pub const FACES_BUNDLE: &str = "insightface-buffalo-l";
 
 pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
@@ -80,6 +105,66 @@ pub const CATALOG: &[CatalogEntry] = &[
         size_bytes: 2_224_147,
         dim: None,
         license: "MIT",
+    },
+    CatalogEntry {
+        id: "ocr-ppv4-det",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrDetect,
+        version: "1",
+        file_name: "ch_PP-OCRv4_det_infer.onnx",
+        url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx",
+        sha256: "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9",
+        size_bytes: 4_745_517,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv4-rec",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ch_PP-OCRv4_rec_infer.onnx",
+        url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx",
+        sha256: "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b",
+        size_bytes: 10_857_958,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv4-dict",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ppocr_keys_v1.txt",
+        url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/release/2.7/ppocr/utils/ppocr_keys_v1.txt",
+        sha256: "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7",
+        size_bytes: 26_249,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "face-scrfd-10g",
+        bundle: FACES_BUNDLE,
+        kind: ModelKind::FaceDetect,
+        version: "1",
+        file_name: "scrfd_10g_bnkps.onnx",
+        url: "https://huggingface.co/immich-app/buffalo_l/resolve/main/detection/model.onnx",
+        sha256: "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+        size_bytes: 16_923_827,
+        dim: None,
+        license: "InsightFace (non-commercial research)",
+    },
+    CatalogEntry {
+        id: "face-arcface-w600k-r50",
+        bundle: FACES_BUNDLE,
+        kind: ModelKind::FaceEmbed,
+        version: "1",
+        file_name: "arcface_w600k_r50.onnx",
+        url: "https://huggingface.co/immich-app/buffalo_l/resolve/main/recognition/model.onnx",
+        sha256: "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
+        size_bytes: 174_383_860,
+        dim: Some(512),
+        license: "InsightFace (non-commercial research)",
     },
 ];
 
@@ -154,8 +239,30 @@ mod tests {
     }
 
     #[test]
+    fn ocr_bundle_has_det_rec_and_dict() {
+        let entries: Vec<_> = bundle(OCR_BUNDLE).collect();
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().any(|e| e.kind == ModelKind::OcrDetect));
+        assert!(entries.iter().any(|e| e.file_name.ends_with(".txt")));
+        assert!(bundle_size(OCR_BUNDLE) > 10_000_000);
+        assert!(bundle_size(OCR_BUNDLE) < 20_000_000);
+    }
+
+    #[test]
     fn embedding_models_agree_on_dimension() {
         let dims: Vec<i64> = bundle(SEMANTIC_BUNDLE).filter_map(|e| e.dim).collect();
         assert!(dims.iter().all(|d| *d == 512), "got {dims:?}");
+    }
+
+    #[test]
+    fn faces_bundle_has_det_and_rec() {
+        let entries: Vec<_> = bundle(FACES_BUNDLE).collect();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|e| e.kind == ModelKind::FaceDetect));
+        assert!(entries.iter().any(|e| e.kind == ModelKind::FaceEmbed));
+        let dims: Vec<i64> = entries.iter().filter_map(|e| e.dim).collect();
+        assert_eq!(dims, vec![512]);
+        assert!(bundle_size(FACES_BUNDLE) > 180_000_000);
+        assert!(bundle_size(FACES_BUNDLE) < 220_000_000);
     }
 }

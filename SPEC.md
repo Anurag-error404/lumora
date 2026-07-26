@@ -56,6 +56,16 @@ metadata. Treated as complete, not as pending Phase 2 work.
 model registry, user-initiated download, background embedding, natural-language
 search blended with FTS. See [Phase 2 checklist](#phase-2-checklist-active).
 
+**Also delivered (Phase 2 slice):** on-device **OCR** — RapidOCR PP-OCRv4
+(detection + recognition + charset) via the same `ort` runtime; extracted text
+in `asset_text`, joined into FTS, powering Documents and Receipts smart
+collections. Opt-in via Settings → AI Features.
+
+**Also delivered (Phase 2 slice):** on-device **Faces / People** — InsightFace
+buffalo_l (SCRFD-10G + ArcFace w600k_r50, non-commercial research licence);
+background detection/clustering, People view with name/merge/detach/ignore, names
+in FTS. Opt-in via Settings → AI Features.
+
 ### Non-goals (Phase 2)
 
 - Cloud backup, sync, or multi-user collaboration.
@@ -90,8 +100,8 @@ search blended with FTS. See [Phase 2 checklist](#phase-2-checklist-active).
 | --- | --- | --- |
 | ML runtime | **ONNX Runtime (`ort` crate)** | Shipped; inference only; CoreML on macOS, CPU fallback |
 | Semantic search | CLIP ViT-B/32 image/text embeddings | Shipped; vectors in SQLite; brute-force scan |
-| Faces | Detection + embedding + clustering | Pending |
-| OCR | On-device text recognition | Pending — feeds FTS + Documents/Receipts |
+| Faces | SCRFD-10G + ArcFace w600k_r50 (InsightFace buffalo_l) via `ort` | Shipped; People view + FTS names |
+| OCR | RapidOCR PP-OCRv4 (det+rec+dict) via `ort` | Shipped; feeds FTS + Documents/Receipts |
 | Vector index | SQLite blob + brute force | ANN only if measurement demands it |
 | Model storage | App-data `models/` | User-visible, deletable; install from Settings |
 
@@ -175,10 +185,10 @@ Master-Photo-Manager/
 │   │   ├── trash/          → Soft-delete / restore
 │   │   ├── smart/          → Rule-based smart collections
 │   │   ├── vault/          → Encrypted vault (delivered)
-│   │   ├── ml/             → Model registry + ONNX inference (CLIP shipped)
-│   │   ├── faces/          → Phase 2 (pending): detect → embed → cluster → people
+│   │   ├── ml/             → Model registry + ONNX inference (CLIP + OCR shipped)
+│   │   ├── faces/          → SCRFD + ArcFace → cluster → people (shipped)
 │   │   ├── semantic/       → CLIP embeddings + vector search (shipped)
-│   │   ├── ocr/            → Phase 2 (pending): text recognition → FTS
+│   │   ├── ocr/            → RapidOCR PP-OCRv4 text recognition → FTS (shipped)
 │   │   └── logging/        → Local crash & diagnostic logs
 │   ├── migrations/         → SQL migrations (current schema version **9**)
 │   └── Cargo.toml
@@ -356,14 +366,24 @@ appearance, AI, privacy metadata, performance hints, import/export defaults
 
 **`ml_models`:** `id`, `kind`, `version`, `path`, `sha256`, `installed_at` — the model registry  
 **`asset_embeddings`:** `asset_id`, `model_id`, `vector` (blob), `dim`, `created_at`  
-**`ml_jobs`:** per-asset per-model processing state so work is resumable and incremental
+**`ml_jobs`:** per-asset per-model processing state so work is resumable and incremental  
+**`asset_text`:** `asset_id`, `text`, `lang`, `confidence`, `created_at` — OCR output, joined into FTS (`assets_fts.ocr_text`)  
+**`people`:** `id`, `name` (nullable), `cover_face_id`, `face_count`, `centroid`, `centroid_count`, `ignored`, `created_at`, `updated_at` — an ignored person keeps its centroid, so the same face keeps matching it and stays hidden  
+**`faces`:** `id`, `asset_id`, `person_id`, `bbox_*`, `score`, `embedding` (blob), `crop_path`, `detected_at`
 
-**Pending (faces / OCR / places):**
+**Pending (places):**
 
-**`faces`:** `id`, `asset_id`, `bbox`, `embedding` (blob), `quality`, `person_id` (nullable), `detected_at`  
-**`people`:** `id`, `name` (nullable until user names them), `cover_face_id`, `created_at`  
-**`asset_text`:** `asset_id`, `text`, `lang`, `confidence` — OCR output, joined into FTS  
 **`asset_places`:** `asset_id`, `lat`, `lon`, `place_label` — from GPS EXIF, reverse-geocoded offline
+
+### On-device model catalog (shipped)
+
+| Bundle | Files | Approx. size | License | Status |
+| --- | --- | --- | --- | --- |
+| `clip-vit-b32` | CLIP image ONNX, text ONNX, tokenizer | ~600 MB | MIT | Shipped |
+| `rapidocr-ppv4` | `ch_PP-OCRv4_det_infer.onnx`, `ch_PP-OCRv4_rec_infer.onnx`, `ppocr_keys_v1.txt` | ~15.6 MB | Apache-2.0 | Shipped |
+| `insightface-buffalo-l` | `scrfd_10g_bnkps.onnx`, `arcface_w600k_r50.onnx` | ~191 MB | InsightFace (non-commercial research) | Shipped |
+
+**Next:** MobileNetV4 auto-tags; captioning later (Florence-2).
 
 **Invariant:** every Phase 2 table references `assets(id)` with cascade delete and
 holds only derived data. Dropping all of them must leave a fully working Phase 1 library.
@@ -394,22 +414,29 @@ holds only derived data. Dropping all of them must leave a fully working Phase 1
 
 ### Faces / People
 
-- [ ] Detect faces, embed, and cluster without any naming required.
-- [ ] People view: browse clusters, name a person, merge / split clusters.
-- [ ] Naming a cluster makes that person searchable and filterable.
-- [ ] Face data is deletable in one action.
+- [x] Detect faces (SCRFD), embed (ArcFace 512-d), and cluster without any naming required.
+- [x] People view: browse clusters, name a person, merge / split clusters.
+- [x] Naming a cluster makes that person searchable and filterable (FTS `people` column).
+- [x] Ignore a person (People card, person header, or info-panel face chip): hidden from
+      People, search, and the info panel, and future detections of that face stay hidden.
+      Reversible from People → Ignored.
+- [x] Face data is deletable in one action (Settings → Clear face data / remove models).
+- [x] Models downloadable / removable from Settings → AI Features; face recognition
+      toggle gates the background worker; invalidate on edit save.
 
 ### OCR / text-in-image
 
-- [ ] Extract text from screenshots and document-like images.
-- [ ] Feed extracted text into FTS so existing search finds it.
-- [ ] Powers the Documents and Receipts smart collections.
+- [x] Extract text from screenshots and document-like images (RapidOCR PP-OCRv4).
+- [x] Feed extracted text into FTS so existing search finds it.
+- [x] Powers the Documents and Receipts smart collections.
+- [x] Models downloadable / removable from Settings → AI Features; OCR toggle
+      gates the background worker; clear text / invalidate on edit save.
 
 ### Smart collections (content-derived)
 
 - [x] Videos, RAW photos, Screenshots (rule-based, delivered).
-- [ ] Documents — OCR/text-density driven.
-- [ ] Receipts — OCR keyword + layout driven.
+- [x] Documents — OCR/text-density driven (length + confidence floor).
+- [x] Receipts — OCR keyword + currency-token driven.
 - [x] Selfies, panoramas, and similar EXIF/geometry rules that need no model.
 - [x] A single collection framework: rule-based and ML-backed collections share
       one definition, one query path, and one counting path.
@@ -432,9 +459,9 @@ holds only derived data. Dropping all of them must leave a fully working Phase 1
       Import & Export, Updates, About.
 - [x] Preferences persist in app-data `preferences.json`.
 - [x] Live prefs include: confirm-before-delete, double-click-to-open,
-      thumbnail size / density / animations, semantic search toggle,
-      background embedding pause, library watch toggle, privacy metadata
-      toggles, storage summary + clear/rebuild cache + optimize DB.
+      thumbnail size / density / animations, semantic search toggle, OCR toggle,
+      face recognition toggle, background embedding pause, library watch toggle,
+      privacy metadata toggles, storage summary + clear/rebuild cache + optimize DB.
 - [x] Settings shows only working controls — no disabled “Soon” placeholders.
 - [x] **Developer** page is diagnostics-only (app/DB/indexer/logs/paths);
       storage actions and AI model management live under Settings.
@@ -547,7 +574,7 @@ holds only derived data. Dropping all of them must leave a fully working Phase 1
 | Phase | Status | Scope |
 | --- | --- | --- |
 | **1 — MVP** | **Delivered** | Import, watch (+ manage UI), thumbnails (video = placeholders), metadata, albums, favourites, tags, ratings, labels, FTS + filters, timeline, recently added/viewed, recent search history + toolbar hints, Home, Hamming near-dups, trash/undo, light theme only, local logs, Settings + Developer, basic image edit (rotate/crop/exposure), **plus encrypted vault** |
-| **2 — On-device intelligence (this spec)** | **Active** | **Shipped:** model infra, CLIP semantic search (+ re-embed after edit), Selfies/Panoramas + collection framework, Settings AI/Storage. **Open:** faces/people, OCR, Documents/Receipts, places, video frame thumbs, perf baselines |
+| **2 — On-device intelligence (this spec)** | **Active** | **Shipped:** model infra, CLIP semantic search (+ re-embed after edit), OCR (RapidOCR PP-OCRv4 → FTS + Documents/Receipts), Faces/People (InsightFace buffalo_l SCRFD + ArcFace), Selfies/Panoramas + collection framework, Settings AI/Storage. **Open:** places, video frame thumbs, perf baselines, MobileNetV4 tags / captioning later |
 | **3** | Future | Advanced / non-destructive editing history, plugins, optional E2E encrypted sync, mobile, AI memories/stories, dark/system theme, auto-updates |
 
 ### Deferred settings (not shown until shipped)
@@ -559,9 +586,7 @@ in later scopes — do **not** put disabled “Soon” toggles back in the UI.
 
 | Setting | Why it waits |
 | --- | --- |
-| Face recognition / People | Needs face model + clustering UI |
-| OCR / Documents & Receipts | Needs OCR model + FTS join |
-| Object detection | Needs detector model |
+| Object detection / auto-tags | Needs MobileNetV4 (or similar) classifier |
 | Auto albums / auto-tag on import | Needs content classifiers + album rules |
 | AI device: GPU / CoreML EP picker | Runtime already targets CoreML when available; explicit picker later |
 | Background: only when idle | Needs idle detection on the job queue |
@@ -636,8 +661,10 @@ Still open (not blocking the next slices):
 - [x] Phase 2 blocking decisions locked (runtime = `ort`, user-initiated model
       download + SHA256, first capability = CLIP semantic search)
 - [x] Semantic search + Settings/Developer IA + recent searches reflected as shipped
-- [ ] Human review and approval of remaining Phase 2 scope (faces, OCR, places)
+- [x] OCR (RapidOCR PP-OCRv4) + Documents/Receipts + `asset_text` reflected as shipped
+- [x] Faces/People (InsightFace buffalo_l) + `faces`/`people` + People view reflected as shipped
+- [ ] Human review and approval of remaining Phase 2 scope (places)
 
-**Next step:** faces/People or OCR (Documents/Receipts), after recording Phase 1
+**Next step:** MobileNetV4 auto-tags; captioning later (Florence-2). Record Phase 1
 perf baselines in `docs/perf-smoke.md`. Do not expand into Phase 3 without an
 explicit SPEC update.

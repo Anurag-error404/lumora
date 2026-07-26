@@ -465,6 +465,32 @@ function AiSection({
             })
           }
         />
+        <ToggleRow
+          label="Text recognition (OCR)"
+          description="Extract text from photos on-device for search and smart collections."
+          checked={prefs.ai.ocr}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.ocr = v;
+              return p;
+            }).then(() => {
+              if (v) void api.kickOcr();
+            })
+          }
+        />
+        <ToggleRow
+          label="Face recognition"
+          description="Detect and group faces on-device for the People view."
+          checked={prefs.ai.faceRecognition}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.faceRecognition = v;
+              return p;
+            }).then(() => {
+              if (v) void api.kickFaces();
+            })
+          }
+        />
         <ChoiceRow
           label="Background processing"
           description="Pause stops new embedding work until you resume."

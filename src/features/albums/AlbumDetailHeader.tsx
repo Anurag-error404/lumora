@@ -6,15 +6,25 @@ import { fileSrc, type Album } from "../../lib/tauri";
 export function AlbumDetailHeader({
   album,
   hasSelection,
+  hasVaults,
+  lockBusy,
   onBack,
   onStartPicking,
   onOpenMoveAlbum,
+  onCreateLockedVault,
+  onAddToExistingVault,
+  onDeleteAlbum,
 }: {
   album: Album | null;
   hasSelection: boolean;
+  hasVaults: boolean;
+  lockBusy: boolean;
   onBack: () => void;
   onStartPicking: (album: Album) => void;
   onOpenMoveAlbum: () => void;
+  onCreateLockedVault: () => void;
+  onAddToExistingVault: (album: Album) => void;
+  onDeleteAlbum: (album: Album) => void;
 }) {
   return (
     <div className="album-detail-head">
@@ -23,6 +33,7 @@ export function AlbumDetailHeader({
           const cover = album.coverThumbnailPath
             ? fileSrc(album.coverThumbnailPath)
             : null;
+          const canLock = album.assetCount > 0 && !lockBusy;
           return (
             <div className="album-detail-hero">
               <div className="album-detail-cover">
@@ -41,8 +52,8 @@ export function AlbumDetailHeader({
                 <p className="muted">
                   {album.assetCount}{" "}
                   {album.assetCount === 1 ? "item" : "items"} in this album.
-                  Add photos from your library or lock the whole album from the
-                  albums grid.
+                  Add photos from your library, or move this album into an
+                  encrypted vault.
                 </p>
                 <div className="album-detail-actions">
                   <button
@@ -56,6 +67,37 @@ export function AlbumDetailHeader({
                       Add selection to album…
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={onCreateLockedVault}
+                    disabled={lockBusy}
+                    title="Create a new encrypted vault"
+                  >
+                    Create locked vault
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAddToExistingVault(album)}
+                    disabled={!canLock || !hasVaults}
+                    title={
+                      !hasVaults
+                        ? "Create a vault first"
+                        : album.assetCount === 0
+                          ? "Add photos before moving this album"
+                          : `Move ${album.name} into an existing vault`
+                    }
+                  >
+                    Add to existing vault
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => onDeleteAlbum(album)}
+                    disabled={lockBusy}
+                    title={`Delete ${album.name}`}
+                  >
+                    Delete album
+                  </button>
                 </div>
               </div>
             </div>

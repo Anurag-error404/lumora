@@ -12,11 +12,13 @@ use crate::duplicates;
 use crate::edit::{self, EditOps, EditResult, SaveMode};
 use crate::error::{AppError, AppResult};
 use crate::export;
+use crate::faces;
 use crate::history::{self, HistoryAction};
 use crate::indexer;
 use crate::indexer::queue::IndexerQueue;
 use crate::ml;
 use crate::models::*;
+use crate::ocr;
 use crate::preferences::{self, Preferences, StorageSummary};
 use crate::saved_searches;
 use crate::search;
@@ -181,9 +183,11 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
         }
     }
 
-    // Newly imported photos may need CLIP embeddings.
+    // Newly imported photos may need CLIP embeddings / OCR / faces.
     if let Some(state) = app.try_state::<AppState>() {
         state.embedder.kick();
+        state.ocr.kick();
+        state.faces.kick();
     }
 
     let _ = app.emit(
@@ -806,13 +810,61 @@ pub fn rename_album(state: State<'_, AppState>, id: String, name: String) -> App
 }
 
 #[tauri::command]
-pub fn delete_album(state: State<'_, AppState>, id: String) -> AppResult<()> {
+pub fn delete_album(
+    state: State<'_, AppState>,
+    id: String,
+    delete_assets: bool,
+) -> AppResult<usize> {
+    let (album_name, asset_ids): (String, Vec<String>) = state.with_db(|conn| {
+        let name: String = conn
+            .query_row(
+                "SELECT name FROM albums WHERE id=?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .map_err(|_| AppError::msg("album not found"))?;
+        let mut stmt = conn.prepare(
+            "SELECT aa.asset_id
+             FROM album_assets aa
+             JOIN assets a ON a.id = aa.asset_id
+             WHERE aa.album_id = ?1 AND a.deleted_at IS NULL",
+        )?;
+        let ids = stmt
+            .query_map(params![id], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok((name, ids))
+    })?;
+
+    let mut trashed = 0usize;
+    if delete_assets && !asset_ids.is_empty() {
+        trashed = state.with_db(|conn| trash::soft_delete(conn, &asset_ids))?;
+        push_history(
+            &state,
+            "trash",
+            format!("Moved {trashed} item(s) to trash with album “{album_name}”"),
+            Some(&id),
+            HistoryAction::Restore {
+                asset_ids: asset_ids.clone(),
+            },
+            HistoryAction::SoftDelete {
+                asset_ids: asset_ids.clone(),
+            },
+        )?;
+    }
+
     state.with_db(|conn| {
         conn.execute("DELETE FROM albums WHERE id=?1", params![id])?;
+        history::record_activity(
+            conn,
+            "album",
+            &format!("Deleted album “{album_name}”"),
+            Some(&id),
+        )?;
         Ok(())
     })?;
     state.history.lock().invalidate_album(&id);
-    Ok(())
+    Ok(trashed)
 }
 
 #[tauri::command]
@@ -1223,6 +1275,8 @@ pub fn remove_ml_model(state: State<'_, AppState>, id: String) -> AppResult<ml::
         ml::status(conn, &models_dir)
     })?;
     state.embedder.invalidate();
+    state.ocr.invalidate();
+    state.faces.invalidate();
     Ok(status)
 }
 
@@ -1258,6 +1312,281 @@ pub fn embed_progress(state: State<'_, AppState>) -> AppResult<semantic::worker:
 pub fn kick_embedding(state: State<'_, AppState>) -> AppResult<()> {
     state.embedder.kick();
     Ok(())
+}
+
+/// Download the RapidOCR PP-OCRv4 bundle (det + rec + dict).
+#[tauri::command]
+pub async fn install_ocr_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let (db_path, models_dir, app_data) = {
+        let state = app.state::<AppState>();
+        (
+            state.paths.db_path.clone(),
+            state.paths.models_dir.clone(),
+            state.paths.app_data.clone(),
+        )
+    };
+
+    let app_for_job = app.clone();
+    let dir_for_job = models_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        let entries: Vec<_> = ml::catalog::bundle(ml::catalog::OCR_BUNDLE).collect();
+        let total_files = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            let app_progress = app_for_job.clone();
+            let file_label = entry.file_name.to_string();
+            ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
+                let _ = app_progress.emit(
+                    "model-progress",
+                    ModelProgressEvent {
+                        model_id: file_label.clone(),
+                        file_index: index as u32 + 1,
+                        file_count: total_files as u32,
+                        downloaded: done,
+                        total,
+                    },
+                );
+            })?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("OCR install task failed: {e}")))??;
+
+    // Turn OCR on once models are present so the worker actually runs.
+    if let Ok(mut prefs) = preferences::load(&app_data) {
+        prefs.ai.ocr = true;
+        let _ = preferences::save(&app_data, &prefs);
+    }
+
+    let state = app.state::<AppState>();
+    state.ocr.invalidate();
+    state.ocr.kick();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrStatusDto {
+    pub model_ready: bool,
+    pub enabled: bool,
+    pub done: i64,
+    pub total: i64,
+}
+
+#[tauri::command]
+pub fn ocr_status(state: State<'_, AppState>) -> AppResult<OcrStatusDto> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| {
+        let cov = ocr::coverage(conn)?;
+        Ok(OcrStatusDto {
+            model_ready: ocr::ocr_ready(conn)?,
+            enabled: prefs.ai.ocr,
+            done: cov.done,
+            total: cov.total,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn ocr_progress(state: State<'_, AppState>) -> AppResult<ocr::worker::OcrProgress> {
+    state.ocr.progress()
+}
+
+#[tauri::command]
+pub fn kick_ocr(state: State<'_, AppState>) -> AppResult<()> {
+    state.ocr.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_ocr_text(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(ocr::clear_all)?;
+    state.ocr.kick();
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn get_asset_text(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Option<ocr::AssetText>> {
+    state.with_db(|conn| ocr::get_asset_text(conn, &asset_id))
+}
+
+/// Download InsightFace buffalo_l (SCRFD + ArcFace).
+#[tauri::command]
+pub async fn install_face_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let (db_path, models_dir, app_data) = {
+        let state = app.state::<AppState>();
+        (
+            state.paths.db_path.clone(),
+            state.paths.models_dir.clone(),
+            state.paths.app_data.clone(),
+        )
+    };
+
+    let app_for_job = app.clone();
+    let dir_for_job = models_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        let entries: Vec<_> = ml::catalog::bundle(ml::catalog::FACES_BUNDLE).collect();
+        let total_files = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            let app_progress = app_for_job.clone();
+            let file_label = entry.file_name.to_string();
+            ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
+                let _ = app_progress.emit(
+                    "model-progress",
+                    ModelProgressEvent {
+                        model_id: file_label.clone(),
+                        file_index: index as u32 + 1,
+                        file_count: total_files as u32,
+                        downloaded: done,
+                        total,
+                    },
+                );
+            })?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("faces install task failed: {e}")))??;
+
+    if let Ok(mut prefs) = preferences::load(&app_data) {
+        prefs.ai.face_recognition = true;
+        let _ = preferences::save(&app_data, &prefs);
+    }
+
+    let state = app.state::<AppState>();
+    state.faces.invalidate();
+    state.faces.kick();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FacesStatusDto {
+    pub model_ready: bool,
+    pub enabled: bool,
+    pub done: i64,
+    pub total: i64,
+    pub people_count: i64,
+}
+
+#[tauri::command]
+pub fn faces_status(state: State<'_, AppState>) -> AppResult<FacesStatusDto> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| {
+        let cov = faces::coverage(conn)?;
+        let people_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM people WHERE face_count > 0",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(FacesStatusDto {
+            model_ready: faces::faces_ready(conn)?,
+            enabled: prefs.ai.face_recognition,
+            done: cov.done,
+            total: cov.total,
+            people_count,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn faces_progress(state: State<'_, AppState>) -> AppResult<faces::worker::FacesProgress> {
+    state.faces.progress()
+}
+
+#[tauri::command]
+pub fn kick_faces(state: State<'_, AppState>) -> AppResult<()> {
+    state.faces.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_face_data(state: State<'_, AppState>) -> AppResult<usize> {
+    let faces_dir = state.paths.faces_dir.clone();
+    let n = state.with_db(|conn| faces::clear_all(conn, &faces_dir))?;
+    state.faces.invalidate();
+    state.faces.kick();
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn list_people(state: State<'_, AppState>) -> AppResult<Vec<faces::Person>> {
+    state.with_db(faces::list_people)
+}
+
+#[tauri::command]
+pub fn list_ignored_people(state: State<'_, AppState>) -> AppResult<Vec<faces::Person>> {
+    state.with_db(faces::list_ignored_people)
+}
+
+/// Hide a person from People and search. The cluster is kept, so the same face
+/// stays hidden when it turns up in future imports.
+#[tauri::command]
+pub fn set_person_ignored(
+    state: State<'_, AppState>,
+    person_id: String,
+    ignored: bool,
+) -> AppResult<()> {
+    state.with_db(|conn| faces::set_ignored(conn, &person_id, ignored))
+}
+
+#[tauri::command]
+pub fn list_person_assets(
+    state: State<'_, AppState>,
+    person_id: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| faces::list_person_assets(conn, &person_id, limit, offset))
+}
+
+#[tauri::command]
+pub fn rename_person(
+    state: State<'_, AppState>,
+    person_id: String,
+    name: String,
+) -> AppResult<()> {
+    state.with_db(|conn| faces::cluster::rename(conn, &person_id, &name))
+}
+
+#[tauri::command]
+pub fn merge_people(
+    state: State<'_, AppState>,
+    into_id: String,
+    from_id: String,
+) -> AppResult<()> {
+    state.with_db(|conn| faces::cluster::merge(conn, &into_id, &from_id))
+}
+
+#[tauri::command]
+pub fn detach_face(state: State<'_, AppState>, face_id: String) -> AppResult<String> {
+    state.with_db(|conn| faces::cluster::detach(conn, &face_id))
+}
+
+#[tauri::command]
+pub fn list_asset_faces(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Vec<faces::FaceBox>> {
+    state.with_db(|conn| faces::list_asset_faces(conn, &asset_id))
+}
+
+#[tauri::command]
+pub fn recluster_faces(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(faces::cluster::recluster_unnamed)?;
+    state.faces.kick();
+    Ok(n)
 }
 
 /// Natural-language search over CLIP embeddings.
@@ -1571,6 +1900,8 @@ pub fn apply_image_edit(
         history::record_activity(conn, "edit", &label, Some(&result.asset.id))
     });
     state.embedder.kick();
+    state.ocr.kick();
+    state.faces.kick();
     Ok(result)
 }
 

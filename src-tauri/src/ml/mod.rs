@@ -54,9 +54,17 @@ pub struct ModelInfo {
 pub struct MlStatus {
     /// Every file of the semantic bundle is installed and verified.
     pub semantic_ready: bool,
+    /// Every file of the OCR bundle is installed and verified.
+    pub ocr_ready: bool,
+    /// Every file of the faces bundle is installed and verified.
+    pub faces_ready: bool,
     pub models: Vec<ModelInfo>,
     /// Bytes the semantic bundle would download if not yet installed.
     pub semantic_download_bytes: u64,
+    /// Bytes the OCR bundle would download if not yet installed.
+    pub ocr_download_bytes: u64,
+    /// Bytes the faces bundle would download if not yet installed.
+    pub faces_download_bytes: u64,
     pub installed_bytes: u64,
     pub models_dir: String,
 }
@@ -85,7 +93,11 @@ pub fn status(conn: &Connection, models_dir: &Path) -> AppResult<MlStatus> {
 
     Ok(MlStatus {
         semantic_ready: semantic_ready(conn)?,
+        ocr_ready: ocr_ready(conn)?,
+        faces_ready: faces_ready(conn)?,
         semantic_download_bytes: catalog::bundle_size(catalog::SEMANTIC_BUNDLE),
+        ocr_download_bytes: catalog::bundle_size(catalog::OCR_BUNDLE),
+        faces_download_bytes: catalog::bundle_size(catalog::FACES_BUNDLE),
         installed_bytes,
         models_dir: models_dir.display().to_string(),
         models,
@@ -96,6 +108,26 @@ pub fn status(conn: &Connection, models_dir: &Path) -> AppResult<MlStatus> {
 /// A half-installed bundle is treated as not ready.
 pub fn semantic_ready(conn: &Connection) -> AppResult<bool> {
     for entry in catalog::bundle(catalog::SEMANTIC_BUNDLE) {
+        if installed_row(conn, entry.id)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// True only when every file of the OCR bundle is present in the registry.
+pub fn ocr_ready(conn: &Connection) -> AppResult<bool> {
+    for entry in catalog::bundle(catalog::OCR_BUNDLE) {
+        if installed_row(conn, entry.id)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// True only when every file of the faces bundle is present in the registry.
+pub fn faces_ready(conn: &Connection) -> AppResult<bool> {
+    for entry in catalog::bundle(catalog::FACES_BUNDLE) {
         if installed_row(conn, entry.id)?.is_none() {
             return Ok(false);
         }
@@ -285,6 +317,39 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
             "DELETE FROM ml_jobs WHERE kind = ?1",
             params![entry.kind.as_str()],
         )?;
+        // Removing any OCR bundle file makes the pipeline unusable — drop text.
+        if entry.bundle == catalog::OCR_BUNDLE {
+            let ids: Vec<String> = {
+                let mut stmt = conn.prepare("SELECT asset_id FROM asset_text")?;
+                let rows = stmt.query_map([], |r| r.get(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            conn.execute("DELETE FROM asset_text", [])?;
+            conn.execute(
+                "DELETE FROM ml_jobs WHERE kind = ?1",
+                params![ModelKind::Ocr.as_str()],
+            )?;
+            for asset_id in ids {
+                let _ = crate::indexer::refresh_fts(conn, &asset_id);
+            }
+        }
+        // Removing any faces bundle file drops derived face/person data.
+        if entry.bundle == catalog::FACES_BUNDLE {
+            let ids: Vec<String> = {
+                let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM faces")?;
+                let rows = stmt.query_map([], |r| r.get(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            conn.execute("DELETE FROM faces", [])?;
+            conn.execute("DELETE FROM people", [])?;
+            conn.execute(
+                "DELETE FROM ml_jobs WHERE kind = ?1",
+                params![ModelKind::Faces.as_str()],
+            )?;
+            for asset_id in ids {
+                let _ = crate::indexer::refresh_fts(conn, &asset_id);
+            }
+        }
     }
     tracing::info!(model = id, "model removed");
     Ok(())
@@ -324,9 +389,13 @@ mod tests {
         let (dir, conn) = open();
         let st = status(&conn, dir.path()).unwrap();
         assert!(!st.semantic_ready);
+        assert!(!st.ocr_ready);
+        assert!(!st.faces_ready);
         assert!(st.models.iter().all(|m| !m.installed));
         assert_eq!(st.installed_bytes, 0);
         assert!(st.semantic_download_bytes > 0);
+        assert!(st.ocr_download_bytes > 0);
+        assert!(st.faces_download_bytes > 0);
     }
 
     #[test]
