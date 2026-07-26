@@ -8,6 +8,10 @@ pub mod error;
 mod edit;
 mod export;
 mod faces;
+/// ONNX Runtime glibc < 2.38 link shim (Linux gnu only).
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[allow(dead_code)]
+mod glibc_compat;
 mod history;
 mod indexer;
 mod logging;
