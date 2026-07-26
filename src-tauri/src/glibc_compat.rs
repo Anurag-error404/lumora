@@ -86,14 +86,3 @@ pub unsafe extern "C" fn __isoc23_strtoull_l(
 ) -> c_ulonglong {
     strtoull_l(nptr, endptr, base, locale)
 }
-
-/// Keep shim symbols reachable under LTO so the linker can resolve ort's refs.
-#[used]
-static KEEP_ISOC23_SHIMS: [*const (); 6] = [
-    __isoc23_strtol as *const (),
-    __isoc23_strtoll as *const (),
-    __isoc23_strtoul as *const (),
-    __isoc23_strtoull as *const (),
-    __isoc23_strtoll_l as *const (),
-    __isoc23_strtoull_l as *const (),
-];
