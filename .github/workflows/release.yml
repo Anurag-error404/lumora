@@ -1,0 +1,97 @@
+# Builds LUMORA installers and publishes a GitHub Release with auto-generated notes.
+# Artifacts: macOS .dmg, Windows .exe/.msi, Linux .AppImage/.deb
+#
+# Trigger:
+#   1. Push a version tag matching package.json / tauri.conf.json, e.g. v0.1.0
+#   2. Or run this workflow manually from the Actions tab
+#
+# Based on: https://v2.tauri.app/distribute/pipelines/github/
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            label: macOS Apple Silicon
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            label: macOS Intel
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            label: Linux x64
+            args: ''
+          - platform: windows-latest
+            label: Windows x64
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and upload to GitHub Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: LUMORA v__VERSION__
+          releaseBody: |
+            ## Install
+
+            Download the installer for your platform from the assets below:
+
+            | Platform | File |
+            | --- | --- |
+            | macOS (Apple Silicon / Intel) | `.dmg` |
+            | Windows | `.exe` (NSIS) or `.msi` |
+            | Linux | `.AppImage` or `.deb` |
+
+            Builds are unsigned. On macOS, if Gatekeeper blocks the app: right-click the app → Open.
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          tauriScript: bun run tauri
+          args: ${{ matrix.args }}
