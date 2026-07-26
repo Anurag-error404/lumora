@@ -10,6 +10,7 @@
 
 pub mod catalog;
 pub mod clip;
+pub mod library;
 pub mod preprocess;
 pub mod vector;
 
@@ -58,6 +59,8 @@ pub struct MlStatus {
     pub ocr_ready: bool,
     /// Every file of the faces bundle is installed and verified.
     pub faces_ready: bool,
+    /// Every file of the auto-tags bundle is installed and verified.
+    pub tags_ready: bool,
     pub models: Vec<ModelInfo>,
     /// Bytes the semantic bundle would download if not yet installed.
     pub semantic_download_bytes: u64,
@@ -65,6 +68,8 @@ pub struct MlStatus {
     pub ocr_download_bytes: u64,
     /// Bytes the faces bundle would download if not yet installed.
     pub faces_download_bytes: u64,
+    /// Bytes the auto-tags bundle would download if not yet installed.
+    pub tags_download_bytes: u64,
     pub installed_bytes: u64,
     pub models_dir: String,
 }
@@ -95,13 +100,85 @@ pub fn status(conn: &Connection, models_dir: &Path) -> AppResult<MlStatus> {
         semantic_ready: semantic_ready(conn)?,
         ocr_ready: ocr_ready(conn)?,
         faces_ready: faces_ready(conn)?,
+        tags_ready: tags_ready(conn)?,
         semantic_download_bytes: catalog::bundle_size(catalog::SEMANTIC_BUNDLE),
         ocr_download_bytes: catalog::bundle_size(catalog::OCR_BUNDLE),
         faces_download_bytes: catalog::bundle_size(catalog::FACES_BUNDLE),
+        tags_download_bytes: catalog::bundle_size(catalog::TAGS_BUNDLE),
         installed_bytes,
         models_dir: models_dir.display().to_string(),
         models,
     })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryOptionStatus {
+    pub id: String,
+    pub capability: String,
+    pub capability_label: String,
+    pub name: String,
+    pub summary: String,
+    pub runtime: String,
+    pub license: String,
+    pub bundle: Option<String>,
+    pub download_bytes: u64,
+    pub installed: bool,
+    pub active: bool,
+    pub available: bool,
+    pub input_size: Option<u32>,
+}
+
+/// Snapshot of every pluggable backend and which one is active / installed.
+pub fn library_status(
+    conn: &Connection,
+    prefs: &crate::preferences::AiPrefs,
+) -> AppResult<Vec<LibraryOptionStatus>> {
+    let mut out = Vec::new();
+    for opt in library::LIBRARY {
+        let installed = match opt.bundle {
+            Some(bundle) => bundle_ready(conn, bundle)?,
+            None => matches!(opt.runtime, library::RuntimeKind::Native),
+        };
+        let active_id = match opt.capability {
+            library::Capability::SemanticSearch => prefs.semantic_model.as_str(),
+            library::Capability::Ocr => prefs.ocr_model.as_str(),
+            library::Capability::Faces => prefs.faces_model.as_str(),
+            library::Capability::AutoTags => prefs.tags_model.as_str(),
+            library::Capability::Duplicates | library::Capability::BlurDetection => {
+                library::default_option(opt.capability).id
+            }
+        };
+        let active = library::resolve_active(opt.capability, active_id).id == opt.id;
+        out.push(LibraryOptionStatus {
+            id: opt.id.to_string(),
+            capability: opt.capability.as_str().to_string(),
+            capability_label: opt.capability.label().to_string(),
+            name: opt.name.to_string(),
+            summary: opt.summary.to_string(),
+            runtime: match opt.runtime {
+                library::RuntimeKind::Onnx => "onnx".into(),
+                library::RuntimeKind::Native => "native".into(),
+            },
+            license: opt.license.to_string(),
+            bundle: opt.bundle.map(|b| b.to_string()),
+            download_bytes: opt.bundle.map(catalog::bundle_size).unwrap_or(0),
+            installed,
+            active,
+            available: true,
+            input_size: opt.input_size,
+        });
+    }
+    Ok(out)
+}
+
+fn bundle_ready(conn: &Connection, bundle: &str) -> AppResult<bool> {
+    for entry in catalog::bundle(bundle) {
+        if installed_row(conn, entry.id)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// True only when every file of the semantic bundle is present in the registry.
@@ -128,6 +205,16 @@ pub fn ocr_ready(conn: &Connection) -> AppResult<bool> {
 /// True only when every file of the faces bundle is present in the registry.
 pub fn faces_ready(conn: &Connection) -> AppResult<bool> {
     for entry in catalog::bundle(catalog::FACES_BUNDLE) {
+        if installed_row(conn, entry.id)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// True only when every file of the auto-tags bundle is present in the registry.
+pub fn tags_ready(conn: &Connection) -> AppResult<bool> {
+    for entry in catalog::bundle(catalog::TAGS_BUNDLE) {
         if installed_row(conn, entry.id)?.is_none() {
             return Ok(false);
         }
@@ -243,6 +330,9 @@ pub fn register_verified(
 ///
 /// Downloads to a `.part` file and only moves it into place after the checksum
 /// matches, so an interrupted download can never be mistaken for a model.
+///
+/// Entries with an `embedded://` URL are written from the app binary instead
+/// of the network (used for small companion files like ImageNet labels).
 pub fn download_and_install(
     conn: &Connection,
     models_dir: &Path,
@@ -254,6 +344,24 @@ pub fn download_and_install(
 
     // Already there and still valid? Re-register rather than re-download.
     if final_path.exists() && file_sha256(&final_path)? == entry.sha256 {
+        return register_verified(conn, entry, &final_path);
+    }
+
+    if let Some(embedded) = entry.url.strip_prefix("embedded://") {
+        let bytes: &[u8] = match embedded {
+            "imagenet_labels.txt" => {
+                include_bytes!("../../resources/imagenet_labels.txt")
+            }
+            other => {
+                return Err(AppError::msg(format!(
+                    "unknown embedded model resource '{other}' for '{}'",
+                    entry.id
+                )));
+            }
+        };
+        on_progress(0, entry.size_bytes);
+        std::fs::write(&final_path, bytes)?;
+        on_progress(entry.size_bytes, entry.size_bytes);
         return register_verified(conn, entry, &final_path);
     }
 
@@ -317,8 +425,25 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
             "DELETE FROM ml_jobs WHERE kind = ?1",
             params![entry.kind.as_str()],
         )?;
+        // Removing any faces bundle file drops derived face/person data.
+        if entry.bundle == catalog::FACES_BUNDLE || entry.bundle == catalog::FACES_BUNDLE_S {
+            let ids: Vec<String> = {
+                let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM faces")?;
+                let rows = stmt.query_map([], |r| r.get(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            conn.execute("DELETE FROM faces", [])?;
+            conn.execute("DELETE FROM people", [])?;
+            conn.execute(
+                "DELETE FROM ml_jobs WHERE kind = ?1",
+                params![ModelKind::Faces.as_str()],
+            )?;
+            for asset_id in ids {
+                let _ = crate::indexer::refresh_fts(conn, &asset_id);
+            }
+        }
         // Removing any OCR bundle file makes the pipeline unusable — drop text.
-        if entry.bundle == catalog::OCR_BUNDLE {
+        if entry.bundle == catalog::OCR_BUNDLE || entry.bundle == catalog::OCR_BUNDLE_V3 {
             let ids: Vec<String> = {
                 let mut stmt = conn.prepare("SELECT asset_id FROM asset_text")?;
                 let rows = stmt.query_map([], |r| r.get(0))?;
@@ -333,18 +458,17 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
                 let _ = crate::indexer::refresh_fts(conn, &asset_id);
             }
         }
-        // Removing any faces bundle file drops derived face/person data.
-        if entry.bundle == catalog::FACES_BUNDLE {
+        // Removing any auto-tags bundle file drops derived labels.
+        if entry.bundle == catalog::TAGS_BUNDLE || entry.bundle == catalog::TAGS_BUNDLE_MEDIUM {
             let ids: Vec<String> = {
-                let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM faces")?;
+                let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM asset_labels")?;
                 let rows = stmt.query_map([], |r| r.get(0))?;
                 rows.filter_map(|r| r.ok()).collect()
             };
-            conn.execute("DELETE FROM faces", [])?;
-            conn.execute("DELETE FROM people", [])?;
+            conn.execute("DELETE FROM asset_labels", [])?;
             conn.execute(
                 "DELETE FROM ml_jobs WHERE kind = ?1",
-                params![ModelKind::Faces.as_str()],
+                params![ModelKind::Tags.as_str()],
             )?;
             for asset_id in ids {
                 let _ = crate::indexer::refresh_fts(conn, &asset_id);

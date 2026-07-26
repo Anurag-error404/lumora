@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -11,7 +12,9 @@ use crate::faces::worker::FaceWorker;
 use crate::history::HistoryStacks;
 use crate::indexer::queue::IndexerQueue;
 use crate::ocr::worker::OcrWorker;
+use crate::places::worker::PlacesWorker;
 use crate::semantic::worker::EmbedWorker;
+use crate::tags::worker::TagsWorker;
 
 /// An unlocked vault session: holds the vault id and decrypted master key in
 /// memory only. The key is wiped when the session is dropped (lock / app exit).
@@ -74,12 +77,17 @@ pub struct AppState {
     pub embedder: Arc<EmbedWorker>,
     pub ocr: Arc<OcrWorker>,
     pub faces: Arc<FaceWorker>,
+    pub places: Arc<PlacesWorker>,
+    pub tags: Arc<TagsWorker>,
     pub history: Mutex<HistoryStacks>,
+    /// Set to true by `cancel_import` to abort an in-flight import.
+    pub import_cancel: Arc<AtomicBool>,
     /// `Some` while the privacy vault is unlocked for this session.
     pub vault: Mutex<Option<VaultSession>>,
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         paths: AppPaths,
         db: Connection,
@@ -87,6 +95,8 @@ impl AppState {
         embedder: Arc<EmbedWorker>,
         ocr: Arc<OcrWorker>,
         faces: Arc<FaceWorker>,
+        places: Arc<PlacesWorker>,
+        tags: Arc<TagsWorker>,
     ) -> Self {
         Self {
             paths,
@@ -95,7 +105,10 @@ impl AppState {
             embedder,
             ocr,
             faces,
+            places,
+            tags,
             history: Mutex::new(HistoryStacks::default()),
+            import_cancel: Arc::new(AtomicBool::new(false)),
             vault: Mutex::new(None),
         }
     }

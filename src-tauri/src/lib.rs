@@ -1,4 +1,5 @@
 mod albums;
+mod blur;
 mod commands;
 mod db;
 mod diagnostics;
@@ -13,12 +14,14 @@ mod logging;
 mod ml;
 mod models;
 mod ocr;
+mod places;
 mod preferences;
 mod saved_searches;
 mod search;
 mod semantic;
 mod smart;
 mod state;
+mod tags;
 mod thumbnails;
 mod trash;
 mod vault;
@@ -62,6 +65,13 @@ pub fn run() {
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = %e, "thumbnail repair skipped"),
             }
+            match faces::repair_missing_face_crops(&conn) {
+                Ok(n) if n > 0 => {
+                    tracing::info!(cleared = n, "cleared missing face crop paths")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "face crop repair skipped"),
+            }
             let indexer =
                 commands::bootstrap_indexer(paths.db_path.clone(), paths.thumbs_dir.clone());
             let embedder = semantic::worker::EmbedWorker::new(
@@ -76,6 +86,11 @@ pub fn run() {
                 paths.db_path.clone(),
                 paths.app_data.clone(),
             );
+            let places = places::worker::PlacesWorker::new(paths.db_path.clone());
+            let tags = tags::worker::TagsWorker::new(
+                paths.db_path.clone(),
+                paths.app_data.clone(),
+            );
             let state = AppState::new(
                 paths,
                 conn,
@@ -83,6 +98,8 @@ pub fn run() {
                 Arc::clone(&embedder),
                 Arc::clone(&ocr),
                 Arc::clone(&faces),
+                Arc::clone(&places),
+                Arc::clone(&tags),
             );
 
             let watch_service = Arc::new(watcher::WatcherService::new());
@@ -104,6 +121,7 @@ pub fn run() {
             get_library_stats,
             import_folder,
             import_paths,
+            cancel_import,
             list_assets,
             search_assets,
             get_index_progress,
@@ -162,6 +180,17 @@ pub fn run() {
             faces_progress,
             kick_faces,
             clear_face_data,
+            install_tags_models,
+            tags_status,
+            tags_progress,
+            kick_tags,
+            clear_auto_tags,
+            list_asset_labels,
+            list_import_runs,
+            model_library,
+            install_model_option,
+            set_active_model,
+            reprocess_ai,
             list_people,
             list_ignored_people,
             set_person_ignored,
@@ -171,7 +200,14 @@ pub fn run() {
             detach_face,
             list_asset_faces,
             recluster_faces,
+            list_places,
+            list_place_assets,
+            places_progress,
+            kick_places,
+            clear_places,
             find_duplicates,
+            list_blurry_assets,
+            scan_blur_scores,
             list_assets_by_ids,
             soft_delete_assets,
             restore_assets,

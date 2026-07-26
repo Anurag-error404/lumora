@@ -23,6 +23,10 @@ pub enum ModelKind {
     FaceEmbed,
     /// Combined faces job kind in `ml_jobs` (detect + embed + cluster).
     Faces,
+    /// MobileNetV4 ImageNet classifier (or its labels file).
+    AutoTag,
+    /// Combined auto-tags job kind in `ml_jobs`.
+    Tags,
 }
 
 impl ModelKind {
@@ -36,6 +40,8 @@ impl ModelKind {
             Self::FaceDetect => "face_detect",
             Self::FaceEmbed => "face_embed",
             Self::Faces => "faces",
+            Self::AutoTag => "auto_tag",
+            Self::Tags => "tags",
         }
     }
 }
@@ -68,6 +74,18 @@ pub const OCR_BUNDLE: &str = "rapidocr-ppv4";
 /// On-device faces bundle: InsightFace buffalo_l (SCRFD-10G + ArcFace w600k_r50).
 /// Non-commercial research licence — see InsightFace model zoo.
 pub const FACES_BUNDLE: &str = "insightface-buffalo-l";
+
+/// ImageNet auto-tags: MobileNetV4-Conv-Small (timm) + class labels.
+pub const TAGS_BUNDLE: &str = "mobilenetv4-in1k";
+
+/// Lighter InsightFace buffalo_s (SCRFD + ArcFace).
+pub const FACES_BUNDLE_S: &str = "insightface-buffalo-s";
+
+/// RapidOCR PP-OCRv3 mobile (smaller than v4).
+pub const OCR_BUNDLE_V3: &str = "rapidocr-ppv3";
+
+/// ImageNet auto-tags: MobileNetV4-Conv-Medium at 256².
+pub const TAGS_BUNDLE_MEDIUM: &str = "mobilenetv4-medium-in1k";
 
 pub const CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
@@ -166,6 +184,118 @@ pub const CATALOG: &[CatalogEntry] = &[
         dim: Some(512),
         license: "InsightFace (non-commercial research)",
     },
+    CatalogEntry {
+        id: "mobilenetv4-small-in1k",
+        bundle: TAGS_BUNDLE,
+        kind: ModelKind::AutoTag,
+        version: "1",
+        file_name: "mobilenetv4_conv_small_in1k.onnx",
+        url: "https://huggingface.co/onnx-community/mobilenetv4_conv_small.e2400_r224_in1k/resolve/main/onnx/model.onnx",
+        sha256: "ca5b8dbf490f54e83c5d72f787821565447ea94347935f6b834cf0a4af0e8d37",
+        size_bytes: 15_086_122,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "mobilenetv4-in1k-labels",
+        bundle: TAGS_BUNDLE,
+        kind: ModelKind::AutoTag,
+        version: "1",
+        file_name: "imagenet_labels.txt",
+        // Served from the app binary (see download_and_install embedded:// handling).
+        url: "embedded://imagenet_labels.txt",
+        sha256: "4eb3da435cf544e4a6f390f62c84cb9c9bb68cf8b14e97f8a063452382e5efd2",
+        size_bytes: 21_675,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    // —— Faces buffalo_s ——
+    CatalogEntry {
+        id: "face-scrfd-buffalo-s",
+        bundle: FACES_BUNDLE_S,
+        kind: ModelKind::FaceDetect,
+        version: "1",
+        file_name: "scrfd_buffalo_s.onnx",
+        url: "https://huggingface.co/immich-app/buffalo_s/resolve/main/detection/model.onnx",
+        sha256: "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a",
+        size_bytes: 2_524_817,
+        dim: None,
+        license: "InsightFace (non-commercial research)",
+    },
+    CatalogEntry {
+        id: "face-arcface-buffalo-s",
+        bundle: FACES_BUNDLE_S,
+        kind: ModelKind::FaceEmbed,
+        version: "1",
+        file_name: "arcface_buffalo_s.onnx",
+        url: "https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx",
+        sha256: "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f",
+        size_bytes: 13_616_099,
+        dim: Some(512),
+        license: "InsightFace (non-commercial research)",
+    },
+    // —— OCR PP-OCRv3 ——
+    CatalogEntry {
+        id: "ocr-ppv3-det",
+        bundle: OCR_BUNDLE_V3,
+        kind: ModelKind::OcrDetect,
+        version: "1",
+        file_name: "ch_PP-OCRv3_det_infer.onnx",
+        url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv3/ch_PP-OCRv3_det_infer.onnx",
+        sha256: "3439588c030faea393a54515f51e983d8e155b19a2e8aba7891934c1cf0de526",
+        size_bytes: 2_432_880,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv3-rec",
+        bundle: OCR_BUNDLE_V3,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ch_PP-OCRv3_rec_infer.onnx",
+        url: "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv3/ch_PP-OCRv3_rec_infer.onnx",
+        sha256: "897a3ededb38fee0dae2c1ccee38241f37df202c9509e3abca02e9217c5ee615",
+        size_bytes: 10_690_752,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv3-dict",
+        bundle: OCR_BUNDLE_V3,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ppocr_keys_v1_ppv3.txt",
+        url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/release/2.7/ppocr/utils/ppocr_keys_v1.txt",
+        sha256: "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7",
+        size_bytes: 26_249,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    // —— MobileNetV4 medium ——
+    CatalogEntry {
+        id: "mobilenetv4-medium-in1k",
+        bundle: TAGS_BUNDLE_MEDIUM,
+        kind: ModelKind::AutoTag,
+        version: "1",
+        file_name: "mobilenetv4_conv_medium_in1k.onnx",
+        url: "https://huggingface.co/onnx-community/mobilenetv4_conv_medium.e500_r256_in1k/resolve/main/onnx/model.onnx",
+        sha256: "f67257da6f91c00cd1d063a61a377718f004305c1299360a5c077e4c2b02b67a",
+        size_bytes: 38_790_007,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "mobilenetv4-medium-labels",
+        bundle: TAGS_BUNDLE_MEDIUM,
+        kind: ModelKind::AutoTag,
+        version: "1",
+        file_name: "imagenet_labels_medium.txt",
+        url: "embedded://imagenet_labels.txt",
+        sha256: "4eb3da435cf544e4a6f390f62c84cb9c9bb68cf8b14e97f8a063452382e5efd2",
+        size_bytes: 21_675,
+        dim: None,
+        license: "Apache-2.0",
+    },
 ];
 
 pub fn entry(id: &str) -> Option<&'static CatalogEntry> {
@@ -211,8 +341,8 @@ mod tests {
     fn every_entry_downloads_over_https() {
         for e in CATALOG {
             assert!(
-                e.url.starts_with("https://"),
-                "{} must download over https",
+                e.url.starts_with("https://") || e.url.starts_with("embedded://"),
+                "{} must download over https or be embedded",
                 e.id
             );
         }
@@ -264,5 +394,24 @@ mod tests {
         assert_eq!(dims, vec![512]);
         assert!(bundle_size(FACES_BUNDLE) > 180_000_000);
         assert!(bundle_size(FACES_BUNDLE) < 220_000_000);
+    }
+
+    #[test]
+    fn tags_bundle_has_model_and_labels() {
+        let entries: Vec<_> = bundle(TAGS_BUNDLE).collect();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|e| e.file_name.ends_with(".onnx")));
+        assert!(entries.iter().any(|e| e.file_name.ends_with(".txt")));
+        assert!(bundle_size(TAGS_BUNDLE) > 15_000_000);
+        assert!(bundle_size(TAGS_BUNDLE) < 20_000_000);
+    }
+
+    #[test]
+    fn alternate_bundles_are_complete() {
+        assert_eq!(bundle(FACES_BUNDLE_S).count(), 2);
+        assert_eq!(bundle(OCR_BUNDLE_V3).count(), 3);
+        assert_eq!(bundle(TAGS_BUNDLE_MEDIUM).count(), 2);
+        assert!(bundle_size(FACES_BUNDLE_S) < 20_000_000);
+        assert!(bundle_size(TAGS_BUNDLE_MEDIUM) > 30_000_000);
     }
 }

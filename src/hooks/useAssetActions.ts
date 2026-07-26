@@ -217,27 +217,51 @@ export function useAssetActions({
     }
   }
 
-  async function cleanupAllDupes() {
-    if (!dupes.length) return;
-    // An asset can appear in both an exact and a near group; never trash a keeper.
-    const keep = new Set(dupes.map((g) => g.assetIds[0]));
+  async function cleanupExactDupes() {
+    const exact = dupes.filter((g) => g.kind === "exact");
+    if (!exact.length) return;
+    const keep = new Set(exact.map((g) => g.assetIds[0]));
     const toTrash = [
       ...new Set(
-        dupes.flatMap((g) => g.assetIds.filter((id) => !keep.has(id))),
+        exact.flatMap((g) => g.assetIds.filter((id) => !keep.has(id))),
       ),
     ];
     if (!toTrash.length) return;
     if (
       !window.confirm(
-        `Clean up ${dupes.length} duplicate group(s)?\n\nThis keeps the first photo of each group and moves ${toTrash.length} duplicate(s) to trash. You can restore them from Trash or undo with ⌘Z.`,
+        `Clean up ${exact.length} exact duplicate group(s)?\n\nKeeps the first file in each group and moves ${toTrash.length} identical copy(ies) to trash. Near duplicates are left for manual review.\n\nYou can restore from Trash or undo with ⌘Z.`,
       )
-    )
+    ) {
       return;
+    }
     try {
       await api.softDeleteAssets(toTrash);
-      setError(`Cleaned up: moved ${toTrash.length} duplicate(s) to trash`);
+      setError(
+        `Exact cleanup: moved ${toTrash.length} identical duplicate(s) to trash`,
+      );
       await loadDuplicates();
       await refreshStats();
+      await refreshHistory();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function trashBlurryAssets(ids: string[]) {
+    if (!ids.length) return;
+    if (
+      !window.confirm(
+        `Move ${ids.length} blurry image(s) to Trash?\n\nYou can restore them from Trash or undo with ⌘Z.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.softDeleteAssets(ids);
+      setError(`Moved ${ids.length} blurry image(s) to trash`);
+      await loadDuplicates();
+      await refreshStats();
+      await refreshHistory();
     } catch (e) {
       setError(String(e));
     }
@@ -391,7 +415,8 @@ export function useAssetActions({
     labelAsset,
     deleteSelected,
     cleanupDupeGroup,
-    cleanupAllDupes,
+    cleanupExactDupes,
+    trashBlurryAssets,
     restoreSelected,
     permanentlyDeleteSelected,
     emptyTrash,

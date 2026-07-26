@@ -97,11 +97,19 @@ export type DuplicateGroup = {
   assetIds: string[];
 };
 
+export type BlurryAsset = {
+  asset: AssetSummary;
+  blurScore: number;
+};
+
 export type ImportResult = {
   scanned: number;
   inserted: number;
   updated: number;
   skipped: number;
+  cancelled?: boolean;
+  durationMs?: number;
+  filesPerSec?: number;
 };
 
 export type ImportProgressEvent = {
@@ -199,10 +207,12 @@ export type MlStatus = {
   semanticReady: boolean;
   ocrReady: boolean;
   facesReady: boolean;
+  tagsReady: boolean;
   models: ModelInfo[];
   semanticDownloadBytes: number;
   ocrDownloadBytes: number;
   facesDownloadBytes: number;
+  tagsDownloadBytes: number;
   installedBytes: number;
   modelsDir: string;
 };
@@ -257,6 +267,63 @@ export type FacesStatus = {
   peopleCount: number;
 };
 
+export type TagsProgress = {
+  pending: number;
+  done: number;
+  total: number;
+  running: boolean;
+  lastPath: string | null;
+  modelReady: boolean;
+};
+
+export type TagsStatus = {
+  modelReady: boolean;
+  enabled: boolean;
+  done: number;
+  total: number;
+};
+
+export type AssetLabel = {
+  assetId: string;
+  label: string;
+  score: number;
+  rank: number;
+  modelId: string;
+  createdAt: string;
+};
+
+export type ImportRun = {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  scanned: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  cancelled: boolean;
+  filesPerSec: number | null;
+  rootsJson: string | null;
+  note: string | null;
+};
+
+export type LibraryOptionStatus = {
+  id: string;
+  capability: string;
+  capabilityLabel: string;
+  name: string;
+  summary: string;
+  runtime: "onnx" | "native" | string;
+  license: string;
+  bundle: string | null;
+  downloadBytes: number;
+  installed: boolean;
+  active: boolean;
+  available: boolean;
+  inputSize: number | null;
+};
+
+
 export type Person = {
   id: string;
   name: string | null;
@@ -264,6 +331,24 @@ export type Person = {
   coverCropPath: string | null;
   createdAt: string;
   ignored: boolean;
+};
+
+/** A reverse-geocoded location grouping the photos taken there. */
+export type PlaceGroup = {
+  label: string;
+  country: string | null;
+  assetCount: number;
+  coverThumbnailPath: string | null;
+  lat: number;
+  lon: number;
+};
+
+export type PlacesProgress = {
+  pending: number;
+  done: number;
+  total: number;
+  running: boolean;
+  lastPath: string | null;
 };
 
 export type FaceBox = {
@@ -373,6 +458,8 @@ export type DeveloperInfo = {
   watchedFolderCount: number;
   activityCount: number;
   exportCount: number;
+  importRunCount: number;
+  ffmpegAvailable: boolean;
   indexProgress: IndexProgress;
   recentLogs: string[];
   crashLogs: string[];
@@ -407,6 +494,10 @@ export type Preferences = {
     autoAlbums: boolean;
     processingDevice: string;
     backgroundProcessing: string;
+    semanticModel?: string;
+    ocrModel?: string;
+    facesModel?: string;
+    tagsModel?: string;
   };
   privacy: {
     autoLockMinutes: number;
@@ -472,6 +563,7 @@ export const api = {
   getLibraryStats: () => invoke<LibraryStats>("get_library_stats"),
   importFolder: (path: string) => invoke<ImportResult>("import_folder", { path }),
   importPaths: (paths: string[]) => invoke<ImportResult>("import_paths", { paths }),
+  cancelImport: () => invoke<void>("cancel_import"),
   listAssets: (limit: number, offset: number) =>
     invoke<AssetSummary[]>("list_assets", { limit, offset }),
   searchAssets: (query: string, limit: number, offset: number) =>
@@ -597,6 +689,30 @@ export const api = {
   facesProgress: () => invoke<FacesProgress>("faces_progress"),
   kickFaces: () => invoke<void>("kick_faces"),
   clearFaceData: () => invoke<number>("clear_face_data"),
+  installTagsModels: () => invoke<MlStatus>("install_tags_models"),
+  tagsStatus: () => invoke<TagsStatus>("tags_status"),
+  tagsProgress: () => invoke<TagsProgress>("tags_progress"),
+  kickTags: () => invoke<void>("kick_tags"),
+  clearAutoTags: () => invoke<number>("clear_auto_tags"),
+  listAssetLabels: (assetId: string) =>
+    invoke<AssetLabel[]>("list_asset_labels", {
+      assetId,
+      asset_id: assetId,
+    }),
+  listImportRuns: (limit = 20) =>
+    invoke<ImportRun[]>("list_import_runs", { limit }),
+  modelLibrary: () => invoke<LibraryOptionStatus[]>("model_library"),
+  installModelOption: (optionId: string) =>
+    invoke<MlStatus>("install_model_option", {
+      optionId,
+      option_id: optionId,
+    }),
+  setActiveModel: (optionId: string, reprocess = true) =>
+    invoke<LibraryOptionStatus[]>("set_active_model", {
+      optionId,
+      option_id: optionId,
+      reprocess,
+    }),
   listPeople: () => invoke<Person[]>("list_people"),
   listIgnoredPeople: () => invoke<Person[]>("list_ignored_people"),
   setPersonIgnored: (personId: string, ignored: boolean) =>
@@ -633,7 +749,24 @@ export const api = {
       asset_id: assetId,
     }),
   reclusterFaces: () => invoke<number>("recluster_faces"),
+  reprocessAi: (kinds: Array<"semantic" | "ocr" | "faces" | "tags" | "all">) =>
+    invoke<{
+      embeddingsCleared: number;
+      ocrCleared: number;
+      facesCleared: number;
+      tagsCleared: number;
+    }>("reprocess_ai", { kinds }),
+  listPlaces: () => invoke<PlaceGroup[]>("list_places"),
+  listPlaceAssets: (label: string, limit: number, offset: number) =>
+    invoke<AssetSummary[]>("list_place_assets", { label, limit, offset }),
+  placesProgress: () => invoke<PlacesProgress>("places_progress"),
+  kickPlaces: () => invoke<void>("kick_places"),
+  clearPlaces: () => invoke<number>("clear_places"),
   findDuplicates: () => invoke<DuplicateGroup[]>("find_duplicates"),
+  listBlurryAssets: (limit = 200, offset = 0) =>
+    invoke<BlurryAsset[]>("list_blurry_assets", { limit, offset }),
+  scanBlurScores: (limit = 500) =>
+    invoke<number>("scan_blur_scores", { limit }),
   listAssetsByIds: (ids: string[]) =>
     invoke<AssetSummary[]>("list_assets_by_ids", { ids }),
   softDeleteAssets: (ids: string[]) => invoke<number>("soft_delete_assets", { ids }),
@@ -744,6 +877,11 @@ export function thumbSrc(asset: AssetSummary): string | null {
   }
 }
 
-export function fileSrc(path: string): string {
-  return convertFileSrc(path);
+export function fileSrc(path: string | null | undefined): string | null {
+  if (!path) return null;
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return null;
+  }
 }

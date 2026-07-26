@@ -127,6 +127,7 @@ pub fn apply_edit(
         let faces_dir = app_data.join("faces");
         let _ = crate::faces::invalidate_asset(conn, &faces_dir, &id);
     }
+    let _ = crate::tags::invalidate_asset(conn, &id);
     let asset = load_asset(conn, &id)?;
     Ok(EditResult {
         asset,

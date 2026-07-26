@@ -366,6 +366,116 @@ pub fn list_activity(conn: &Connection, limit: u32) -> AppResult<Vec<ActivityEnt
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Persist a local-only import performance sample (no telemetry).
+pub fn record_import_run(
+    conn: &Connection,
+    result: &crate::models::ImportResult,
+    roots: &[std::path::PathBuf],
+) -> AppResult<String> {
+    let id = Uuid::new_v4().to_string();
+    let finished_at = Utc::now();
+    let started_at = finished_at
+        - chrono::Duration::milliseconds(result.duration_ms as i64);
+    let roots_json = serde_json::to_string(
+        &roots
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into());
+    let note = if result.cancelled {
+        Some("cancelled")
+    } else {
+        None
+    };
+    conn.execute(
+        "INSERT INTO import_runs (
+            id, started_at, finished_at, duration_ms, scanned, inserted, updated,
+            skipped, cancelled, files_per_sec, roots_json, note
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![
+            id,
+            started_at.to_rfc3339(),
+            finished_at.to_rfc3339(),
+            result.duration_ms as i64,
+            result.scanned as i64,
+            result.inserted as i64,
+            result.updated as i64,
+            result.skipped as i64,
+            if result.cancelled { 1i64 } else { 0 },
+            result.files_per_sec,
+            roots_json,
+            note,
+        ],
+    )?;
+
+    let label = if result.cancelled {
+        format!(
+            "Import stopped — {} files in {:.1}s ({:.1}/s)",
+            result.scanned,
+            result.duration_ms as f64 / 1000.0,
+            result.files_per_sec
+        )
+    } else {
+        format!(
+            "Imported {} files in {:.1}s ({:.1}/s)",
+            result.scanned,
+            result.duration_ms as f64 / 1000.0,
+            result.files_per_sec
+        )
+    };
+    let detail = format!(
+        "inserted={}, updated={}, skipped={}, duration_ms={}, files_per_sec={:.2}",
+        result.inserted, result.updated, result.skipped, result.duration_ms, result.files_per_sec
+    );
+    let _ = record_activity(conn, "import", &label, Some(&detail));
+    Ok(id)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRun {
+    pub id: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub duration_ms: i64,
+    pub scanned: i64,
+    pub inserted: i64,
+    pub updated: i64,
+    pub skipped: i64,
+    pub cancelled: bool,
+    pub files_per_sec: Option<f64>,
+    pub roots_json: Option<String>,
+    pub note: Option<String>,
+}
+
+pub fn list_import_runs(conn: &Connection, limit: u32) -> AppResult<Vec<ImportRun>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, started_at, finished_at, duration_ms, scanned, inserted, updated,
+                skipped, cancelled, files_per_sec, roots_json, note
+         FROM import_runs
+         ORDER BY finished_at DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |row| {
+        Ok(ImportRun {
+            id: row.get(0)?,
+            started_at: row.get(1)?,
+            finished_at: row.get(2)?,
+            duration_ms: row.get(3)?,
+            scanned: row.get(4)?,
+            inserted: row.get(5)?,
+            updated: row.get(6)?,
+            skipped: row.get(7)?,
+            cancelled: row.get::<_, i64>(8)? != 0,
+            files_per_sec: row.get(9)?,
+            roots_json: row.get(10)?,
+            note: row.get(11)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn record_export(
     conn: &Connection,
     path: &str,

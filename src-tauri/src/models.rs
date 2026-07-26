@@ -133,11 +133,27 @@ pub struct DuplicateGroup {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BlurryAsset {
+    pub asset: AssetSummary,
+    pub blur_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub scanned: u64,
     pub inserted: u64,
     pub updated: u64,
     pub skipped: u64,
+    /// True when the user aborted mid-import; counts reflect work already done.
+    #[serde(default)]
+    pub cancelled: bool,
+    /// Wall-clock duration of the import job in milliseconds.
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// Effective throughput (`scanned / duration`), zero when duration is 0.
+    #[serde(default)]
+    pub files_per_sec: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -317,6 +333,8 @@ pub struct DeveloperInfo {
     pub watched_folder_count: i64,
     pub activity_count: i64,
     pub export_count: i64,
+    pub import_run_count: i64,
+    pub ffmpeg_available: bool,
     pub index_progress: IndexProgress,
     pub recent_logs: Vec<String>,
     pub crash_logs: Vec<String>,

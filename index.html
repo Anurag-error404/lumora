@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="LUMORA — your memories your machine. Local-first photo & video library with on-device AI search, faces, OCR, and an encrypted vault. Nothing leaves your computer."
+      content="LUMORA — your memories your machine. Local-first photo & video library with on-device AI search, faces, OCR, auto-tags, Places, and an encrypted vault. Nothing leaves your computer."
     />
     <meta name="theme-color" content="#2f6f5e" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -27,15 +27,20 @@
         <span class="brand-name">LUMORA</span>
       </a>
       <nav class="nav" aria-label="Primary">
-        <a href="#features">Features</a>
-        <a href="#privacy">Privacy</a>
-        <a href="#stack">Stack</a>
+        <a href="guide.html">Guide</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
           rel="noopener noreferrer"
-          >GitHub</a
         >
+          <svg class="nav-cta-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
       </nav>
     </header>
 
@@ -45,17 +50,12 @@
           <p class="hero-brand" id="hero-brand">LUMORA</p>
           <h1 class="hero-tagline">your memories your machine.</h1>
           <p class="hero-lede">
-            A local-first photo &amp; video library for archives that stay on
-            your disk — organise a million assets, search by meaning, and keep
-            every byte offline.
+            A local-first photo &amp; video library — organise at scale, search
+            by meaning, lock private shots in an encrypted vault, and keep every
+            byte on your disk.
           </p>
           <div class="hero-actions">
-            <a
-              class="btn btn-primary"
-              href="https://github.com/Anurag-error404/lumora"
-              rel="noopener noreferrer"
-              >View on GitHub</a
-            >
+            <a class="btn btn-primary" href="guide.html">Read the guide</a>
             <a class="btn btn-ghost" href="#features">Explore features</a>
           </div>
         </div>
@@ -83,111 +83,304 @@
         <h2 id="intro-heading">Google Photos convenience. Zero cloud.</h2>
         <p>
           Built for archive and professional users who need filesystem-scale
-          indexing, fast search, and on-device intelligence — without uploading a
-          single frame.
+          indexing, fast search, on-device intelligence, and a privacy vault for
+          sensitive albums — without uploading a single frame.
         </p>
       </section>
 
       <section class="section features" id="features" aria-labelledby="features-heading">
         <header class="section-head">
-          <h2 id="features-heading">Everything in the library</h2>
-          <p>Phase 1 baseline plus shipped on-device AI — all local.</p>
+          <h2 id="features-heading">What LUMORA does</h2>
+          <p>
+            One desktop app for importing, organising, searching, cleaning, and
+            locking private media in a vault that never leaves the machine.
+          </p>
         </header>
 
-        <div class="feature-blocks">
-          <article class="feature reveal">
-            <h3>Library &amp; indexing</h3>
-            <ul>
-              <li>Import folders recursively; originals stay where they are</li>
-              <li>Watched folders with live add / change / remove</li>
-              <li>Incremental indexing — hash, EXIF, thumbnails</li>
-              <li>Photos and videos in one library</li>
-              <li>Built for large collections (up to 1M assets)</li>
-              <li>Virtualised grid that stays scrollable at scale</li>
-            </ul>
-          </article>
+        <nav class="capability-rail reveal" aria-label="Feature areas">
+          <a href="#library">Library</a>
+          <a href="#organise">Organise</a>
+          <a href="#search">Search</a>
+          <a href="#intelligence">On-device AI</a>
+          <a href="#cleanup">Cleanup</a>
+          <a href="#vault">Privacy vault</a>
+          <a href="#places">Places</a>
+        </nav>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Organisation</h3>
-            <ul>
-              <li>Manual albums — create, rename, drag &amp; drop</li>
-              <li>Tags, favourites, 1–5 ratings, colour labels</li>
-              <li>Timeline by year and month</li>
-              <li>Recently added and recently viewed</li>
-              <li>Home overview of your library</li>
-              <li>Smart collections: Videos, RAW, Screenshots, Selfies, Panoramas</li>
-              <li>Documents &amp; Receipts collections driven by OCR</li>
+      <section class="feature-band" id="library" aria-labelledby="library-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">01 — Library</p>
+            <h2 id="library-heading">Index where the files already live</h2>
+            <p class="feature-lede">
+              Point LUMORA at folders on disk. Originals stay put; the app builds
+              a fast local index of hashes, EXIF, thumbnails, and blur scores.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Recursive import</strong>
+                <span>Bring entire trees into one library without relocating files.</span>
+              </li>
+              <li>
+                <strong>Watched folders</strong>
+                <span>New shots appear as they land — add, change, and remove stay in sync.</span>
+              </li>
+              <li>
+                <strong>Photos + videos</strong>
+                <span>One grid for both. Video frame thumbs use system ffmpeg when available.</span>
+              </li>
+              <li>
+                <strong>Built for scale</strong>
+                <span>Incremental indexing and a virtualised grid that stays scrollable on large archives.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-library">
+              <span class="visual-label">Local disk</span>
+              <span class="visual-line">~/Pictures</span>
+              <span class="visual-line">~/Archives/2024</span>
+              <span class="visual-line muted">Originals untouched</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Search</h3>
-            <ul>
-              <li>Full-text search (FTS5) across filename, tags, metadata</li>
-              <li>Structured filters — <code>camera:</code>, <code>rating&gt;</code>, <code>before:</code>, <code>after:</code></li>
-              <li>Natural-language semantic search with on-device CLIP</li>
-              <li>Semantic results blend with FTS instead of replacing it</li>
-              <li>Recent search history in the toolbar and Discover</li>
-              <li>Find text inside screenshots and documents via OCR</li>
-              <li>Search people by name once faces are labelled</li>
+      <section class="feature-band alt" id="organise" aria-labelledby="organise-heading">
+        <div class="feature-band-inner reverse">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">02 — Organisation</p>
+            <h2 id="organise-heading">Structure a lifetime of media</h2>
+            <p class="feature-lede">
+              Manual tools when you want control; smart collections when the
+              content already says what it is.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Albums &amp; tags</strong>
+                <span>Create, rename, drag-and-drop; rate 1–5; colour labels; favourites.</span>
+              </li>
+              <li>
+                <strong>Timeline</strong>
+                <span>Browse by year and month the way you remember trips and eras.</span>
+              </li>
+              <li>
+                <strong>Smart collections</strong>
+                <span>Videos, RAW, Screenshots, Selfies, Panoramas — plus Documents and Receipts from OCR.</span>
+              </li>
+              <li>
+                <strong>Recents</strong>
+                <span>Jump back to recently added or recently viewed without hunting.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-organise">
+              <span class="chip">Videos</span>
+              <span class="chip">RAW</span>
+              <span class="chip">Screenshots</span>
+              <span class="chip">Selfies</span>
+              <span class="chip">Panoramas</span>
+              <span class="chip">Documents</span>
+              <span class="chip">Receipts</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>On-device intelligence</h3>
-            <ul>
-              <li>CLIP ViT-B/32 embeddings for “find by description”</li>
-              <li>People view — detect, cluster, name, merge, ignore</li>
-              <li>RapidOCR PP-OCRv4 text extraction into the search index</li>
-              <li>Background inference that never blocks browsing</li>
-              <li>Model registry — install, verify, remove when you want</li>
-              <li>App works fully with zero models installed</li>
-              <li>Derived data (embeddings, faces, OCR) deletable anytime</li>
+      <section class="feature-band" id="search" aria-labelledby="search-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">03 — Search</p>
+            <h2 id="search-heading">Find by filename, filter, or meaning</h2>
+            <p class="feature-lede">
+              Start with fast full-text search. Add structured filters. When you
+              install CLIP, ask in plain language — results blend with FTS instead
+              of replacing it.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Full-text</strong>
+                <span>Filename, tags, camera, OCR text, people names, and auto-tags.</span>
+              </li>
+              <li>
+                <strong>Filters</strong>
+                <span><code>camera:</code>, <code>rating&gt;</code>, <code>before:</code>, <code>after:</code> and more.</span>
+              </li>
+              <li>
+                <strong>Semantic</strong>
+                <span>“Dog on a beach at sunset” — on-device CLIP, no cloud call.</span>
+              </li>
+              <li>
+                <strong>History</strong>
+                <span>Recent queries in the toolbar and Discover so you can resume a hunt.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-search">
+              <span class="search-mock">dog on a beach · camera:iphone rating&gt;3</span>
+              <span class="visual-line muted">FTS + semantic · local only</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Duplicates &amp; cleanup</h3>
-            <ul>
-              <li>Exact duplicates via SHA-256</li>
-              <li>Near-duplicates via perceptual hash clustering</li>
-              <li>Soft trash with 30-day retention</li>
-              <li>Undo / redo for destructive library actions</li>
-              <li>Safer cleanup flows through trash, not permanent delete</li>
-            </ul>
-          </article>
+      <section class="feature-band alt" id="intelligence" aria-labelledby="intelligence-heading">
+        <div class="feature-band-inner reverse">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">04 — On-device AI</p>
+            <h2 id="intelligence-heading">Intelligence that stays offline</h2>
+            <p class="feature-lede">
+              Every model is optional. Install what you need from Settings → AI.
+              Switch backends in the model library. Delete derived data anytime —
+              originals are never required for a reset.
+            </p>
+            <div class="ai-grid">
+              <div>
+                <h3>Semantic search</h3>
+                <p>CLIP ViT-B/32 embeddings for natural-language find.</p>
+              </div>
+              <div>
+                <h3>OCR</h3>
+                <p>RapidOCR reads screenshots and documents into search.</p>
+              </div>
+              <div>
+                <h3>People</h3>
+                <p>InsightFace clusters faces — front-facing ≥80% only.</p>
+              </div>
+              <div>
+                <h3>Auto-tags</h3>
+                <p>MobileNetV4 ImageNet labels in the info panel and FTS.</p>
+              </div>
+            </div>
+            <p class="feature-note">
+              Face models may be non-commercial research licences — check
+              Settings before commercial use.
+            </p>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-ai">
+              <span class="ai-row"><em>CLIP</em> semantic</span>
+              <span class="ai-row"><em>OCR</em> text-in-image</span>
+              <span class="ai-row"><em>Faces</em> people</span>
+              <span class="ai-row"><em>Tags</em> MobileNetV4</span>
+              <span class="visual-line muted">ONNX · CoreML on macOS</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Editing &amp; export</h3>
-            <ul>
-              <li>Rotate, flip, aspect-ratio crop, exposure (±2 EV)</li>
-              <li>Save as replace (with confirmation) or save as copy</li>
-              <li>ZIP export of selected assets</li>
-              <li>Activity log and exports history</li>
+      <section class="feature-band" id="cleanup" aria-labelledby="cleanup-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">05 — Cleanup</p>
+            <h2 id="cleanup-heading">Delete with confidence</h2>
+            <p class="feature-lede">
+              Exact copies, near lookalikes, and soft-focus shots are separated
+              so bulk cleanup never mixes with careful review.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Exact duplicates</strong>
+                <span>Identical SHA-256. Bulk keep-one when you’re sure.</span>
+              </li>
+              <li>
+                <strong>Near duplicates</strong>
+                <span>Perceptual hash (Hamming ≤ 2). Review each group — no bulk delete.</span>
+              </li>
+              <li>
+                <strong>Blurry review</strong>
+                <span>Laplacian variance flags soft / out-of-focus frames for optional trash.</span>
+              </li>
+              <li>
+                <strong>Soft trash</strong>
+                <span>Retention window plus undo / redo for destructive library actions.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-cleanup">
+              <span class="cleanup-row exact">Exact · SHA-256</span>
+              <span class="cleanup-row near">Near · review</span>
+              <span class="cleanup-row blur">Blurry · review</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Encrypted vault</h3>
-            <ul>
-              <li>Argon2id key derivation + XChaCha20-Poly1305</li>
-              <li>Recovery code for vault unlock</li>
-              <li>Lock albums and folders behind the vault</li>
-              <li>Encrypted metadata for vaulted content</li>
+      <section class="feature-band alt" id="vault" aria-labelledby="vault-heading">
+        <div class="feature-band-inner reverse">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">06 — Privacy vault</p>
+            <h2 id="vault-heading">Lock what should stay private</h2>
+            <p class="feature-lede">
+              Move sensitive photos and whole albums into the encrypted Locked
+              folder. Keys stay on your machine — ciphertext on disk, even if
+              someone browses the library folder in Finder.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Modern crypto</strong>
+                <span>Argon2id for key derivation and XChaCha20-Poly1305 for content and metadata.</span>
+              </li>
+              <li>
+                <strong>Recovery code</strong>
+                <span>A one-time recovery path if you forget the vault password — store it safely offline.</span>
+              </li>
+              <li>
+                <strong>Albums &amp; folders</strong>
+                <span>Lock individual items or whole collections behind the vault in one place.</span>
+              </li>
+              <li>
+                <strong>Local only</strong>
+                <span>No cloud unlock, no hosted key escrow — unlock happens entirely on-device.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-vault">
+              <span class="visual-label">Privacy vault</span>
+              <span class="visual-line">Locked folder</span>
+              <span class="visual-line">Argon2id · XChaCha20</span>
+              <span class="visual-line muted">Recovery code · on-device unlock</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-          <article class="feature reveal">
-            <h3>Settings &amp; control</h3>
-            <ul>
-              <li>Settings: General, Appearance, Library, AI Features, Privacy, Storage, Performance, Shortcuts, Import &amp; Export, Updates, About</li>
-              <li>Toggles for semantic search, OCR, face recognition, watch folders</li>
-              <li>Storage summary, clear / rebuild cache, optimise database</li>
-              <li>Developer page for diagnostics only — paths, indexer, logs</li>
-              <li>Local-only diagnostic logs — never uploaded</li>
-              <li>Keyboard-first browsing: preview, rate, favourite, select, trash</li>
+      <section class="feature-band" id="places" aria-labelledby="places-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">07 — Places &amp; extras</p>
+            <h2 id="places-heading">Where it was shot — without a map server</h2>
+            <p class="feature-lede">
+              Browse by place from GPS EXIF using offline reverse geocoding, then
+              tidy shots with light edits and local export history.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Places</strong>
+                <span>GPS EXIF grouped with bundled GeoNames data — no tile network calls.</span>
+              </li>
+              <li>
+                <strong>Light editing</strong>
+                <span>Rotate, flip, crop, exposure (±2 EV) — replace or save as copy.</span>
+              </li>
+              <li>
+                <strong>Export &amp; history</strong>
+                <span>ZIP export, activity log, and local import analytics — never uploaded.</span>
+              </li>
             </ul>
-          </article>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-library">
+              <span class="visual-label">Places</span>
+              <span class="visual-line">Offline geocode</span>
+              <span class="visual-line muted">GeoNames · on disk</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -196,13 +389,16 @@
           <h2 id="privacy-heading">Nothing leaves the machine</h2>
           <p>
             Core features work with zero network. Models download only when you
-            ask. Inference, indexing, search, logs, and crash reports stay on
-            disk. No telemetry. No analytics. No hosted APIs for your photos.
+            ask. Inference, indexing, search, logs, and diagnostics stay on disk.
+            Sensitive albums can sit in the privacy vault — encrypted at rest.
+            No telemetry. No analytics. No hosted APIs for your photos.
           </p>
           <ul class="privacy-points">
+            <li>Encrypted Locked folder (Argon2id + XChaCha20-Poly1305) with recovery code</li>
             <li>On-device ONNX Runtime (CoreML on macOS, CPU elsewhere)</li>
             <li>User-initiated model downloads with SHA-256 verification</li>
-            <li>Embeddings, faces, and OCR text rebuildable without touching originals</li>
+            <li>Embeddings, faces, OCR, and auto-tags rebuildable without touching originals</li>
+            <li>Offline Places reverse-geocode from bundled GeoNames data</li>
           </ul>
         </div>
       </section>
@@ -210,7 +406,7 @@
       <section class="section stack" id="stack" aria-labelledby="stack-heading">
         <header class="section-head">
           <h2 id="stack-heading">Desktop-native stack</h2>
-          <p>Small binary, Rust backend, React UI — open source.</p>
+          <p>Small binary, Rust backend, React UI — open source under MIT.</p>
         </header>
         <dl class="stack-list reveal">
           <div>
@@ -231,7 +427,7 @@
           </div>
           <div>
             <dt>ML</dt>
-            <dd>ONNX Runtime · CLIP · OCR · Faces</dd>
+            <dd>ONNX · CLIP · OCR · Faces · Auto-tags</dd>
           </div>
           <div>
             <dt>Platforms</dt>
@@ -241,14 +437,20 @@
       </section>
 
       <section class="section cta-band" aria-labelledby="cta-heading">
-        <h2 id="cta-heading">Build it. Fork it. Keep your archive.</h2>
-        <p>Clone the repo and run the desktop app locally with Bun + Rust.</p>
-        <a
-          class="btn btn-primary"
-          href="https://github.com/Anurag-error404/lumora"
-          rel="noopener noreferrer"
-          >Open repository</a
-        >
+        <h2 id="cta-heading">Start local. Stay local.</h2>
+        <p>
+          Follow the guide to run LUMORA, import a folder, and optionally install
+          on-device models — or clone the repo and build from source.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="guide.html">Open the guide</a>
+          <a
+            class="btn btn-ghost"
+            href="https://github.com/Anurag-error404/lumora"
+            rel="noopener noreferrer"
+            >Open repository</a
+          >
+        </div>
       </section>
     </main>
 
@@ -258,7 +460,9 @@
         <span class="footer-tag">your memories your machine.</span>
       </div>
       <p class="footer-meta">
-        Open source ·
+        MIT License ·
+        <a href="guide.html">Guide</a>
+        ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
           >GitHub</a
         >

@@ -2,22 +2,23 @@
 
 ## Status
 
-Accepted (Phase 1)
+Accepted (Phase 1). Partially superseded for video thumbnails — see Consequences.
 
 ## Context
 
-SPEC open questions needed concrete choices before indexing/search work.
+Early product work needed concrete media-stack choices before indexing and search could ship.
 
 ## Decision
 
 1. **EXIF:** `kamadak-exif` (pure Rust) for reads only. EXIF write deferred.
-2. **Thumbnails:** JPEG, max 320px long edge, stored at `app_data/thumbs/{sha256}.jpg`. No eviction in MVP.
-3. **Video:** Index in the same library with placeholder thumbnails; frame extraction deferred (no ffmpeg bundle).
-4. **Near-duplicates:** Simple average hash (aHash) over an 8×8 luma thumbnail — not ML.
-5. **Editing / saved searches:** Out of MVP (v1.5 / Phase 1.1).
+2. **Thumbnails:** JPEG, max 320px long edge, under app-data thumbs keyed by content hash. No eviction policy yet.
+3. **Video:** Index in the same library as photos. Frame extraction uses **system ffmpeg / ffprobe** when present on `PATH` (soft-fail to a placeholder if missing). ffmpeg is not bundled.
+4. **Near-duplicates:** Average hash (aHash) over an 8×8 luma preview — not ML. Current UI threshold is Hamming ≤ 2.
+5. **Editing / saved searches:** Shipped later than the initial MVP cut; present in the app today.
 
 ## Consequences
 
-- No system `exiftool` dependency.
-- Video UX is browse/metadata-first until a later phase adds frame thumbs.
-- Thumbnail disk use grows with library size; document and measure in `docs/perf-smoke.md`.
+- No system `exiftool` dependency for reads.
+- Contributors need ffmpeg only if they care about video thumbs in development.
+- Thumbnail disk use grows with library size; measure in [`../perf-smoke.md`](../perf-smoke.md).
+- Near-duplicate false positives remain possible with aHash; cleanup UI keeps exact vs near segregated for that reason.

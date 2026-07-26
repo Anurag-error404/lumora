@@ -8,6 +8,7 @@ import {
   api,
   fileSrc,
   thumbSrc,
+  type AssetLabel,
   type AssetOrganisation,
   type AssetSummary,
   type AssetText,
@@ -30,6 +31,8 @@ export function MediaInfoPanel({
   const [loadingText, setLoadingText] = useState(true);
   const [faces, setFaces] = useState<FaceBox[]>([]);
   const [loadingFaces, setLoadingFaces] = useState(true);
+  const [autoTags, setAutoTags] = useState<AssetLabel[]>([]);
+  const [loadingAutoTags, setLoadingAutoTags] = useState(true);
 
   const name = asset.path.split(/[/\\]/).pop() ?? asset.path;
   const folder = asset.path.replace(/[/\\][^/\\]+$/, "") || asset.path;
@@ -95,6 +98,25 @@ export function MediaInfoPanel({
       })
       .finally(() => {
         if (!cancelled) setLoadingFaces(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingAutoTags(true);
+    void api
+      .listAssetLabels(asset.id)
+      .then((data) => {
+        if (!cancelled) setAutoTags(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAutoTags([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingAutoTags(false);
       });
     return () => {
       cancelled = true;
@@ -324,6 +346,42 @@ export function MediaInfoPanel({
                 </ul>
               ) : (
                 <p className="muted media-info-empty">No tags assigned</p>
+              )}
+            </div>
+
+            <div className="media-info-block">
+              <div className="media-info-block-head">
+                <Icon name="sparkle" />
+                <div>
+                  <h4>Auto-tags</h4>
+                  <p>
+                    {loadingAutoTags
+                      ? "Loading…"
+                      : `${autoTags.length} label${
+                          autoTags.length === 1 ? "" : "s"
+                        }`}
+                  </p>
+                </div>
+              </div>
+              {loadingAutoTags ? (
+                <p className="muted media-info-empty">Fetching auto-tags…</p>
+              ) : autoTags.length > 0 ? (
+                <ul className="media-info-chips">
+                  {autoTags.map((tag) => (
+                    <li key={`${tag.modelId}-${tag.rank}-${tag.label}`}>
+                      <span className="media-info-chip tag" title={`${Math.round(tag.score * 100)}%`}>
+                        <Icon name="sparkle" />
+                        {tag.label}
+                        <em>{Math.round(tag.score * 100)}%</em>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted media-info-empty">
+                  No auto-tags yet. Enable object detection and install the
+                  MobileNet model in Settings → AI.
+                </p>
               )}
             </div>
             {orgError && <p className="muted media-info-empty">{orgError}</p>}

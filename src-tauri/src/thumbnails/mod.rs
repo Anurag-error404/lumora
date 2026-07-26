@@ -1,3 +1,5 @@
+pub mod ffmpeg;
+
 use std::path::{Path, PathBuf};
 
 use image::imageops::FilterType;
@@ -40,9 +42,19 @@ pub fn generate_thumbnail(source: &Path, thumbs_dir: &Path, hash: &str) -> AppRe
     }
 
     let img = open_oriented(source)?;
-    let thumb = img.resize(THUMB_MAX_EDGE, THUMB_MAX_EDGE, FilterType::Triangle);
-    thumb.save_with_format(&dest, ImageFormat::Jpeg)?;
+    write_thumbnail_jpeg(&img, &dest)?;
     Ok(dest)
+}
+
+/// Resize + JPEG-encode an already-decoded image. Shared by import so we never
+/// decode the same photo twice (thumb + perceptual hash used to each open it).
+pub fn write_thumbnail_jpeg(img: &DynamicImage, dest: &Path) -> AppResult<()> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let thumb = img.resize(THUMB_MAX_EDGE, THUMB_MAX_EDGE, FilterType::Triangle);
+    thumb.save_with_format(dest, ImageFormat::Jpeg)?;
+    Ok(())
 }
 
 /// Encode a thumbnail entirely in memory. Used by the privacy vault, where
@@ -56,11 +68,12 @@ pub fn thumbnail_bytes(source: &Path) -> AppResult<Vec<u8>> {
 }
 
 /// Recreate thumbnail files that are missing or still on the pre-orientation naming.
+/// Videos use ffmpeg frame extraction when available.
 pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path) -> AppResult<u32> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, hash, thumbnail_path FROM assets
+        "SELECT id, path, hash, thumbnail_path, media_type FROM assets
          WHERE deleted_at IS NULL
-           AND media_type = 'image'
+           AND media_type IN ('image', 'video')
            AND hash IS NOT NULL
            AND hash != ''",
     )?;
@@ -70,12 +83,13 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, Option<String>>(3)?,
+            r.get::<_, String>(4)?,
         ))
     })?;
 
     let mut repaired = 0u32;
     for row in rows.flatten() {
-        let (id, path, hash, thumb_path) = row;
+        let (id, path, hash, thumb_path, media_type) = row;
         let needs = match &thumb_path {
             Some(p) => !is_current_thumb(p),
             None => true,
@@ -100,7 +114,12 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
         // Force regenerate even if a leftover current file exists with wrong pixels.
         let dest = thumbnail_path(thumbs_dir, &hash);
         let _ = std::fs::remove_file(&dest);
-        if let Ok(dest) = generate_thumbnail(source, thumbs_dir, &hash) {
+        let generated = if media_type == "video" {
+            ffmpeg::extract_frame_thumbnail(source, thumbs_dir, &hash)
+        } else {
+            generate_thumbnail(source, thumbs_dir, &hash)
+        };
+        if let Ok(dest) = generated {
             let dest_str = dest.to_string_lossy().to_string();
             conn.execute(
                 "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
@@ -114,10 +133,16 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
 
 /// Simple average hash (aHash) — no ML; used for near-duplicate grouping.
 pub fn perceptual_hash(path: &Path) -> AppResult<String> {
-    let img = open_oriented(path)?
-        .resize_exact(8, 8, FilterType::Triangle)
+    let img = open_oriented(path)?;
+    Ok(perceptual_hash_from_image(&img))
+}
+
+/// aHash from an already-decoded image (avoids a second full decode on import).
+pub fn perceptual_hash_from_image(img: &DynamicImage) -> String {
+    let small = img
+        .resize_exact(8, 8, FilterType::Nearest)
         .to_luma8();
-    let pixels: Vec<u8> = img.pixels().map(|p| p.0[0]).collect();
+    let pixels: Vec<u8> = small.pixels().map(|p| p.0[0]).collect();
     let avg = (pixels.iter().map(|&p| p as u32).sum::<u32>() / pixels.len() as u32) as u8;
     let mut bits: u64 = 0;
     for (i, &p) in pixels.iter().enumerate() {
@@ -125,7 +150,7 @@ pub fn perceptual_hash(path: &Path) -> AppResult<String> {
             bits |= 1u64 << i;
         }
     }
-    Ok(format!("{bits:016x}"))
+    format!("{bits:016x}")
 }
 
 #[cfg(test)]

@@ -249,7 +249,7 @@ function ViewerVideo({ asset }: { asset: AssetSummary }) {
   return (
     <video
       className="viewer-video"
-      src={fileSrc(asset.path)}
+      src={fileSrc(asset.path) ?? undefined}
       controls
       autoPlay
       playsInline

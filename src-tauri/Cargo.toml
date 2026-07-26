@@ -57,6 +57,9 @@ rpassword = "7.5.4"
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 ureq = "3.3.0"
 tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
+# Offline reverse geocoding for Places. Bundles GeoNames city data (CC-BY 4.0)
+# into the binary; no network at build or runtime.
+reverse_geocoder = "4.1.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"

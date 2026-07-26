@@ -4,6 +4,7 @@ pub mod scan;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use image::GenericImageView;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -35,17 +36,42 @@ pub fn upsert_asset(
     thumbs_dir: &Path,
     generate_thumb: bool,
 ) -> AppResult<UpsertOutcome> {
-    if !path.is_file() {
+    let Some(prepared) = prepare_asset(path, thumbs_dir, generate_thumb)? else {
         return Ok(UpsertOutcome::Skipped);
+    };
+    commit_prepared(conn, &prepared)
+}
+
+/// CPU-bound work for one file: hash, EXIF, single image decode → thumb + phash.
+/// Safe to run on a worker thread with no DB connection held.
+pub fn prepare_asset(
+    path: &Path,
+    thumbs_dir: &Path,
+    generate_thumb: bool,
+) -> AppResult<Option<PreparedAsset>> {
+    if !path.is_file() {
+        return Ok(None);
     }
     let Some(kind) = media_type_for_path(path) else {
-        return Ok(UpsertOutcome::Skipped);
+        return Ok(None);
     };
 
     let hash = sha256_file(path)?;
-    let path_str = path.to_string_lossy().to_string();
+    let meta = read_media_meta(path, kind, thumbs_dir, generate_thumb, &hash)?;
+    Ok(Some(PreparedAsset {
+        path: path.to_path_buf(),
+        hash,
+        kind,
+        meta,
+    }))
+}
+
+pub fn commit_prepared(conn: &Connection, prepared: &PreparedAsset) -> AppResult<UpsertOutcome> {
+    let path_str = prepared.path.to_string_lossy().to_string();
     let now = Utc::now().to_rfc3339();
-    let meta = read_media_meta(path, kind)?;
+    let meta = &prepared.meta;
+    let hash = &prepared.hash;
+    let kind = prepared.kind;
 
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -56,13 +82,13 @@ pub fn upsert_asset(
         .ok();
 
     let (id, outcome) = if let Some((id, old_hash)) = existing {
-        if old_hash.as_deref() == Some(hash.as_str()) && !generate_thumb {
+        if old_hash.as_deref() == Some(hash.as_str()) && !meta.force_write {
             return Ok(UpsertOutcome::Skipped);
         }
         conn.execute(
             "UPDATE assets SET hash=?1, perceptual_hash=?2, media_type=?3, width=?4, height=?5,
              duration_ms=?6, file_size=?7, captured_at=?8, indexed_at=?9, camera=?10, lens=?11,
-             deleted_at=NULL WHERE id=?12",
+             blur_score=?12, deleted_at=NULL WHERE id=?13",
             params![
                 hash,
                 meta.perceptual_hash,
@@ -75,18 +101,19 @@ pub fn upsert_asset(
                 now,
                 meta.camera,
                 meta.lens,
+                meta.blur_score,
                 id
             ],
         )?;
         (id, UpsertOutcome::Updated)
     } else {
         let id = Uuid::new_v4().to_string();
-        let created_at = file_created_at(path).unwrap_or_else(|| now.clone());
+        let created_at = file_created_at(&prepared.path).unwrap_or_else(|| now.clone());
         conn.execute(
             "INSERT INTO assets (
                 id, path, hash, perceptual_hash, media_type, width, height, duration_ms, file_size,
-                created_at, captured_at, indexed_at, camera, lens
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                created_at, captured_at, indexed_at, camera, lens, blur_score
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
             params![
                 id,
                 path_str,
@@ -101,20 +128,19 @@ pub fn upsert_asset(
                 meta.captured_at,
                 now,
                 meta.camera,
-                meta.lens
+                meta.lens,
+                meta.blur_score
             ],
         )?;
         (id, UpsertOutcome::Inserted)
     };
 
-    if generate_thumb && kind == MediaKind::Image {
-        if let Ok(thumb) = thumbnails::generate_thumbnail(path, thumbs_dir, &hash) {
-            let thumb_str = thumb.to_string_lossy().to_string();
-            conn.execute(
-                "UPDATE assets SET thumbnail_path=?1 WHERE id=?2",
-                params![thumb_str, id],
-            )?;
-        }
+    if let Some(ref thumb) = meta.thumbnail_path {
+        let thumb_str = thumb.to_string_lossy().to_string();
+        conn.execute(
+            "UPDATE assets SET thumbnail_path=?1 WHERE id=?2",
+            params![thumb_str, id],
+        )?;
     }
 
     refresh_fts(conn, &id)?;
@@ -148,37 +174,147 @@ pub fn import_folder_with_progress(
     thumbs_dir: &Path,
     on_progress: impl FnMut(u64, u64, &Path),
 ) -> AppResult<ImportResult> {
-    import_paths_with_progress(conn, &[root.to_path_buf()], thumbs_dir, on_progress)
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    import_paths_with_progress(
+        conn,
+        &[root.to_path_buf()],
+        thumbs_dir,
+        Arc::new(AtomicBool::new(false)),
+        on_progress,
+    )
 }
 
+/// Import media with cancellation. CPU work (hash / decode / thumb) runs on a
+/// small thread pool; SQLite writes stay on this thread.
 pub fn import_paths_with_progress(
     conn: &Connection,
     roots: &[std::path::PathBuf],
     thumbs_dir: &Path,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     mut on_progress: impl FnMut(u64, u64, &Path),
 ) -> AppResult<ImportResult> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread;
+
     let files = collect_media_files(roots)?;
     let total = files.len() as u64;
     let mut scanned = 0u64;
     let mut inserted = 0u64;
     let mut updated = 0u64;
     let mut skipped = 0u64;
+    let mut cancelled = false;
+    let started = std::time::Instant::now();
 
-    for path in &files {
+    if files.is_empty() {
+        return Ok(ImportResult {
+            scanned: 0,
+            inserted: 0,
+            updated: 0,
+            skipped: 0,
+            cancelled: false,
+            duration_ms: 0,
+            files_per_sec: 0.0,
+        });
+    }
+
+    let workers = thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4);
+    let files = Arc::new(files);
+    let thumbs_dir = thumbs_dir.to_path_buf();
+    let next = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<(usize, AppResult<Option<PreparedAsset>>)>();
+
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let files = Arc::clone(&files);
+        let next = Arc::clone(&next);
+        let stop = Arc::clone(&stop);
+        let cancel = Arc::clone(&cancel);
+        let thumbs_dir = thumbs_dir.clone();
+        let tx = tx.clone();
+        handles.push(thread::spawn(move || {
+            loop {
+                if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+                    stop.store(true, Ordering::Relaxed);
+                    break;
+                }
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= files.len() {
+                    break;
+                }
+                let prepared = prepare_asset(&files[i], &thumbs_dir, true);
+                if tx.send((i, prepared)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+
+    let mut received = 0usize;
+    while received < files.len() {
+        if cancel.load(Ordering::Relaxed) {
+            stop.store(true, Ordering::Relaxed);
+            cancelled = true;
+            while rx.recv().is_ok() {
+                received += 1;
+                if received >= files.len() {
+                    break;
+                }
+            }
+            break;
+        }
+
+        let Ok((index, prepared)) = rx.recv() else {
+            break;
+        };
+        received += 1;
         scanned += 1;
+        let path = &files[index];
         on_progress(scanned, total, path);
-        match upsert_asset(conn, path, thumbs_dir, true)? {
-            UpsertOutcome::Inserted => inserted += 1,
-            UpsertOutcome::Updated => updated += 1,
-            UpsertOutcome::Skipped => skipped += 1,
+
+        match prepared {
+            Ok(Some(asset)) => match commit_prepared(conn, &asset) {
+                Ok(UpsertOutcome::Inserted) => inserted += 1,
+                Ok(UpsertOutcome::Updated) => updated += 1,
+                Ok(UpsertOutcome::Skipped) => skipped += 1,
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "import commit failed");
+                    skipped += 1;
+                }
+            },
+            Ok(None) => skipped += 1,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "import prepare failed");
+                skipped += 1;
+            }
         }
     }
+
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let files_per_sec = if duration_ms == 0 {
+        0.0
+    } else {
+        (scanned as f64) * 1000.0 / (duration_ms as f64)
+    };
 
     Ok(ImportResult {
         scanned,
         inserted,
         updated,
         skipped,
+        cancelled,
+        duration_ms,
+        files_per_sec,
     })
 }
 
@@ -233,6 +369,13 @@ pub enum UpsertOutcome {
     Skipped,
 }
 
+pub struct PreparedAsset {
+    path: std::path::PathBuf,
+    hash: String,
+    kind: MediaKind,
+    meta: MediaMeta,
+}
+
 struct MediaMeta {
     width: Option<i64>,
     height: Option<i64>,
@@ -242,9 +385,19 @@ struct MediaMeta {
     camera: Option<String>,
     lens: Option<String>,
     perceptual_hash: Option<String>,
+    blur_score: Option<f64>,
+    thumbnail_path: Option<std::path::PathBuf>,
+    /// When true, commit even if the content hash is unchanged (forced thumb regen).
+    force_write: bool,
 }
 
-fn read_media_meta(path: &Path, kind: MediaKind) -> AppResult<MediaMeta> {
+fn read_media_meta(
+    path: &Path,
+    kind: MediaKind,
+    thumbs_dir: &Path,
+    generate_thumb: bool,
+    hash: &str,
+) -> AppResult<MediaMeta> {
     let file_size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
     let mut meta = MediaMeta {
         width: None,
@@ -255,13 +408,12 @@ fn read_media_meta(path: &Path, kind: MediaKind) -> AppResult<MediaMeta> {
         camera: None,
         lens: None,
         perceptual_hash: None,
+        blur_score: None,
+        thumbnail_path: None,
+        force_write: generate_thumb,
     };
 
     if kind == MediaKind::Image {
-        if let Ok(img) = image::image_dimensions(path) {
-            meta.width = Some(img.0 as i64);
-            meta.height = Some(img.1 as i64);
-        }
         if let Ok(file) = std::fs::File::open(path) {
             let mut bufreader = std::io::BufReader::new(&file);
             if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
@@ -277,8 +429,53 @@ fn read_media_meta(path: &Path, kind: MediaKind) -> AppResult<MediaMeta> {
                     .map(|f| f.display_value().to_string().trim_matches('"').to_string());
             }
         }
-        if let Ok(phash) = thumbnails::perceptual_hash(path) {
-            meta.perceptual_hash = Some(phash);
+
+        // One decode: dimensions + perceptual hash + thumbnail.
+                match thumbnails::open_oriented(path) {
+            Ok(img) => {
+                let (w, h) = img.dimensions();
+                meta.width = Some(w as i64);
+                meta.height = Some(h as i64);
+                meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
+                meta.blur_score = Some(crate::blur::blur_score_from_image(&img));
+                if generate_thumb {
+                    let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
+                    if dest.exists() {
+                        meta.thumbnail_path = Some(dest);
+                    } else if thumbnails::write_thumbnail_jpeg(&img, &dest).is_ok() {
+                        meta.thumbnail_path = Some(dest);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(path = %path.display(), error = %e, "image decode skipped");
+                if let Ok(dims) = image::image_dimensions(path) {
+                    meta.width = Some(dims.0 as i64);
+                    meta.height = Some(dims.1 as i64);
+                }
+            }
+        }
+    } else if kind == MediaKind::Video {
+        let probe = thumbnails::ffmpeg::probe_video(path);
+        meta.width = probe.width;
+        meta.height = probe.height;
+        meta.duration_ms = probe.duration_ms;
+        if generate_thumb {
+            let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
+            if dest.exists() {
+                meta.thumbnail_path = Some(dest);
+            } else {
+                match thumbnails::ffmpeg::extract_frame_thumbnail(path, thumbs_dir, hash) {
+                    Ok(dest) => meta.thumbnail_path = Some(dest),
+                    Err(e) => {
+                        tracing::debug!(
+                            path = %path.display(),
+                            error = %e,
+                            "video frame thumbnail skipped"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -292,10 +489,11 @@ fn file_created_at(path: &Path) -> Option<String> {
     Some(datetime.to_rfc3339())
 }
 
-/// `(path, camera, lens, tag names, ocr, people)` — kept for call-site docs.
+/// `(path, camera, lens, tag names, ocr, people, auto_tags)` — kept for call-site docs.
 pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
     let row: Option<(
         String,
+        Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
@@ -310,7 +508,12 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                 (SELECT GROUP_CONCAT(p.name, ' ') FROM faces f
                  JOIN people p ON p.id = f.person_id
                  WHERE f.asset_id = assets.id AND p.ignored = 0
-                   AND p.name IS NOT NULL AND TRIM(p.name) != '')
+                   AND p.name IS NOT NULL AND TRIM(p.name) != ''),
+                (SELECT GROUP_CONCAT(
+                    CASE WHEN instr(l.label, ',') > 0
+                         THEN trim(substr(l.label, 1, instr(l.label, ',') - 1))
+                         ELSE l.label END, ' ')
+                 FROM asset_labels l WHERE l.asset_id = assets.id)
              FROM assets WHERE id = ?1",
             params![asset_id],
             |r| {
@@ -321,6 +524,7 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                     r.get(3)?,
                     r.get(4)?,
                     r.get(5)?,
+                    r.get(6)?,
                 ))
             },
         )
@@ -331,14 +535,14 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
         params![asset_id],
     )?;
 
-    if let Some((path, camera, lens, tags, ocr_text, people)) = row {
+    if let Some((path, camera, lens, tags, ocr_text, people, auto_tags)) = row {
         let filename = Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         conn.execute(
-            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
                 asset_id,
                 filename,
@@ -346,7 +550,8 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                 camera.unwrap_or_default(),
                 lens.unwrap_or_default(),
                 ocr_text.unwrap_or_default(),
-                people.unwrap_or_default()
+                people.unwrap_or_default(),
+                auto_tags.unwrap_or_default()
             ],
         )?;
     }
@@ -398,9 +603,14 @@ mod import_tests {
             .unwrap();
 
         let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
-        let result =
-            import_paths_with_progress(&conn, std::slice::from_ref(&file), &thumbs, |_, _, _| {})
-                .unwrap();
+        let result = import_paths_with_progress(
+            &conn,
+            std::slice::from_ref(&file),
+            &thumbs,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            |_, _, _| {},
+        )
+        .unwrap();
 
         assert_eq!(result.scanned, 1);
         assert_eq!(result.inserted, 1);
@@ -416,9 +626,14 @@ mod import_tests {
         let notes = dir.path().join("notes.txt");
         std::fs::write(&notes, "hello").unwrap();
         let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
-        let err =
-            import_paths_with_progress(&conn, &[notes], &dir.path().join("thumbs"), |_, _, _| {})
-                .unwrap_err();
+        let err = import_paths_with_progress(
+            &conn,
+            &[notes],
+            &dir.path().join("thumbs"),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            |_, _, _| {},
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("unsupported"));
     }
 }

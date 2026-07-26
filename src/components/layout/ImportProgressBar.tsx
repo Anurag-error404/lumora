@@ -4,10 +4,16 @@ import type { ImportProgressEvent } from "../../lib/tauri";
 export function ImportProgressBar({
   progress,
   pct,
+  onCancel,
 }: {
   progress: ImportProgressEvent;
   pct: number | null;
+  onCancel?: () => void;
 }) {
+  const canCancel =
+    !!onCancel &&
+    (progress.phase === "scanning" || progress.phase === "indexing");
+
   return (
     <div className="import-progress" role="status" aria-live="polite">
       <div className="import-progress-meta">
@@ -17,9 +23,18 @@ export function ImportProgressBar({
             ? "Scanning for media…"
             : progress.phase === "done"
               ? "Import complete"
-              : `Importing ${progress.current} / ${progress.total}`}
+              : progress.phase === "cancelled"
+                ? "Import cancelled"
+                : `Importing ${progress.current} / ${progress.total}`}
         </span>
-        {pct !== null && <span>{pct}%</span>}
+        <span className="import-progress-actions">
+          {pct !== null && progress.phase === "indexing" && <span>{pct}%</span>}
+          {canCancel && (
+            <button type="button" className="import-cancel" onClick={onCancel}>
+              Stop
+            </button>
+          )}
+        </span>
       </div>
       <div
         className={`import-progress-track ${
@@ -33,7 +48,7 @@ export function ImportProgressBar({
               ? undefined
               : {
                   width:
-                    progress.phase === "done"
+                    progress.phase === "done" || progress.phase === "cancelled"
                       ? "100%"
                       : pct !== null
                         ? `${pct}%`

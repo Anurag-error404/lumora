@@ -26,6 +26,7 @@ import { AssetEmptyState } from "./features/library/AssetEmptyState";
 import { LibraryGrid } from "./features/library/LibraryGrid";
 import { MediaInfoPanel } from "./features/media-info/MediaInfoPanel";
 import { PeopleView } from "./features/people/PeopleView";
+import { PlacesView } from "./features/places/PlacesView";
 import { TagFilterBoard } from "./features/tags/TagFilterBoard";
 import { TimelineView } from "./features/timeline/TimelineView";
 import { HomeView } from "./features/home/HomeView";
@@ -46,6 +47,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibraryAssets } from "./hooks/useLibraryAssets";
 import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
 import { usePeople } from "./hooks/usePeople";
+import { usePlaces } from "./hooks/usePlaces";
 import { usePreferences } from "./hooks/usePreferences";
 import { useRecentSearches } from "./hooks/useRecentSearches";
 import { useTagBrowse } from "./hooks/useTagBrowse";
@@ -95,6 +97,11 @@ export default function App() {
     setError,
   });
 
+  const { places, activePlace, setActivePlace, refreshPlaces } = usePlaces({
+    view,
+    setError,
+  });
+
   const {
     tags,
     tagBrowse,
@@ -126,7 +133,7 @@ export default function App() {
     selectTimelineGroup,
   } = useTimeline({ view, setError, selected, setSelected });
 
-  const { dupes, dupeAssets, setDupeAssets, loadDuplicates, dupeAssetList } =
+  const { dupes, dupeAssets, setDupeAssets, blurry, loadDuplicates, dupeAssetList } =
     useDuplicates({ view, setError });
 
   const { history, refreshHistory } = useHistoryFeed({ view, setError });
@@ -159,6 +166,7 @@ export default function App() {
     query,
     activeAlbum,
     activePerson,
+    activePlace,
     tagBrowse,
     refreshHistory,
     refreshExports,
@@ -392,7 +400,8 @@ export default function App() {
     labelAsset,
     deleteSelected,
     cleanupDupeGroup,
-    cleanupAllDupes,
+    cleanupExactDupes,
+    trashBlurryAssets,
     restoreSelected,
     permanentlyDeleteSelected,
     emptyTrash,
@@ -477,8 +486,13 @@ export default function App() {
   const { tagModal, setTagModal, tagName, setTagName, submitTagModal, applyExistingTag } =
     useTagWorkflows({ selectedIds, refreshTags, loadAssets, setError });
 
-  const { importModal, setImportModal, onImportFiles, onImportFolder } =
-    useImportFlow({ setBusy, setImportProgress, loadAssets, setError });
+  const {
+    importModal,
+    setImportModal,
+    onImportFiles,
+    onImportFolder,
+    cancelImport,
+  } = useImportFlow({ setBusy, setImportProgress, loadAssets, setError });
 
   useKeyboardShortcuts({
     albumModal,
@@ -519,6 +533,9 @@ export default function App() {
     if (id === "people") {
       setActivePerson(null);
     }
+    if (id === "places") {
+      setActivePlace(null);
+    }
     if (id !== "library" || !pickingForAlbum) {
       setSelected(new Set());
     }
@@ -535,6 +552,7 @@ export default function App() {
         albumCount={albums.length}
         tagCount={tags.length}
         peopleCount={people.length}
+        placeCount={places.length}
         savedSearchCount={recentSearches.length}
         exportCount={exports.length}
         lockedCount={vault.status?.totalLockedCount ?? 0}
@@ -561,7 +579,11 @@ export default function App() {
         />
 
         {importProgress && (
-          <ImportProgressBar progress={importProgress} pct={importPct} />
+          <ImportProgressBar
+            progress={importProgress}
+            pct={importPct}
+            onCancel={() => void cancelImport()}
+          />
         )}
 
         {pickingForAlbum && (
@@ -652,6 +674,7 @@ export default function App() {
             <TimelineView
               timelineYears={timelineYears}
               timelineScaleYears={timelineScaleYears}
+              timeline={timeline}
               timelineAssets={timelineAssets}
               timelineKey={timelineKey}
               timelineLoading={timelineLoading}
@@ -801,15 +824,26 @@ export default function App() {
                 void setPersonIgnored(personId, ignored);
               }}
             />
+          ) : view === "places" && !activePlace ? (
+            <PlacesView
+              places={places}
+              onRefresh={() => void refreshPlaces()}
+              onOpenPlace={(label) => {
+                setActivePlace(label);
+                setSelected(new Set());
+              }}
+            />
           ) : view === "duplicates" ? (
             <DuplicatesView
               dupes={dupes}
               dupeAssets={dupeAssets}
+              blurry={blurry}
               onRefresh={() => void loadDuplicates()}
-              onCleanupAll={() => void cleanupAllDupes()}
+              onCleanupExact={() => void cleanupExactDupes()}
               onCleanupGroup={(group, keepId) =>
                 void cleanupDupeGroup(group, keepId)
               }
+              onTrashBlurry={(ids) => void trashBlurryAssets(ids)}
               onPreview={setLightboxId}
               onShowInfo={setInfoAssetId}
               onBrowseLibrary={() => setView("library")}
@@ -818,10 +852,28 @@ export default function App() {
             <>
               {LIBRARY_PAGE_META[view] &&
                 !(view === "albums" && activeAlbum) &&
-                !(view === "people" && activePerson) && (
+                !(view === "people" && activePerson) &&
+                !(view === "places" && activePlace) && (
                 <PageHeader
                   title={LIBRARY_PAGE_META[view]!.title}
                   description={LIBRARY_PAGE_META[view]!.description}
+                />
+              )}
+              {view === "places" && activePlace && (
+                <PageHeader
+                  title={activePlace}
+                  description="Photos taken at this location."
+                  actions={
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePlace(null);
+                        setSelected(new Set());
+                      }}
+                    >
+                      Back to places
+                    </button>
+                  }
                 />
               )}
               {view === "people" && activePerson && (

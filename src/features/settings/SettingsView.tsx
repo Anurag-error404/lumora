@@ -8,6 +8,7 @@ import {
   type VaultStatus,
 } from "../../lib/tauri";
 import { AiModelsPanel } from "./AiModelsPanel";
+import { ModelLibraryPanel } from "./ModelLibraryPanel";
 import {
   ChoiceRow,
   SelectRow,
@@ -491,6 +492,19 @@ function AiSection({
             })
           }
         />
+        <ToggleRow
+          label="Object detection / auto-tags"
+          description="Classify photos with on-device MobileNetV4 labels for search."
+          checked={prefs.ai.objectDetection}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.objectDetection = v;
+              return p;
+            }).then(() => {
+              if (v) void api.kickTags();
+            })
+          }
+        />
         <ChoiceRow
           label="Background processing"
           description="Pause stops new embedding work until you resume."
@@ -509,6 +523,9 @@ function AiSection({
       </SettingsBlock>
       <SettingsBlock title="Models">
         <AiModelsPanel />
+      </SettingsBlock>
+      <SettingsBlock title="Model library">
+        <ModelLibraryPanel />
       </SettingsBlock>
     </>
   );

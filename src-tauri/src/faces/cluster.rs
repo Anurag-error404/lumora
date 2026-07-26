@@ -1,13 +1,23 @@
 //! Online nearest-centroid face clustering.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use std::path::Path;
+
+use rusqlite::{params, Connection};
 
 use crate::error::AppResult;
 use crate::indexer;
 use crate::ml::vector;
 
 /// Cosine similarity threshold for joining an existing person.
-pub const MATCH_THRESHOLD: f32 = 0.42;
+///
+/// ArcFace embeddings of the same person typically land well above 0.35 once
+/// L2-normalised. The previous 0.42 bar over-split: slight pose/lighting
+/// changes created a new cluster instead of joining the right one.
+pub const MATCH_THRESHOLD: f32 = 0.32;
+
+/// When two people centroids are at least this similar, consolidate them.
+/// Runs after detection batches so early over-splits heal without a full recluster.
+pub const CONSOLIDATE_THRESHOLD: f32 = 0.40;
 
 #[derive(Debug, Clone)]
 pub struct AssignResult {
@@ -206,10 +216,110 @@ pub fn recluster_unnamed(conn: &Connection) -> AppResult<usize> {
         touched.insert(asset_id);
         n += 1;
     }
+    // Heal residual over-splits between the newly rebuilt unnamed clusters.
+    let _ = consolidate_similar_people(conn)?;
     for asset_id in touched {
         let _ = indexer::refresh_fts(conn, &asset_id);
     }
     Ok(n)
+}
+
+/// Merge people whose centroids are very similar. Named people stay sticky:
+/// faces move into the named id. Two differently named people are never merged.
+pub fn consolidate_similar_people(conn: &Connection) -> AppResult<usize> {
+    let people: Vec<(String, Option<String>, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, centroid FROM people
+             WHERE ignored = 0 AND centroid IS NOT NULL AND centroid_count > 0
+               AND face_count > 0",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut merged = 0usize;
+    let mut absorbed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for i in 0..people.len() {
+        if absorbed.contains(&people[i].0) {
+            continue;
+        }
+        let emb_i = match vector::decode(&people[i].2) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        for j in (i + 1)..people.len() {
+            if absorbed.contains(&people[j].0) {
+                continue;
+            }
+            let emb_j = match vector::decode(&people[j].2) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if vector::similarity(&emb_i, &emb_j) < CONSOLIDATE_THRESHOLD {
+                continue;
+            }
+
+            let name_i = people[i]
+                .1
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let name_j = people[j]
+                .1
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+
+            // Never auto-merge two differently named people.
+            if name_i.is_some() && name_j.is_some() && name_i != name_j {
+                continue;
+            }
+
+            let (into, from) = match (name_i, name_j) {
+                (Some(_), None) => (&people[i].0, &people[j].0),
+                (None, Some(_)) => (&people[j].0, &people[i].0),
+                _ => {
+                    let count_i: i64 = conn
+                        .query_row(
+                            "SELECT face_count FROM people WHERE id = ?1",
+                            params![people[i].0],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    let count_j: i64 = conn
+                        .query_row(
+                            "SELECT face_count FROM people WHERE id = ?1",
+                            params![people[j].0],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    if count_j > count_i {
+                        (&people[j].0, &people[i].0)
+                    } else {
+                        (&people[i].0, &people[j].0)
+                    }
+                }
+            };
+
+            if absorbed.contains(into) || absorbed.contains(from) {
+                continue;
+            }
+            merge(conn, into, from)?;
+            absorbed.insert(from.clone());
+            merged += 1;
+            if from == &people[i].0 {
+                break;
+            }
+        }
+    }
+    Ok(merged)
 }
 
 pub fn rename(conn: &Connection, person_id: &str, name: &str) -> AppResult<()> {
@@ -292,13 +402,28 @@ pub fn refresh_person_stats(conn: &Connection, person_id: &str) -> AppResult<()>
         params![person_id],
         |r| r.get(0),
     )?;
-    let cover: Option<String> = conn
-        .query_row(
-            "SELECT id FROM faces WHERE person_id = ?1 ORDER BY score DESC LIMIT 1",
-            params![person_id],
-            |r| r.get(0),
-        )
-        .optional()?;
+    // Prefer a cover whose crop JPEG still exists; fall back to highest score.
+    let cover: Option<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, crop_path FROM faces WHERE person_id = ?1 ORDER BY score DESC",
+        )?;
+        let rows = stmt.query_map(params![person_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        let mut fallback = None;
+        let mut with_crop = None;
+        for row in rows.flatten() {
+            let (id, crop) = row;
+            if fallback.is_none() {
+                fallback = Some(id.clone());
+            }
+            if with_crop.is_none() && crop.as_deref().is_some_and(|p| Path::new(p).is_file()) {
+                with_crop = Some(id);
+                break;
+            }
+        }
+        with_crop.or(fallback)
+    };
     conn.execute(
         "UPDATE people SET face_count = ?1, cover_face_id = ?2, updated_at = ?3 WHERE id = ?4",
         params![
@@ -371,5 +496,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gone, 0);
+    }
+
+    #[test]
+    fn consolidate_merges_near_duplicate_unnamed_clusters() {
+        let (_dir, conn) = open();
+        let mut a = unit(0);
+        let mut b = unit(0);
+        b[1] = 0.05;
+        vector::normalize(&mut a);
+        vector::normalize(&mut b);
+        let p1 = assign(&conn, &a).unwrap();
+        // assign() leaves face_count at 0 until faces are stored; bump it so
+        // consolidate considers the cluster.
+        conn.execute(
+            "UPDATE people SET face_count = 1 WHERE id = ?1",
+            params![p1.person_id],
+        )
+        .unwrap();
+        let p2 = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO people (id, name, cover_face_id, face_count, centroid, centroid_count, created_at, updated_at)
+             VALUES (?1, NULL, NULL, 1, ?2, 1, ?3, ?3)",
+            params![p2, vector::encode(&b), now],
+        )
+        .unwrap();
+        let merged = consolidate_similar_people(&conn).unwrap();
+        assert!(merged >= 1);
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM people", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1);
     }
 }

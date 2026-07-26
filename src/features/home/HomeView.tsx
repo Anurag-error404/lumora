@@ -43,6 +43,13 @@ const FEATURES: {
     cta: "Browse videos",
   },
   {
+    title: "Duplicates & blur cleanup",
+    body: "Exact matches clean in bulk; near-duplicates and blurry shots stay review-only so you decide what leaves the library.",
+    icon: "copy",
+    action: "duplicates",
+    cta: "Review duplicates",
+  },
+  {
     title: "Watched folders",
     body: "Point LUMORA at a folder and new photos appear in your library as they land on disk.",
     icon: "folder",

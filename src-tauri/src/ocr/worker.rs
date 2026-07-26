@@ -70,13 +70,14 @@ impl OcrWorker {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let cov = ocr::coverage(&conn)?;
         let pending = cov.total.saturating_sub(cov.done);
+        let bundle = ocr::active_bundle(&self.app_data);
         Ok(OcrProgress {
             pending,
             done: cov.done,
             total: cov.total,
             running: self.running.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
-            model_ready: ocr::ocr_ready(&conn)?,
+            model_ready: ocr::ocr_ready_bundle(&conn, &bundle)?,
         })
     }
 
@@ -137,11 +138,12 @@ impl OcrWorker {
 
         let conn = Connection::open(&self.db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        if !ocr::ocr_ready(&conn)? {
+        let bundle = ocr::active_bundle(&self.app_data);
+        if !ocr::ocr_ready_bundle(&conn, &bundle)? {
             return Ok(None);
         }
-        let paths = ocr::model_paths(&conn)?;
-        tracing::info!("loading OCR engine for background text extraction");
+        let paths = ocr::model_paths_for(&conn, &bundle)?;
+        tracing::info!(bundle = %bundle, "loading OCR engine for background text extraction");
         let engine = Arc::new(OcrEngine::load(&paths)?);
         *self.engine.lock() = Some(Arc::clone(&engine));
         Ok(Some(engine))

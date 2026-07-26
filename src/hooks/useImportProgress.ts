@@ -11,7 +11,7 @@ export function useImportProgress() {
     let unlisten: (() => void) | undefined;
     void listen<ImportProgressEvent>("import-progress", (event) => {
       setImportProgress(event.payload);
-      if (event.payload.phase === "done") {
+      if (event.payload.phase === "done" || event.payload.phase === "cancelled") {
         window.setTimeout(() => setImportProgress(null), 1200);
       }
     }).then((fn) => {

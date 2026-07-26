@@ -4,7 +4,8 @@ use crate::error::AppResult;
 use crate::models::DuplicateGroup;
 
 /// Max Hamming distance (aHash bits) to treat two images as near-duplicates.
-pub const NEAR_DUP_HAMMING_THRESHOLD: u32 = 5;
+/// Kept tight (≤2 of 64) to limit false positives from coarse 8×8 aHash.
+pub const NEAR_DUP_HAMMING_THRESHOLD: u32 = 2;
 
 pub fn find_exact_duplicates(conn: &Connection) -> AppResult<Vec<DuplicateGroup>> {
     let mut stmt = conn.prepare(
@@ -164,20 +165,29 @@ mod tests {
 
     #[test]
     fn near_dupes_by_hamming_distance() {
-        // Two hashes 3 bits apart (< threshold 5), different SHA.
+        // Two hashes 2 bits apart (at threshold), different SHA.
         let a = 0u64;
-        let b = 0b111u64; // hamming 3
+        let b = 0b11u64; // hamming 2
         let c = !0u64; // far from a/b
         let entries = vec![
             ("a".into(), "sha-a".into(), a),
             ("b".into(), "sha-b".into(), b),
             ("c".into(), "sha-c".into(), c),
         ];
-        let groups = cluster_near_duplicates(&entries, 5);
+        let groups = cluster_near_duplicates(&entries, NEAR_DUP_HAMMING_THRESHOLD);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].asset_ids.len(), 2);
         assert!(groups[0].asset_ids.contains(&"a".into()));
         assert!(groups[0].asset_ids.contains(&"b".into()));
+    }
+
+    #[test]
+    fn near_dupes_reject_distance_above_threshold() {
+        let entries = vec![
+            ("a".into(), "sha-a".into(), 0u64),
+            ("b".into(), "sha-b".into(), 0b111u64), // hamming 3
+        ];
+        assert!(cluster_near_duplicates(&entries, NEAR_DUP_HAMMING_THRESHOLD).is_empty());
     }
 
     #[test]
@@ -198,7 +208,7 @@ mod tests {
         conn.execute(
             "INSERT INTO assets (id, path, hash, perceptual_hash, media_type, created_at, indexed_at)
              VALUES ('a','/a.jpg','sha-a','0000000000000000','image','t','t'),
-                    ('b','/b.jpg','sha-b','0000000000000007','image','t','t'),
+                    ('b','/b.jpg','sha-b','0000000000000003','image','t','t'),
                     ('c','/c.jpg','sha-c','ffffffffffffffff','image','t','t')",
             [],
         )

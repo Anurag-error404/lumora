@@ -18,6 +18,7 @@ export type View =
   | "documents"
   | "receipts"
   | "people"
+  | "places"
   | "trash"
   | "favorites"
   | "locked"

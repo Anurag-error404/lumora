@@ -43,9 +43,23 @@ pub struct OcrCoverage {
     pub total: i64,
 }
 
+pub fn active_bundle(app_data: &std::path::Path) -> String {
+    let preferred = crate::preferences::load(app_data)
+        .map(|p| p.ai.ocr_model)
+        .unwrap_or_else(|_| "rapidocr-ppv4".into());
+    let opt = ml::library::resolve_active(ml::library::Capability::Ocr, &preferred);
+    opt.bundle
+        .unwrap_or(ml::catalog::OCR_BUNDLE)
+        .to_string()
+}
+
 /// True when every OCR bundle file is registered.
 pub fn ocr_ready(conn: &Connection) -> AppResult<bool> {
-    for entry in ml::catalog::bundle(ml::catalog::OCR_BUNDLE) {
+    ocr_ready_bundle(conn, ml::catalog::OCR_BUNDLE)
+}
+
+pub fn ocr_ready_bundle(conn: &Connection, bundle: &str) -> AppResult<bool> {
+    for entry in ml::catalog::bundle(bundle) {
         if ml::installed_row(conn, entry.id)?.is_none() {
             return Ok(false);
         }
@@ -54,10 +68,33 @@ pub fn ocr_ready(conn: &Connection) -> AppResult<bool> {
 }
 
 pub fn model_paths(conn: &Connection) -> AppResult<OcrModelPaths> {
+    model_paths_for(conn, ml::catalog::OCR_BUNDLE)
+}
+
+pub fn model_paths_for(conn: &Connection, bundle: &str) -> AppResult<OcrModelPaths> {
+    let mut det = None;
+    let mut rec = None;
+    let mut dict = None;
+    for entry in ml::catalog::bundle(bundle) {
+        match entry.kind {
+            ModelKind::OcrDetect => det = Some(ml::require_path(conn, entry.id)?),
+            ModelKind::OcrRecognize if entry.file_name.ends_with(".txt") => {
+                dict = Some(ml::require_path(conn, entry.id)?)
+            }
+            ModelKind::OcrRecognize => rec = Some(ml::require_path(conn, entry.id)?),
+            _ => {}
+        }
+    }
     Ok(OcrModelPaths {
-        det: ml::require_path(conn, DET_MODEL_ID)?,
-        rec: ml::require_path(conn, REC_MODEL_ID)?,
-        dict: ml::require_path(conn, DICT_MODEL_ID)?,
+        det: det.ok_or_else(|| {
+            crate::error::AppError::msg(format!("OCR detect model missing in bundle {bundle}"))
+        })?,
+        rec: rec.ok_or_else(|| {
+            crate::error::AppError::msg(format!("OCR recognize model missing in bundle {bundle}"))
+        })?,
+        dict: dict.ok_or_else(|| {
+            crate::error::AppError::msg(format!("OCR dictionary missing in bundle {bundle}"))
+        })?,
     })
 }
 

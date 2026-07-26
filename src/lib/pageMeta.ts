@@ -69,4 +69,9 @@ export const LIBRARY_PAGE_META: Partial<
     description:
       "Faces grouped on-device. Name a person once to browse every photo they appear in.",
   },
+  places: {
+    title: "Places",
+    description:
+      "Photos grouped by where they were taken, reverse-geocoded entirely on-device from GPS EXIF.",
+  },
 };

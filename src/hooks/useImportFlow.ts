@@ -29,15 +29,37 @@ export function useImportFlow({
     });
     try {
       const result = await api.importPaths(paths);
-      setError(
-        `Imported: scanned ${result.scanned}, inserted ${result.inserted}, updated ${result.updated}`,
-      );
+      const rate =
+        result.filesPerSec != null && result.filesPerSec > 0
+          ? ` · ${result.filesPerSec.toFixed(1)} files/s`
+          : "";
+      const timing =
+        result.durationMs != null && result.durationMs > 0
+          ? ` in ${(result.durationMs / 1000).toFixed(1)}s${rate}`
+          : "";
+      if (result.cancelled) {
+        setError(
+          `Import stopped: scanned ${result.scanned}, inserted ${result.inserted}, updated ${result.updated}${timing}. Already-indexed files stay in the library.`,
+        );
+      } else {
+        setError(
+          `Imported: scanned ${result.scanned}, inserted ${result.inserted}, updated ${result.updated}${timing}`,
+        );
+      }
       await loadAssets();
     } catch (e) {
       setError(String(e));
       setImportProgress(null);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function cancelImport() {
+    try {
+      await api.cancelImport();
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -63,5 +85,11 @@ export function useImportFlow({
     await runImport([selected]);
   }
 
-  return { importModal, setImportModal, onImportFiles, onImportFolder };
+  return {
+    importModal,
+    setImportModal,
+    onImportFiles,
+    onImportFolder,
+    cancelImport,
+  };
 }

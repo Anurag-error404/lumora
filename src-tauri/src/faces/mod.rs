@@ -60,8 +60,23 @@ pub struct FaceBox {
     pub person_ignored: bool,
 }
 
+/// Active faces bundle from preferences (falls back to buffalo_l).
+pub fn active_bundle(app_data: &Path) -> String {
+    let preferred = crate::preferences::load(app_data)
+        .map(|p| p.ai.faces_model)
+        .unwrap_or_else(|_| "insightface-buffalo-l".into());
+    let opt = ml::library::resolve_active(ml::library::Capability::Faces, &preferred);
+    opt.bundle
+        .unwrap_or(ml::catalog::FACES_BUNDLE)
+        .to_string()
+}
+
 pub fn faces_ready(conn: &Connection) -> AppResult<bool> {
-    for entry in ml::catalog::bundle(ml::catalog::FACES_BUNDLE) {
+    faces_ready_bundle(conn, ml::catalog::FACES_BUNDLE)
+}
+
+pub fn faces_ready_bundle(conn: &Connection, bundle: &str) -> AppResult<bool> {
+    for entry in ml::catalog::bundle(bundle) {
         if ml::installed_row(conn, entry.id)?.is_none() {
             return Ok(false);
         }
@@ -70,9 +85,26 @@ pub fn faces_ready(conn: &Connection) -> AppResult<bool> {
 }
 
 pub fn model_paths(conn: &Connection) -> AppResult<FaceModelPaths> {
+    model_paths_for(conn, ml::catalog::FACES_BUNDLE)
+}
+
+pub fn model_paths_for(conn: &Connection, bundle: &str) -> AppResult<FaceModelPaths> {
+    let mut det = None;
+    let mut rec = None;
+    for entry in ml::catalog::bundle(bundle) {
+        match entry.kind {
+            ModelKind::FaceDetect => det = Some(ml::require_path(conn, entry.id)?),
+            ModelKind::FaceEmbed => rec = Some(ml::require_path(conn, entry.id)?),
+            _ => {}
+        }
+    }
     Ok(FaceModelPaths {
-        det: ml::require_path(conn, DET_MODEL_ID)?,
-        rec: ml::require_path(conn, REC_MODEL_ID)?,
+        det: det.ok_or_else(|| {
+            crate::error::AppError::msg(format!("face detect model missing in bundle {bundle}"))
+        })?,
+        rec: rec.ok_or_else(|| {
+            crate::error::AppError::msg(format!("face embed model missing in bundle {bundle}"))
+        })?,
     })
 }
 
@@ -115,10 +147,20 @@ pub fn store_detections(
     let now = chrono::Utc::now().to_rfc3339();
     for det in detections {
         let face_id = uuid::Uuid::new_v4().to_string();
-        let crop_path = faces_dir.join(format!("{face_id}.jpg"));
+        let crop_file = faces_dir.join(format!("{face_id}.jpg"));
         let rgb = image::DynamicImage::ImageRgba8(det.crop.clone()).to_rgb8();
-        rgb.save_with_format(&crop_path, ImageFormat::Jpeg)
-            .map_err(|e| crate::error::AppError::msg(format!("face crop save: {e}")))?;
+        let crop_path = match rgb.save_with_format(&crop_file, ImageFormat::Jpeg) {
+            Ok(()) => Some(crop_file.display().to_string()),
+            Err(e) => {
+                tracing::warn!(
+                    asset = %asset_id,
+                    face = %face_id,
+                    error = %e,
+                    "face crop save skipped"
+                );
+                None
+            }
+        };
 
         let assigned = cluster::assign(conn, &det.embedding)?;
         conn.execute(
@@ -135,7 +177,7 @@ pub fn store_detections(
                 det.h as f64,
                 det.score as f64,
                 vector::encode(&det.embedding),
-                crop_path.display().to_string(),
+                crop_path,
                 now
             ],
         )?;
@@ -217,8 +259,55 @@ fn map_person(r: &rusqlite::Row<'_>) -> rusqlite::Result<Person> {
         face_count: r.get(2)?,
         created_at: r.get(3)?,
         ignored: r.get::<_, i64>(4)? != 0,
-        cover_crop_path: r.get(5)?,
+        cover_crop_path: existing_crop_path(r.get(5)?),
     })
+}
+
+/// Return the path only when the JPEG still exists on disk.
+fn existing_crop_path(path: Option<String>) -> Option<String> {
+    path.filter(|p| Path::new(p).is_file())
+}
+
+/// Clear stale `crop_path` rows and refresh person covers after cache wipes.
+pub fn repair_missing_face_crops(conn: &Connection) -> AppResult<u32> {
+    let rows: Vec<(String, Option<String>, Option<String>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, crop_path, person_id FROM faces
+             WHERE crop_path IS NOT NULL AND crop_path != ''",
+        )?;
+        let mapped = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        mapped.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut cleared = 0u32;
+    let mut people = std::collections::HashSet::new();
+    for (face_id, crop_path, person_id) in rows {
+        let missing = match &crop_path {
+            Some(p) => !Path::new(p).is_file(),
+            None => false,
+        };
+        if !missing {
+            continue;
+        }
+        conn.execute(
+            "UPDATE faces SET crop_path = NULL WHERE id = ?1",
+            params![face_id],
+        )?;
+        cleared += 1;
+        if let Some(pid) = person_id {
+            people.insert(pid);
+        }
+    }
+    for person_id in people {
+        let _ = cluster::refresh_person_stats(conn, &person_id);
+    }
+    Ok(cleared)
 }
 
 /// Hide (or restore) a person. The cluster and its centroid are kept so future
@@ -290,7 +379,7 @@ pub fn list_asset_faces(conn: &Connection, asset_id: &str) -> AppResult<Vec<Face
             bbox_w: r.get::<_, f64>(6)? as f32,
             bbox_h: r.get::<_, f64>(7)? as f32,
             score: r.get::<_, f64>(8)? as f32,
-            crop_path: r.get(9)?,
+            crop_path: existing_crop_path(r.get(9)?),
             person_ignored: r.get::<_, i64>(10)? != 0,
         })
     })?;

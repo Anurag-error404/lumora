@@ -114,11 +114,11 @@ fn perf_smoke_measure_and_print() {
 
     assert!(
         thumbs_per_min >= 100.0,
-        "thumb throughput {thumbs_per_min:.1}/min below SPEC goal of 100/min"
+        "thumb throughput {thumbs_per_min:.1}/min below goal of 100/min"
     );
     assert!(
         search_ms < 100.0,
-        "FTS search {search_ms:.2}ms above SPEC goal of 100ms"
+        "FTS search {search_ms:.2}ms above goal of 100ms"
     );
     assert!(hit_count > 0, "expected FTS hits for Canon");
 }

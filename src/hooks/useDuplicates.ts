@@ -6,10 +6,15 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { api, type AssetSummary, type DuplicateGroup } from "../lib/tauri";
+import {
+  api,
+  type AssetSummary,
+  type BlurryAsset,
+  type DuplicateGroup,
+} from "../lib/tauri";
 import type { View } from "../types/app";
 
-/** Duplicate groups plus a lookup map of the assets they reference. */
+/** Duplicate groups, blurry candidates, and asset lookups for cleanup review. */
 export function useDuplicates({
   view,
   setError,
@@ -21,13 +26,23 @@ export function useDuplicates({
   const [dupeAssets, setDupeAssets] = useState<Map<string, AssetSummary>>(
     new Map(),
   );
+  const [blurry, setBlurry] = useState<BlurryAsset[]>([]);
 
   const loadDuplicates = useCallback(async () => {
     try {
       setError(null);
-      const groups = await api.findDuplicates();
+      const [groups, blurryRows] = await Promise.all([
+        api.findDuplicates(),
+        api.listBlurryAssets(200, 0),
+      ]);
       setDupes(groups);
-      const ids = [...new Set(groups.flatMap((g) => g.assetIds))];
+      setBlurry(blurryRows);
+      const ids = [
+        ...new Set([
+          ...groups.flatMap((g) => g.assetIds),
+          ...blurryRows.map((b) => b.asset.id),
+        ]),
+      ];
       const rows = ids.length ? await api.listAssetsByIds(ids) : [];
       setDupeAssets(new Map(rows.map((a) => [a.id, a])));
     } catch (e) {
@@ -51,8 +66,20 @@ export function useDuplicates({
         rows.push(asset);
       }
     }
+    for (const hit of blurry) {
+      if (seen.has(hit.asset.id)) continue;
+      seen.add(hit.asset.id);
+      rows.push(dupeAssets.get(hit.asset.id) ?? hit.asset);
+    }
     return rows;
-  }, [dupes, dupeAssets]);
+  }, [dupes, dupeAssets, blurry]);
 
-  return { dupes, dupeAssets, setDupeAssets, loadDuplicates, dupeAssetList };
+  return {
+    dupes,
+    dupeAssets,
+    setDupeAssets,
+    blurry,
+    loadDuplicates,
+    dupeAssetList,
+  };
 }

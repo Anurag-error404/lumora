@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::albums;
+use crate::blur;
 use crate::diagnostics;
 use crate::duplicates;
 use crate::edit::{self, EditOps, EditResult, SaveMode};
@@ -19,12 +20,14 @@ use crate::indexer::queue::IndexerQueue;
 use crate::ml;
 use crate::models::*;
 use crate::ocr;
+use crate::places;
 use crate::preferences::{self, Preferences, StorageSummary};
 use crate::saved_searches;
 use crate::search;
 use crate::semantic;
 use crate::smart;
 use crate::state::{AppState, VaultSession};
+use crate::tags;
 use crate::thumbnails;
 use crate::trash;
 use crate::vault;
@@ -118,9 +121,14 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     }
 
     // Extract owned paths so we don't hold `State<'_>` across threads.
-    let (db_path, thumbs) = {
+    let (db_path, thumbs, cancel) = {
         let state = app.state::<AppState>();
-        (state.paths.db_path.clone(), state.paths.thumbs_dir.clone())
+        state.import_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        (
+            state.paths.db_path.clone(),
+            state.paths.thumbs_dir.clone(),
+            Arc::clone(&state.import_cancel),
+        )
     };
 
     let label = if roots.len() == 1 {
@@ -145,12 +153,17 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<ImportResult> {
         let conn = Connection::open(&db_path)?;
         conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;",
+        )?;
 
         let result = indexer::import_paths_with_progress(
             &conn,
             &roots_for_job,
             &thumbs,
+            cancel,
             |current, total, file| {
                 let _ = app_for_job.emit(
                     "import-progress",
@@ -165,9 +178,11 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
         )?;
 
         // Only watch directories — individual files don't create a watched root.
-        for root in &roots_for_job {
-            if root.is_dir() {
-                let _ = watcher::add_watched(&conn, root);
+        if !result.cancelled {
+            for root in &roots_for_job {
+                if root.is_dir() {
+                    let _ = watcher::add_watched(&conn, root);
+                }
             }
         }
         Ok(result)
@@ -175,33 +190,60 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     .await
     .map_err(|e| AppError::msg(format!("import task failed: {e}")))??;
 
-    if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
-        for root in &roots {
-            if root.is_dir() {
-                ws.add_root(root.clone());
+    // Local-only import analytics (Activity + import_runs). Never sent off-device.
+    if let Some(state) = app.try_state::<AppState>() {
+        let roots_for_log = roots.clone();
+        let result_for_log = result.clone();
+        let _ = state.with_db(|conn| {
+            history::record_import_run(conn, &result_for_log, &roots_for_log)
+        });
+    }
+
+    if !result.cancelled {
+        if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
+            for root in &roots {
+                if root.is_dir() {
+                    ws.add_root(root.clone());
+                }
             }
         }
     }
 
-    // Newly imported photos may need CLIP embeddings / OCR / faces.
+    // Newly imported photos may need CLIP embeddings / OCR / faces / places / tags.
     if let Some(state) = app.try_state::<AppState>() {
         state.embedder.kick();
         state.ocr.kick();
         state.faces.kick();
+        state.places.kick();
+        state.tags.kick();
     }
 
+    let phase = if result.cancelled {
+        "cancelled"
+    } else {
+        "done"
+    };
     let _ = app.emit(
         "import-progress",
         ImportProgressEvent {
             current: result.scanned,
             total: result.scanned,
             path: label,
-            phase: "done".into(),
+            phase: phase.into(),
         },
     );
 
     tracing::info!(?result, paths = ?paths, "media imported");
     Ok(result)
+}
+
+/// Abort an in-flight import. Already-indexed files stay in the library.
+#[tauri::command]
+pub fn cancel_import(state: State<'_, AppState>) -> AppResult<()> {
+    state
+        .import_cancel
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]
@@ -237,7 +279,7 @@ pub fn get_developer_info(state: State<'_, AppState>) -> AppResult<DeveloperInfo
     let database_size_bytes = std::fs::metadata(&state.paths.db_path)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    let (schema_version, watched_folder_count, activity_count, export_count) =
+    let (schema_version, watched_folder_count, activity_count, export_count, import_run_count) =
         state.with_db(|conn| {
             Ok((
                 scalar(
@@ -247,6 +289,7 @@ pub fn get_developer_info(state: State<'_, AppState>) -> AppResult<DeveloperInfo
                 scalar(conn, "SELECT COUNT(*) FROM watched_folders")?,
                 scalar(conn, "SELECT COUNT(*) FROM activity_log")?,
                 scalar(conn, "SELECT COUNT(*) FROM exports")?,
+                scalar(conn, "SELECT COUNT(*) FROM import_runs")?,
             ))
         })?;
 
@@ -273,6 +316,8 @@ pub fn get_developer_info(state: State<'_, AppState>) -> AppResult<DeveloperInfo
         watched_folder_count,
         activity_count,
         export_count,
+        import_run_count,
+        ffmpeg_available: thumbnails::ffmpeg::ffmpeg_available(),
         index_progress: state.indexer.progress(),
         recent_logs,
         crash_logs,
@@ -1277,6 +1322,7 @@ pub fn remove_ml_model(state: State<'_, AppState>, id: String) -> AppResult<ml::
     state.embedder.invalidate();
     state.ocr.invalidate();
     state.faces.invalidate();
+    state.tags.invalidate();
     Ok(status)
 }
 
@@ -1520,6 +1566,387 @@ pub fn clear_face_data(state: State<'_, AppState>) -> AppResult<usize> {
     Ok(n)
 }
 
+/// Download MobileNetV4 + ImageNet labels for on-device auto-tags.
+#[tauri::command]
+pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let (db_path, models_dir, app_data) = {
+        let state = app.state::<AppState>();
+        (
+            state.paths.db_path.clone(),
+            state.paths.models_dir.clone(),
+            state.paths.app_data.clone(),
+        )
+    };
+
+    let app_for_job = app.clone();
+    let dir_for_job = models_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        let entries: Vec<_> = ml::catalog::bundle(ml::catalog::TAGS_BUNDLE).collect();
+        let total_files = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            let app_progress = app_for_job.clone();
+            let file_label = entry.file_name.to_string();
+            ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
+                let _ = app_progress.emit(
+                    "model-progress",
+                    ModelProgressEvent {
+                        model_id: file_label.clone(),
+                        file_index: index as u32 + 1,
+                        file_count: total_files as u32,
+                        downloaded: done,
+                        total,
+                    },
+                );
+            })?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("auto-tags install task failed: {e}")))??;
+
+    if let Ok(mut prefs) = preferences::load(&app_data) {
+        prefs.ai.object_detection = true;
+        let _ = preferences::save(&app_data, &prefs);
+    }
+
+    let state = app.state::<AppState>();
+    state.tags.invalidate();
+    state.tags.kick();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagsStatusDto {
+    pub model_ready: bool,
+    pub enabled: bool,
+    pub done: i64,
+    pub total: i64,
+}
+
+#[tauri::command]
+pub fn tags_status(state: State<'_, AppState>) -> AppResult<TagsStatusDto> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| {
+        let cov = tags::coverage(conn)?;
+        Ok(TagsStatusDto {
+            model_ready: tags::tags_ready(conn)?,
+            enabled: prefs.ai.object_detection,
+            done: cov.done,
+            total: cov.total,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn tags_progress(state: State<'_, AppState>) -> AppResult<tags::worker::TagsProgress> {
+    state.tags.progress()
+}
+
+#[tauri::command]
+pub fn kick_tags(state: State<'_, AppState>) -> AppResult<()> {
+    state.tags.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_auto_tags(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(tags::clear_all)?;
+    state.tags.invalidate();
+    state.tags.kick();
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn list_asset_labels(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Vec<tags::AssetLabel>> {
+    state.with_db(|conn| tags::list_for_asset(conn, &asset_id))
+}
+
+#[tauri::command]
+pub fn list_import_runs(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> AppResult<Vec<history::ImportRun>> {
+    state.with_db(|conn| history::list_import_runs(conn, limit.min(100)))
+}
+
+/// Full pluggable model library with install/active state per capability.
+#[tauri::command]
+pub fn model_library(state: State<'_, AppState>) -> AppResult<Vec<ml::LibraryOptionStatus>> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| ml::library_status(conn, &prefs.ai))
+}
+
+/// Download every file for a library option's bundle (user-initiated only).
+#[tauri::command]
+pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResult<ml::MlStatus> {
+    let opt = ml::library::option(&option_id).ok_or_else(|| {
+        AppError::msg(format!("unknown model option '{option_id}'"))
+    })?;
+    let bundle = opt.bundle.ok_or_else(|| {
+        AppError::msg(format!(
+            "'{}' is a {} backend and does not download",
+            opt.name,
+            match opt.runtime {
+                ml::library::RuntimeKind::Native => "native",
+                ml::library::RuntimeKind::Onnx => "onnx",
+            }
+        ))
+    })?;
+
+    let (db_path, models_dir, app_data) = {
+        let state = app.state::<AppState>();
+        (
+            state.paths.db_path.clone(),
+            state.paths.models_dir.clone(),
+            state.paths.app_data.clone(),
+        )
+    };
+
+    let app_for_job = app.clone();
+    let dir_for_job = models_dir.clone();
+    let bundle_name = bundle.to_string();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let entries: Vec<_> = ml::catalog::bundle(&bundle_name).collect();
+        let total_files = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            let app_progress = app_for_job.clone();
+            let file_label = entry.file_name.to_string();
+            ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
+                let _ = app_progress.emit(
+                    "model-progress",
+                    ModelProgressEvent {
+                        model_id: file_label.clone(),
+                        file_index: index as u32 + 1,
+                        file_count: total_files as u32,
+                        downloaded: done,
+                        total,
+                    },
+                );
+            })?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("model install task failed: {e}")))??;
+
+    // Activate the option and enable the matching capability.
+    if let Ok(mut prefs) = preferences::load(&app_data) {
+        match opt.capability {
+            ml::library::Capability::SemanticSearch => {
+                prefs.ai.semantic_model = opt.id.to_string();
+                prefs.ai.semantic_search = true;
+            }
+            ml::library::Capability::Ocr => {
+                prefs.ai.ocr_model = opt.id.to_string();
+                prefs.ai.ocr = true;
+            }
+            ml::library::Capability::Faces => {
+                prefs.ai.faces_model = opt.id.to_string();
+                prefs.ai.face_recognition = true;
+            }
+            ml::library::Capability::AutoTags => {
+                prefs.ai.tags_model = opt.id.to_string();
+                prefs.ai.object_detection = true;
+            }
+            _ => {}
+        }
+        let _ = preferences::save(&app_data, &prefs);
+    }
+
+    let state = app.state::<AppState>();
+    state.embedder.invalidate();
+    state.ocr.invalidate();
+    state.faces.invalidate();
+    state.tags.invalidate();
+    state.embedder.kick();
+    state.ocr.kick();
+    state.faces.kick();
+    state.tags.kick();
+    state.with_db(|conn| ml::status(conn, &models_dir))
+}
+
+/// Switch the active backend for a capability. Optionally clear + re-run derived data.
+#[tauri::command]
+pub async fn set_active_model(
+    app: AppHandle,
+    option_id: String,
+    reprocess: bool,
+) -> AppResult<Vec<ml::LibraryOptionStatus>> {
+    let opt = ml::library::option(&option_id).ok_or_else(|| {
+        AppError::msg(format!("unknown model option '{option_id}'"))
+    })?;
+
+    // Install first when the option needs files that aren't present.
+    if let Some(bundle) = opt.bundle {
+        let needs_install = {
+            let state = app.state::<AppState>();
+            state.with_db(|conn| {
+                for entry in ml::catalog::bundle(bundle) {
+                    if ml::installed_row(conn, entry.id)?.is_none() {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })?
+        };
+        if needs_install {
+            install_model_option(app.clone(), option_id.clone()).await?;
+        }
+    }
+
+    let app_data = {
+        let state = app.state::<AppState>();
+        state.paths.app_data.clone()
+    };
+    let mut prefs = preferences::load(&app_data)?;
+    match opt.capability {
+        ml::library::Capability::SemanticSearch => {
+            prefs.ai.semantic_model = opt.id.to_string();
+        }
+        ml::library::Capability::Ocr => {
+            prefs.ai.ocr_model = opt.id.to_string();
+        }
+        ml::library::Capability::Faces => {
+            prefs.ai.faces_model = opt.id.to_string();
+        }
+        ml::library::Capability::AutoTags => {
+            prefs.ai.tags_model = opt.id.to_string();
+        }
+        _ => {}
+    }
+    preferences::save(&app_data, &prefs)?;
+
+    let state = app.state::<AppState>();
+    state.embedder.invalidate();
+    state.ocr.invalidate();
+    state.faces.invalidate();
+    state.tags.invalidate();
+
+    if reprocess {
+        let faces_dir = state.paths.faces_dir.clone();
+        match opt.capability {
+            ml::library::Capability::SemanticSearch => {
+                let _ = state.with_db(ml::clear_embeddings);
+                state.embedder.kick();
+            }
+            ml::library::Capability::Ocr => {
+                let _ = state.with_db(ocr::clear_all);
+                state.ocr.kick();
+            }
+            ml::library::Capability::Faces => {
+                let _ = state.with_db(|conn| faces::clear_all(conn, &faces_dir));
+                state.faces.kick();
+            }
+            ml::library::Capability::AutoTags => {
+                let _ = state.with_db(tags::clear_all);
+                state.tags.kick();
+            }
+            _ => {}
+        }
+    } else {
+        state.embedder.kick();
+        state.ocr.kick();
+        state.faces.kick();
+        state.tags.kick();
+    }
+
+    state.with_db(|conn| ml::library_status(conn, &prefs.ai))
+}
+
+/// Wipe derived AI data for the chosen capabilities and re-queue background work.
+///
+/// `kinds` accepts any of: `"semantic"`, `"ocr"`, `"faces"`, `"tags"`, `"all"`.
+#[tauri::command]
+pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult<ReprocessResult> {
+    let mut want_semantic = false;
+    let mut want_ocr = false;
+    let mut want_faces = false;
+    let mut want_tags = false;
+    for kind in &kinds {
+        match kind.as_str() {
+            "semantic" | "clip" | "embeddings" => want_semantic = true,
+            "ocr" | "text" => want_ocr = true,
+            "faces" | "people" => want_faces = true,
+            "tags" | "auto_tags" | "object_detection" => want_tags = true,
+            "all" => {
+                want_semantic = true;
+                want_ocr = true;
+                want_faces = true;
+                want_tags = true;
+            }
+            other => {
+                return Err(AppError::msg(format!(
+                    "unknown reprocess kind: {other} (use semantic, ocr, faces, tags, or all)"
+                )));
+            }
+        }
+    }
+    if !want_semantic && !want_ocr && !want_faces && !want_tags {
+        return Err(AppError::msg("select at least one AI capability to reprocess"));
+    }
+
+    let faces_dir = state.paths.faces_dir.clone();
+    let result = state.with_db(|conn| {
+        let mut out = ReprocessResult {
+            embeddings_cleared: 0,
+            ocr_cleared: 0,
+            faces_cleared: 0,
+            tags_cleared: 0,
+        };
+        if want_semantic {
+            out.embeddings_cleared = ml::clear_embeddings(conn)?;
+        }
+        if want_ocr {
+            out.ocr_cleared = ocr::clear_all(conn)?;
+        }
+        if want_faces {
+            out.faces_cleared = faces::clear_all(conn, &faces_dir)?;
+        }
+        if want_tags {
+            out.tags_cleared = tags::clear_all(conn)?;
+        }
+        Ok(out)
+    })?;
+
+    if want_semantic {
+        state.embedder.invalidate();
+        state.embedder.kick();
+    }
+    if want_ocr {
+        state.ocr.invalidate();
+        state.ocr.kick();
+    }
+    if want_faces {
+        state.faces.invalidate();
+        state.faces.kick();
+    }
+    if want_tags {
+        state.tags.invalidate();
+        state.tags.kick();
+    }
+    Ok(result)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReprocessResult {
+    pub embeddings_cleared: usize,
+    pub ocr_cleared: usize,
+    pub faces_cleared: usize,
+    pub tags_cleared: usize,
+}
+
 #[tauri::command]
 pub fn list_people(state: State<'_, AppState>) -> AppResult<Vec<faces::Person>> {
     state.with_db(faces::list_people)
@@ -1586,6 +2013,43 @@ pub fn list_asset_faces(
 pub fn recluster_faces(state: State<'_, AppState>) -> AppResult<usize> {
     let n = state.with_db(faces::cluster::recluster_unnamed)?;
     state.faces.kick();
+    Ok(n)
+}
+
+/// Distinct geotagged places, most-populated first, each with a cover thumbnail.
+#[tauri::command]
+pub fn list_places(state: State<'_, AppState>) -> AppResult<Vec<places::PlaceGroup>> {
+    state.with_db(places::list_places)
+}
+
+/// Photos taken at a given place label.
+#[tauri::command]
+pub fn list_place_assets(
+    state: State<'_, AppState>,
+    label: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| places::list_place_assets(conn, &label, limit, offset))
+}
+
+/// Live progress of the background GPS / reverse-geocode pass.
+#[tauri::command]
+pub fn places_progress(state: State<'_, AppState>) -> AppResult<places::worker::PlacesProgress> {
+    state.places.progress()
+}
+
+#[tauri::command]
+pub fn kick_places(state: State<'_, AppState>) -> AppResult<()> {
+    state.places.kick();
+    Ok(())
+}
+
+/// Drop all Places data so it can be rebuilt from originals' GPS EXIF.
+#[tauri::command]
+pub fn clear_places(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(places::clear_all)?;
+    state.places.kick();
     Ok(n)
 }
 
@@ -1662,6 +2126,24 @@ fn list_assets_preserving_order(
 #[tauri::command]
 pub fn find_duplicates(state: State<'_, AppState>) -> AppResult<Vec<DuplicateGroup>> {
     state.with_db(duplicates::all_duplicates)
+}
+
+/// Soft-focus / out-of-focus images (Laplacian variance ≤ threshold).
+#[tauri::command]
+pub fn list_blurry_assets(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> AppResult<Vec<BlurryAsset>> {
+    state.with_db(|conn| {
+        blur::list_blurry(conn, limit.unwrap_or(200), offset.unwrap_or(0))
+    })
+}
+
+/// Score images that still lack a blur_score (uses thumbnails when present).
+#[tauri::command]
+pub fn scan_blur_scores(state: State<'_, AppState>, limit: Option<u32>) -> AppResult<usize> {
+    state.with_db(|conn| blur::backfill_missing(conn, limit.unwrap_or(500)))
 }
 
 #[tauri::command]

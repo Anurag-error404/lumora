@@ -22,6 +22,11 @@ const REC_SIZE: u32 = 112;
 const DET_THRESH: f32 = 0.5;
 const NMS_THRESH: f32 = 0.4;
 const MAX_FACES: usize = 32;
+/// Skip detections where less than this fraction of the face box lies inside
+/// the image (edge-clipped / mostly off-frame faces).
+const MIN_VISIBILITY: f32 = 0.80;
+/// Skip detections that are not sufficiently front-facing (profiles / backs).
+const MIN_FRONTAL: f32 = 0.80;
 const STRIDES: [u32; 3] = [8, 16, 32];
 const NUM_ANCHORS: usize = 2;
 
@@ -206,15 +211,28 @@ impl FaceEngine {
                 let cy = (ay + 0.5) * *stride as f32;
                 let d = &dists[idx * 4..idx * 4 + 4];
                 let (x, y, w, h) = distance2bbox(cx, cy, [d[0], d[1], d[2], d[3]], *stride as f32);
-                let x = (x / scale).clamp(0.0, orig_w as f32 - 1.0);
-                let y = (y / scale).clamp(0.0, orig_h as f32 - 1.0);
-                let w = (w / scale).max(1.0).min(orig_w as f32 - x);
-                let h = (h / scale).max(1.0).min(orig_h as f32 - y);
+                // Keep unclamped box so we can measure how much of the face is
+                // still inside the frame before edge-clipping for storage/crops.
+                let x_raw = x / scale;
+                let y_raw = y / scale;
+                let w_raw = (w / scale).max(1.0);
+                let h_raw = (h / scale).max(1.0);
+                if face_visibility(x_raw, y_raw, w_raw, h_raw, orig_w, orig_h) < MIN_VISIBILITY {
+                    continue;
+                }
+                let x = x_raw.clamp(0.0, orig_w as f32 - 1.0);
+                let y = y_raw.clamp(0.0, orig_h as f32 - 1.0);
+                let w = w_raw.min(orig_w as f32 - x).max(1.0);
+                let h = h_raw.min(orig_h as f32 - y).max(1.0);
                 let mut kps = [[0.0f32; 2]; 5];
                 for k in 0..5 {
                     let kx = kps_data[idx * 10 + k * 2] * *stride as f32 + cx;
                     let ky = kps_data[idx * 10 + k * 2 + 1] * *stride as f32 + cy;
                     kps[k] = [kx / scale, ky / scale];
+                }
+                // Profiles / backs: landmark geometry fails the frontal gate.
+                if frontal_score(&kps, w) < MIN_FRONTAL {
+                    continue;
                 }
                 candidates.push(RawDet {
                     x,
@@ -303,6 +321,107 @@ fn arcface_pixels(aligned: &RgbaImage) -> Vec<f32> {
         }
     }
     out
+}
+
+/// Fraction of the detection box that lies inside the image bounds.
+///
+/// Boxes that hang off the edge (partial faces) score below 1.0. Callers use
+/// this to skip faces that are not at least [`MIN_VISIBILITY`] visible.
+pub fn face_visibility(x: f32, y: f32, w: f32, h: f32, img_w: u32, img_h: u32) -> f32 {
+    if w <= 0.0 || h <= 0.0 {
+        return 0.0;
+    }
+    let img_w = img_w as f32;
+    let img_h = img_h as f32;
+    let x1 = x.max(0.0);
+    let y1 = y.max(0.0);
+    let x2 = (x + w).min(img_w);
+    let y2 = (y + h).min(img_h);
+    let iw = (x2 - x1).max(0.0);
+    let ih = (y2 - y1).max(0.0);
+    (iw * ih) / (w * h)
+}
+
+/// Estimate how front-facing a detection is from SCRFD's 5 landmarks.
+///
+/// Landmark order (InsightFace): left eye, right eye, nose, left mouth, right mouth.
+/// Returns `1.0` for a clear frontal face and near `0.0` for profiles / backs.
+///
+/// Gates used:
+/// - inter-ocular distance vs face width (profiles collapse the eyes)
+/// - nose / mouth midline vs eye midline (yaw)
+/// - eye-line roll
+/// - mouth width vs inter-ocular distance
+pub fn frontal_score(kps: &[[f32; 2]; 5], face_w: f32) -> f32 {
+    let le = kps[0];
+    let re = kps[1];
+    let nose = kps[2];
+    let lm = kps[3];
+    let rm = kps[4];
+
+    let eye_dx = re[0] - le[0];
+    let eye_dy = re[1] - le[1];
+    let iod = (eye_dx * eye_dx + eye_dy * eye_dy).sqrt();
+    if !iod.is_finite() || iod < 2.0 || face_w < 2.0 {
+        return 0.0;
+    }
+
+    // Left eye must be left of right eye in image space for a usable frontal pose.
+    if eye_dx <= 0.0 {
+        return 0.0;
+    }
+
+    // Profiles / backs: eyes sit too close together relative to the face box.
+    let eye_span = (iod / face_w).clamp(0.0, 1.0);
+    let span_score = if eye_span < 0.22 {
+        0.0
+    } else if eye_span >= 0.32 {
+        1.0
+    } else {
+        (eye_span - 0.22) / 0.10
+    };
+
+    let mid_x = (le[0] + re[0]) * 0.5;
+    let mid_y = (le[1] + re[1]) * 0.5;
+
+    // Yaw: nose should sit near the eye midline.
+    let yaw = ((nose[0] - mid_x).abs() / iod).min(1.2) / 1.2;
+    let yaw_score = 1.0 - yaw;
+
+    // Mouth midpoint should also stay near the midline.
+    let mouth_mid_x = (lm[0] + rm[0]) * 0.5;
+    let mouth_yaw = ((mouth_mid_x - mid_x).abs() / iod).min(1.2) / 1.2;
+    let mouth_yaw_score = 1.0 - mouth_yaw;
+
+    // Roll: eyes roughly level.
+    let roll = (eye_dy.abs() / iod).min(1.0);
+    let roll_score = 1.0 - roll;
+
+    // Frontal faces have a visible mouth width on the order of the eye spacing.
+    let mouth_w = (rm[0] - lm[0]).abs();
+    let mouth_ratio = mouth_w / iod;
+    let mouth_score = if mouth_ratio < 0.35 {
+        0.0
+    } else if mouth_ratio >= 0.55 {
+        1.0
+    } else {
+        (mouth_ratio - 0.35) / 0.20
+    };
+
+    // Nose should sit below the eyes (rejects upside-down / garbage landmarks).
+    let nose_below = if nose[1] > mid_y + iod * 0.05 {
+        1.0
+    } else {
+        0.0
+    };
+
+    (span_score * 0.30
+        + yaw_score * 0.30
+        + mouth_yaw_score * 0.15
+        + roll_score * 0.10
+        + mouth_score * 0.10
+        + nose_below * 0.05)
+        .clamp(0.0, 1.0)
 }
 
 fn face_crop(rgba: &RgbaImage, x: f32, y: f32, w: f32, h: f32) -> RgbaImage {
@@ -472,6 +591,73 @@ mod tests {
         assert!((y - 80.0).abs() < 1e-5);
         assert!((w - 40.0).abs() < 1e-5);
         assert!((h - 60.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn fully_in_frame_face_is_fully_visible() {
+        assert!((face_visibility(10.0, 10.0, 50.0, 50.0, 200, 200) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn edge_clipped_face_visibility_drops_below_threshold() {
+        // Half the box hangs off the left edge → 50% visible.
+        let v = face_visibility(-50.0, 10.0, 100.0, 100.0, 200, 200);
+        assert!((v - 0.5).abs() < 1e-5);
+        assert!(v < MIN_VISIBILITY);
+    }
+
+    #[test]
+    fn mostly_visible_face_passes_threshold() {
+        // Only 10% clipped on the right → 90% visible.
+        let v = face_visibility(110.0, 10.0, 100.0, 100.0, 200, 200);
+        assert!((v - 0.9).abs() < 1e-5);
+        assert!(v >= MIN_VISIBILITY);
+    }
+
+    #[test]
+    fn frontal_landmarks_score_high() {
+        // Synthetic frontal 5-point set inside a ~100px-wide face.
+        let kps = [
+            [40.0, 40.0],  // left eye
+            [80.0, 40.0],  // right eye
+            [60.0, 60.0],  // nose
+            [45.0, 80.0],  // left mouth
+            [75.0, 80.0],  // right mouth
+        ];
+        let score = frontal_score(&kps, 100.0);
+        assert!(
+            score >= MIN_FRONTAL,
+            "expected frontal score ≥ {MIN_FRONTAL}, got {score}"
+        );
+    }
+
+    #[test]
+    fn profile_landmarks_score_low() {
+        // Eyes collapsed toward one side — classic SCRFD profile / back pattern.
+        let kps = [
+            [70.0, 40.0],
+            [78.0, 42.0],
+            [82.0, 55.0],
+            [72.0, 70.0],
+            [76.0, 72.0],
+        ];
+        let score = frontal_score(&kps, 100.0);
+        assert!(
+            score < MIN_FRONTAL,
+            "expected profile score < {MIN_FRONTAL}, got {score}"
+        );
+    }
+
+    #[test]
+    fn swapped_eyes_rejected() {
+        let kps = [
+            [80.0, 40.0], // "left" eye is actually on the right
+            [40.0, 40.0],
+            [60.0, 60.0],
+            [45.0, 80.0],
+            [75.0, 80.0],
+        ];
+        assert_eq!(frontal_score(&kps, 100.0), 0.0);
     }
 
     #[test]

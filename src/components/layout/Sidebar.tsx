@@ -48,7 +48,7 @@ const NAV_SECTIONS: readonly NavSection[] = [
     heading: "Discover",
     items: [
       { id: "people", label: "People", icon: "person" },
-      { id: "places", label: "Places", icon: "place", soon: true },
+      { id: "places", label: "Places", icon: "place" },
       { id: "tags", label: "Tags", icon: "label" },
       { id: "albums", label: "Albums", icon: "album" },
       { id: "savedSearches", label: "Recent searches", icon: "search" },
@@ -110,6 +110,7 @@ export function Sidebar({
   albumCount,
   tagCount,
   peopleCount,
+  placeCount,
   savedSearchCount,
   exportCount,
   lockedCount,
@@ -123,6 +124,7 @@ export function Sidebar({
   albumCount: number;
   tagCount: number;
   peopleCount: number;
+  placeCount: number;
   savedSearchCount: number;
   exportCount: number;
   lockedCount: number;
@@ -155,6 +157,8 @@ export function Sidebar({
         return tagCount;
       case "people":
         return peopleCount;
+      case "places":
+        return placeCount;
       case "savedSearches":
         return savedSearchCount;
       case "locked":

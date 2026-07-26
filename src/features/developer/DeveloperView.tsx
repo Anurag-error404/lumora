@@ -1,6 +1,7 @@
 import { PageHeader } from "../../components/PageHeader";
 import { formatBytes } from "../../lib/format";
 import type { DeveloperInfo } from "../../lib/tauri";
+import { ImportAnalyticsCard } from "./ImportAnalyticsCard";
 
 /** Local diagnostics: app/database/cache details, paths, and logs. */
 export function DeveloperView({
@@ -73,6 +74,14 @@ export function DeveloperView({
                   <dt>Export records</dt>
                   <dd>{info.exportCount}</dd>
                 </div>
+                <div>
+                  <dt>Import runs</dt>
+                  <dd>{info.importRunCount}</dd>
+                </div>
+                <div>
+                  <dt>ffmpeg</dt>
+                  <dd>{info.ffmpegAvailable ? "Available" : "Not on PATH"}</dd>
+                </div>
               </dl>
               <button onClick={() => onOpenPath(info.databasePath, true)}>
                 Show database
@@ -123,6 +132,8 @@ export function DeveloperView({
                 </p>
               )}
             </article>
+
+            <ImportAnalyticsCard />
           </section>
 
           <section className="developer-paths">

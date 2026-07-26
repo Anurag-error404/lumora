@@ -71,13 +71,14 @@ impl FaceWorker {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let cov = faces::coverage(&conn)?;
         let pending = cov.total.saturating_sub(cov.done);
+        let bundle = faces::active_bundle(&self.app_data);
         Ok(FacesProgress {
             pending,
             done: cov.done,
             total: cov.total,
             running: self.running.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
-            model_ready: faces::faces_ready(&conn)?,
+            model_ready: faces::faces_ready_bundle(&conn, &bundle)?,
         })
     }
 
@@ -138,11 +139,12 @@ impl FaceWorker {
 
         let conn = Connection::open(&self.db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        if !faces::faces_ready(&conn)? {
+        let bundle = faces::active_bundle(&self.app_data);
+        if !faces::faces_ready_bundle(&conn, &bundle)? {
             return Ok(None);
         }
-        let paths = faces::model_paths(&conn)?;
-        tracing::info!("loading face engine for background detection");
+        let paths = faces::model_paths_for(&conn, &bundle)?;
+        tracing::info!(bundle = %bundle, "loading face engine for background detection");
         let engine = Arc::new(FaceEngine::load(&paths)?);
         *self.engine.lock() = Some(Arc::clone(&engine));
         Ok(Some(engine))
@@ -177,6 +179,11 @@ impl FaceWorker {
                 }
             }
             thread::sleep(Duration::from_millis(BETWEEN_MS));
+        }
+        if done > 0 {
+            if let Err(e) = faces::cluster::consolidate_similar_people(&conn) {
+                tracing::debug!(error = %e, "face consolidate skipped");
+            }
         }
         Ok(done)
     }

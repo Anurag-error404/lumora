@@ -118,6 +118,31 @@ pub struct AiPrefs {
     pub auto_albums: bool,
     pub processing_device: String,
     pub background_processing: String,
+    /// Active library option id for semantic search (e.g. `clip-vit-b32`).
+    #[serde(default = "default_semantic_model")]
+    pub semantic_model: String,
+    /// Active library option id for OCR.
+    #[serde(default = "default_ocr_model")]
+    pub ocr_model: String,
+    /// Active library option id for faces.
+    #[serde(default = "default_faces_model")]
+    pub faces_model: String,
+    /// Active library option id for auto-tags.
+    #[serde(default = "default_tags_model")]
+    pub tags_model: String,
+}
+
+fn default_semantic_model() -> String {
+    "clip-vit-b32".into()
+}
+fn default_ocr_model() -> String {
+    "rapidocr-ppv4".into()
+}
+fn default_faces_model() -> String {
+    "insightface-buffalo-l".into()
+}
+fn default_tags_model() -> String {
+    "mobilenetv4-small".into()
 }
 
 impl Default for AiPrefs {
@@ -130,6 +155,10 @@ impl Default for AiPrefs {
             auto_albums: false,
             processing_device: "automatic".into(),
             background_processing: "always".into(),
+            semantic_model: default_semantic_model(),
+            ocr_model: default_ocr_model(),
+            faces_model: default_faces_model(),
+            tags_model: default_tags_model(),
         }
     }
 }

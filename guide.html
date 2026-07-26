@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="LUMORA guide — install, import, search, on-device AI, duplicates cleanup, Places, vault, and privacy."
+    />
+    <meta name="theme-color" content="#2f6f5e" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Guide — LUMORA</title>
+  </head>
+  <body class="guide-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="LUMORA home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">LUMORA</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="guide.html" aria-current="page">Guide</a>
+        <a
+          class="nav-cta"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+        >
+          <svg class="nav-cta-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </nav>
+    </header>
+
+    <main id="main" class="guide-layout">
+      <aside class="guide-toc" aria-label="On this page">
+        <p class="guide-toc-label">On this page</p>
+        <ol>
+          <li><a href="#install">Install &amp; run</a></li>
+          <li><a href="#import">Import library</a></li>
+          <li><a href="#browse">Browse &amp; organise</a></li>
+          <li><a href="#search">Search</a></li>
+          <li><a href="#ai">On-device AI</a></li>
+          <li><a href="#cleanup">Duplicates &amp; blur</a></li>
+          <li><a href="#places">Places &amp; people</a></li>
+          <li><a href="#vault">Encrypted vault</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#shortcuts">Shortcuts</a></li>
+        </ol>
+      </aside>
+
+      <article class="guide-content">
+        <header class="guide-hero">
+          <p class="guide-kicker">Documentation</p>
+          <h1>LUMORA guide</h1>
+          <p class="guide-lede">
+            How to run the desktop app, grow a local library, turn on optional
+            on-device models, and clean up duplicates — without sending photos
+            anywhere.
+          </p>
+        </header>
+
+        <section id="install" class="guide-section reveal">
+          <h2>Install &amp; run</h2>
+          <p>You need Bun, a stable Rust toolchain, and (on macOS) Xcode Command Line Tools.</p>
+          <pre class="guide-code"><code>bun install
+bun run tauri dev      # desktop app + Vite
+bun run tauri build    # release bundle</code></pre>
+          <ul>
+            <li>Ensure <code>~/.cargo/bin</code> is on your <code>PATH</code>.</li>
+            <li>
+              For video thumbnails, install <strong>ffmpeg</strong> /
+              <strong>ffprobe</strong> so they are on <code>PATH</code>. Without
+              them, videos still import; thumbs fall back to a placeholder.
+            </li>
+            <li>
+              Contributor notes live in <code>CONTRIBUTING.md</code>; architecture
+              decisions in <code>docs/adr/</code>.
+            </li>
+          </ul>
+        </section>
+
+        <section id="import" class="guide-section reveal">
+          <h2>Import your library</h2>
+          <ol>
+            <li>Open <strong>Home</strong> → <strong>Import photos</strong>, or drop a folder onto the window.</li>
+            <li>Originals stay on disk. LUMORA stores metadata, thumbs, and optional AI data in app data.</li>
+            <li>
+              Add <strong>Watched folders</strong> so new files appear automatically
+              (Settings → Library, or the Watched folders view).
+            </li>
+            <li>
+              Import timing is logged locally (Activity + Developer → import
+              analytics). Nothing is uploaded.
+            </li>
+          </ol>
+        </section>
+
+        <section id="browse" class="guide-section reveal">
+          <h2>Browse &amp; organise</h2>
+          <ul>
+            <li><strong>Library</strong> — virtualised grid of everything.</li>
+            <li><strong>Timeline</strong> — year / month browsing.</li>
+            <li><strong>Albums</strong> — manual collections; drag photos in.</li>
+            <li><strong>Tags, ratings, colour labels, favourites</strong> — from the selection bar or viewer.</li>
+            <li>
+              <strong>Smart collections</strong> — Videos, RAW, Screenshots
+              (path contains “screenshot”), Selfies, Panoramas, Documents,
+              Receipts.
+            </li>
+            <li>Open the <strong>info</strong> panel on any item for EXIF, tags, auto-tags, faces, and OCR text.</li>
+          </ul>
+        </section>
+
+        <section id="search" class="guide-section reveal">
+          <h2>Search</h2>
+          <p>
+            The toolbar search mixes full-text and (when models are installed)
+            semantic results.
+          </p>
+          <ul>
+            <li>Plain text matches filename, tags, camera, OCR, people, auto-tags.</li>
+            <li>
+              Filters such as <code>camera:iphone</code>,
+              <code>rating&gt;3</code>, <code>before:2024-01-01</code>.
+            </li>
+            <li>
+              Natural language (“dog on a beach”) uses on-device CLIP when the
+              semantic model is installed and enabled.
+            </li>
+            <li>Recent queries appear as toolbar hints and under Discover.</li>
+          </ul>
+        </section>
+
+        <section id="ai" class="guide-section reveal">
+          <h2>On-device AI</h2>
+          <p>
+            All models are optional. Install them from
+            <strong>Settings → AI</strong>. Downloads are user-initiated and
+            checksum-verified.
+          </p>
+          <dl class="guide-dl">
+            <div>
+              <dt>Semantic search</dt>
+              <dd>CLIP ViT-B/32 — find by description.</dd>
+            </div>
+            <div>
+              <dt>OCR</dt>
+              <dd>RapidOCR (PP-OCRv4 / v3) — text in screenshots and documents.</dd>
+            </div>
+            <div>
+              <dt>Faces / People</dt>
+              <dd>
+                InsightFace (buffalo_l / buffalo_s). Only faces that are ≥80%
+                in-frame and ≥80% front-facing are kept. Name, merge, ignore in
+                People.
+              </dd>
+            </div>
+            <div>
+              <dt>Auto-tags</dt>
+              <dd>
+                MobileNetV4 ImageNet labels. Shown in the info panel and
+                searchable. Enable <strong>Object detection / auto-tags</strong>.
+              </dd>
+            </div>
+            <div>
+              <dt>Model library</dt>
+              <dd>
+                Switch backends per capability, install the active option, and
+                re-run processing when you change models.
+              </dd>
+            </div>
+          </dl>
+          <p>
+            You can clear embeddings, OCR, faces, or auto-tags anytime without
+            deleting original files.
+          </p>
+        </section>
+
+        <section id="cleanup" class="guide-section reveal">
+          <h2>Duplicates &amp; blurry cleanup</h2>
+          <p>
+            Open <strong>Duplicates</strong> in the sidebar. Sections are
+            collapsible so you can scan quickly.
+          </p>
+          <ul>
+            <li>
+              <strong>Exact</strong> — identical SHA-256. Use
+              <em>Clean up all exact — keep 1 per group</em>, or keep a specific
+              file per group.
+            </li>
+            <li>
+              <strong>Near</strong> — perceptual aHash with Hamming ≤ 2. Review
+              each group; there is no bulk delete for near matches (false
+              positives can still happen with a coarse hash).
+            </li>
+            <li>
+              <strong>Blurry</strong> — Laplacian variance ≤ 80. Trash one or
+              trash all listed after review. Soft-focus portraits can score low
+              too.
+            </li>
+          </ul>
+          <p>Everything goes to Trash first — restore or undo with ⌘Z / Ctrl+Z.</p>
+        </section>
+
+        <section id="places" class="guide-section reveal">
+          <h2>Places &amp; people</h2>
+          <ul>
+            <li>
+              <strong>Places</strong> groups photos by GPS EXIF using offline
+              reverse geocoding (bundled GeoNames). No map tile network calls.
+            </li>
+            <li>
+              <strong>People</strong> lists face clusters after face models are
+              installed. Name people to make them searchable.
+            </li>
+          </ul>
+        </section>
+
+        <section id="vault" class="guide-section reveal">
+          <h2>Encrypted vault</h2>
+          <p>
+            Move private items into the <strong>Locked folder</strong>. Keys use
+            Argon2id; content uses XChaCha20-Poly1305. Store your recovery code
+            safely — it is the only unlock path if you forget the password.
+          </p>
+        </section>
+
+        <section id="privacy" class="guide-section reveal">
+          <h2>Privacy defaults</h2>
+          <ul>
+            <li>No telemetry, analytics, or cloud photo APIs.</li>
+            <li>Network is used only when you download models you chose.</li>
+            <li>Diagnostic logs stay on disk (Developer page).</li>
+            <li>Derived AI data is rebuildable and deletable; originals stay put.</li>
+          </ul>
+        </section>
+
+        <section id="shortcuts" class="guide-section reveal">
+          <h2>Keyboard shortcuts</h2>
+          <div class="guide-table-wrap">
+            <table class="guide-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Click</td>
+                  <td>Open media viewer</td>
+                </tr>
+                <tr>
+                  <td>Space</td>
+                  <td>Toggle / close viewer</td>
+                </tr>
+                <tr>
+                  <td>← / →</td>
+                  <td>Previous / next in viewer</td>
+                </tr>
+                <tr>
+                  <td>F</td>
+                  <td>Favourite selection or open item</td>
+                </tr>
+                <tr>
+                  <td>0–5</td>
+                  <td>Rate selection or open item</td>
+                </tr>
+                <tr>
+                  <td>⌘A / Ctrl+A</td>
+                  <td>Select all visible</td>
+                </tr>
+                <tr>
+                  <td>Delete</td>
+                  <td>Soft-delete (or restore in Trash)</td>
+                </tr>
+                <tr>
+                  <td>⌘Z / Ctrl+Z</td>
+                  <td>Undo</td>
+                </tr>
+                <tr>
+                  <td>⌘⇧Z / Ctrl+Y</td>
+                  <td>Redo</td>
+                </tr>
+                <tr>
+                  <td>Esc</td>
+                  <td>Close viewer / clear selection</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="guide-section guide-next reveal">
+          <h2>Next steps</h2>
+          <p>
+            Building from source or sending a pull request? See
+            <a href="https://github.com/Anurag-error404/lumora/blob/main/CONTRIBUTING.md"
+              >CONTRIBUTING.md</a
+            >
+            and the
+            <a href="https://github.com/Anurag-error404/lumora/blob/main/README.md"
+              >README</a
+            >.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="index.html">Back to landing</a>
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/Anurag-error404/lumora"
+              rel="noopener noreferrer"
+              >Clone the repo</a
+            >
+          </div>
+        </section>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <span class="brand-name">LUMORA</span>
+        <span class="footer-tag">your memories your machine.</span>
+      </div>
+      <p class="footer-meta">
+        MIT License ·
+        <a href="index.html">Home</a>
+        ·
+        <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </p>
+    </footer>
+
+    <script src="site.js" defer></script>
+  </body>
+</html>
