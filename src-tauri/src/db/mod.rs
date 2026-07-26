@@ -429,7 +429,7 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -446,12 +446,20 @@ mod tests {
         assert!(tables.iter().any(|t| t == "locked_albums"));
         assert!(tables.iter().any(|t| t == "saved_searches"));
 
+        let has_blur_score: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('assets') WHERE name = 'blur_score'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_blur_score, 1);
         // reopen — no double apply
         drop(conn);
         let conn2 = open_and_migrate(&path).unwrap();
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 14);
+        assert_eq!(version2, 15);
     }
 }
