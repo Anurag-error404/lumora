@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { api, type ExportRecord } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 /** Recent ZIP export records. */
@@ -26,9 +27,7 @@ export function useExportsFeed({
     }
   }, [setError]);
 
-  useEffect(() => {
-    void refreshExports();
-  }, [refreshExports]);
+  useEffect(() => idleDefer(() => void refreshExports()), [refreshExports]);
 
   useEffect(() => {
     if (view === "exports") void refreshExports();

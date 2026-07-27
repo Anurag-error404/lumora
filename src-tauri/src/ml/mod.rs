@@ -360,7 +360,16 @@ pub fn download_and_install(
             }
         };
         on_progress(0, entry.size_bytes);
-        std::fs::write(&final_path, bytes)?;
+        // Write via a temp file so Windows antivirus locks on the live path
+        // cannot block the install after a large ONNX download.
+        let part_path = models_dir.join(format!("{}.part", entry.file_name));
+        std::fs::write(&part_path, bytes).map_err(|e| {
+            AppError::msg(format!(
+                "failed to write embedded '{}': {e}",
+                entry.id
+            ))
+        })?;
+        replace_file(&part_path, &final_path)?;
         on_progress(entry.size_bytes, entry.size_bytes);
         return register_verified(conn, entry, &final_path);
     }
@@ -397,13 +406,47 @@ pub fn download_and_install(
         std::io::Write::flush(&mut out)?;
     }
 
-    std::fs::rename(&part_path, &final_path)?;
+    // Windows cannot rename over an existing file; also rename across volumes
+    // fails. Replace atomically when possible, otherwise copy + remove.
+    replace_file(&part_path, &final_path)?;
     match register_verified(conn, entry, &final_path) {
         Ok(installed) => Ok(installed),
         Err(e) => {
             // register_verified already removed the bad file.
             let _ = std::fs::remove_file(&part_path);
             Err(e)
+        }
+    }
+}
+
+fn replace_file(from: &Path, to: &Path) -> AppResult<()> {
+    if to.exists() {
+        std::fs::remove_file(to).map_err(|e| {
+            AppError::msg(format!(
+                "could not replace '{}': {e}",
+                to.display()
+            ))
+        })?;
+    }
+    match std::fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Fall back when rename can't move across drives (common on Windows).
+            tracing::warn!(
+                from = %from.display(),
+                to = %to.display(),
+                error = %e,
+                "rename failed; copying model file instead"
+            );
+            std::fs::copy(from, to).map_err(|copy_err| {
+                AppError::msg(format!(
+                    "could not move '{}' → '{}': rename failed ({e}); copy failed ({copy_err})",
+                    from.display(),
+                    to.display()
+                ))
+            })?;
+            let _ = std::fs::remove_file(from);
+            Ok(())
         }
     }
 }
@@ -488,6 +531,49 @@ pub fn clear_embeddings(conn: &Connection) -> AppResult<usize> {
             ModelKind::ClipImage.as_str(),
             ModelKind::ClipText.as_str()
         ],
+    )?;
+    Ok(n)
+}
+
+/// Assets that exhausted retries for `kind` and will not be picked up again
+/// until [`reset_failed_jobs`] runs (e.g. on Resume).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobFailureStats {
+    pub failed: i64,
+    pub last_error: Option<String>,
+}
+
+pub fn job_failure_stats(conn: &Connection, kind: &str) -> AppResult<JobFailureStats> {
+    let failed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ml_jobs j
+         JOIN assets a ON a.id = j.asset_id AND a.deleted_at IS NULL
+         WHERE j.kind = ?1 AND j.state = 'failed' AND j.attempts >= 3",
+        params![kind],
+        |r| r.get(0),
+    )?;
+    let last_error: Option<String> = conn
+        .query_row(
+            "SELECT error FROM ml_jobs j
+             JOIN assets a ON a.id = j.asset_id AND a.deleted_at IS NULL
+             WHERE j.kind = ?1 AND j.state = 'failed' AND j.attempts >= 3
+               AND j.error IS NOT NULL AND length(j.error) > 0
+             ORDER BY j.updated_at DESC
+             LIMIT 1",
+            params![kind],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(JobFailureStats { failed, last_error })
+}
+
+/// Clear exhausted failures so the next worker pass retries them.
+pub fn reset_failed_jobs(conn: &Connection, kind: &str) -> AppResult<usize> {
+    let n = conn.execute(
+        "DELETE FROM ml_jobs
+         WHERE kind = ?1 AND state = 'failed' AND attempts >= 3",
+        params![kind],
     )?;
     Ok(n)
 }

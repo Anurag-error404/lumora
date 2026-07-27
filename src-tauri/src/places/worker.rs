@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::places;
+use crate::preferences;
 
 const BATCH: u32 = 32;
 const IDLE_MS: u64 = 750;
@@ -43,15 +44,17 @@ pub struct PlacesProgress {
 
 pub struct PlacesWorker {
     db_path: PathBuf,
+    app_data: PathBuf,
     running: AtomicBool,
     last_path: Mutex<Option<String>>,
     wake: AtomicBool,
 }
 
 impl PlacesWorker {
-    pub fn new(db_path: PathBuf) -> Arc<Self> {
+    pub fn new(db_path: PathBuf, app_data: PathBuf) -> Arc<Self> {
         let worker = Arc::new(Self {
             db_path,
+            app_data,
             running: AtomicBool::new(false),
             last_path: Mutex::new(None),
             wake: AtomicBool::new(true),
@@ -84,6 +87,15 @@ impl PlacesWorker {
             if !self.wake.swap(false, Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(IDLE_MS));
                 self.wake.store(true, Ordering::Relaxed);
+                continue;
+            }
+
+            let prefs = match preferences::load(&self.app_data) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if prefs.ai.background_processing == "paused" {
+                self.running.store(false, Ordering::Relaxed);
                 continue;
             }
 

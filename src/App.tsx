@@ -54,6 +54,7 @@ import { useTagBrowse } from "./hooks/useTagBrowse";
 import { useTagWorkflows } from "./hooks/useTagWorkflows";
 import { useTimeline } from "./hooks/useTimeline";
 import { useVault } from "./hooks/useVault";
+import { useVaultAutoLock } from "./hooks/useVaultAutoLock";
 import { useViewer } from "./hooks/useViewer";
 import { useWatchedFolders } from "./hooks/useWatchedFolders";
 import { api, type Album, type AssetSummary, type Person } from "./lib/tauri";
@@ -190,6 +191,11 @@ export default function App() {
   });
 
   const vault = useVault({ view, setError });
+  useVaultAutoLock({
+    unlocked: Boolean(vault.status?.unlocked),
+    autoLockMinutes: prefs?.privacy.autoLockMinutes ?? 0,
+    onLock: vault.lock,
+  });
 
   const progress = useIndexProgress();
   const { importProgress, setImportProgress, importPct } = useImportProgress();
@@ -492,7 +498,66 @@ export default function App() {
     onImportFiles,
     onImportFolder,
     cancelImport,
-  } = useImportFlow({ setBusy, setImportProgress, loadAssets, setError });
+  } = useImportFlow({
+    setBusy,
+    setImportProgress,
+    loadAssets,
+    setError,
+    prefs,
+    setView,
+  });
+
+  // Persist / restore last view when the preference is on.
+  useEffect(() => {
+    if (!prefs || prefsLoading) return;
+    if (!prefs.general.restorePreviousSession) return;
+    try {
+      const raw = localStorage.getItem("lumora.session.view");
+      if (!raw) return;
+      const allowed: View[] = [
+        "home",
+        "library",
+        "recent",
+        "recentViewed",
+        "timeline",
+        "albums",
+        "tags",
+        "savedSearches",
+        "duplicates",
+        "videos",
+        "rawPhotos",
+        "screenshots",
+        "selfies",
+        "panoramas",
+        "documents",
+        "receipts",
+        "people",
+        "places",
+        "trash",
+        "favorites",
+        "watched",
+        "activity",
+        "exports",
+        "settings",
+      ];
+      if (allowed.includes(raw as View)) {
+        setView(raw as View);
+      }
+    } catch {
+      /* ignore */
+    }
+    // Only on first prefs load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefsLoading]);
+
+  useEffect(() => {
+    if (!prefs?.general.restorePreviousSession) return;
+    try {
+      localStorage.setItem("lumora.session.view", view);
+    } catch {
+      /* ignore */
+    }
+  }, [view, prefs?.general.restorePreviousSession]);
 
   useKeyboardShortcuts({
     albumModal,

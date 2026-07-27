@@ -26,7 +26,8 @@ Do **not** claim million-scale success without recording numbers from a real run
 | Date | Machine | Library size | Cold start | Search | Thumbs/min | Idle RAM | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-07-26 | Apple M3 Pro, 18 GB, macOS 26.5.2 | 100 synthetic PNGs (480×320) via `perf_smoke` | _not measured_ (dev session already warm) | **0.14 ms** FTS text (`Canon`); **0.14 ms** `camera:` filter (avg of 20 warm queries) | **878**/min (debug build, sequential) | **~112 MB** RSS (debug binary idle during `tauri dev`) | Near-dup Hamming cluster **0.19 ms** on 100 hashes. Debug thumbs; release expected faster. |
-| 2026-07-26 | _(import path)_ | — | — | — | — | — | Import: one image decode per file (thumb + aHash), parallel prepare workers, cancelable. Video thumbs use system ffmpeg when available. |
+| 2026-07-27 | _(policy)_ | — | — | — | — | — | Video thumbs: system ffmpeg soft-fail (locked). Places map: offline SVG geometry. Dark theme: out of scope. Remaining: cold start + 1M-scale numbers. |
+| 2026-07-27 | Apple M3 Pro (pre-opt) | 272 real media | — | — | — | — | Import baseline **1.1 files/s** (254.6s). Post-opt: batched SQLite commits, thumb-sized blur, up to 16 prepare workers, deferred cold-start repair. Re-measure after restart. |
 
 ## Privacy
 

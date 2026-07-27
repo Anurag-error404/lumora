@@ -70,7 +70,7 @@ impl Default for GeneralPrefs {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearancePrefs {
-    /// "light" is the only live value today; "system" / "dark" are stored for later.
+    /// "light" is the only supported value. Dark / system themes are out of scope.
     pub theme: String,
     pub accent: String,
     pub thumbnail_size: u32,

@@ -62,25 +62,35 @@ pub fn run() {
             tracing::info!(app_data = %paths.app_data.display(), "app data directory");
 
             let conn = db::open_and_migrate(&paths.db_path)?;
-            match thumbnails::repair_missing_thumbnails(&conn, &paths.thumbs_dir) {
-                Ok(n) if n > 0 => {
-                    tracing::info!(repaired = n, "regenerated missing thumbnails")
+            // Defer thumbnail / face-crop repair off the critical startup path so
+            // the window can appear while background maintenance catches up.
+            let repair_db = paths.db_path.clone();
+            let repair_thumbs = paths.thumbs_dir.clone();
+            std::thread::spawn(move || {
+                let Ok(conn) = db::open_and_migrate(&repair_db) else {
+                    return;
+                };
+                match thumbnails::repair_missing_thumbnails(&conn, &repair_thumbs) {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(repaired = n, "regenerated missing thumbnails")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "thumbnail repair skipped"),
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "thumbnail repair skipped"),
-            }
-            match faces::repair_missing_face_crops(&conn) {
-                Ok(n) if n > 0 => {
-                    tracing::info!(cleared = n, "cleared missing face crop paths")
+                match faces::repair_missing_face_crops(&conn) {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(cleared = n, "cleared missing face crop paths")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "face crop repair skipped"),
                 }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "face crop repair skipped"),
-            }
+            });
             let indexer =
                 commands::bootstrap_indexer(paths.db_path.clone(), paths.thumbs_dir.clone());
+            let prefs_boot = preferences::load(&paths.app_data).unwrap_or_default();
             let embedder = semantic::worker::EmbedWorker::new(
                 paths.db_path.clone(),
-                paths.models_dir.clone(),
+                paths.app_data.clone(),
             );
             let ocr = ocr::worker::OcrWorker::new(
                 paths.db_path.clone(),
@@ -90,7 +100,10 @@ pub fn run() {
                 paths.db_path.clone(),
                 paths.app_data.clone(),
             );
-            let places = places::worker::PlacesWorker::new(paths.db_path.clone());
+            let places = places::worker::PlacesWorker::new(
+                paths.db_path.clone(),
+                paths.app_data.clone(),
+            );
             let tags = tags::worker::TagsWorker::new(
                 paths.db_path.clone(),
                 paths.app_data.clone(),
@@ -107,9 +120,15 @@ pub fn run() {
             );
 
             let watch_service = Arc::new(watcher::WatcherService::new());
-            let roots = state
-                .with_db(watcher::load_watched_paths)
-                .unwrap_or_default();
+            let watch_enabled = prefs_boot.library.watch_folders_enabled;
+            watch_service.set_enabled(watch_enabled);
+            let roots = if watch_enabled {
+                state
+                    .with_db(watcher::load_watched_paths)
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             for root in &roots {
                 watch_service.add_root(root.clone());
             }
@@ -172,22 +191,26 @@ pub fn run() {
             semantic_status,
             embed_progress,
             kick_embedding,
+            pause_embedding,
             semantic_search,
             install_ocr_models,
             ocr_status,
             ocr_progress,
             kick_ocr,
+            pause_ocr,
             clear_ocr_text,
             get_asset_text,
             install_face_models,
             faces_status,
             faces_progress,
             kick_faces,
+            pause_faces,
             clear_face_data,
             install_tags_models,
             tags_status,
             tags_progress,
             kick_tags,
+            pause_tags,
             clear_auto_tags,
             list_asset_labels,
             list_import_runs,

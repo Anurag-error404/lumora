@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Person } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 export function usePeople({
@@ -41,9 +42,7 @@ export function usePeople({
     [refreshPeople, setError],
   );
 
-  useEffect(() => {
-    void refreshPeople();
-  }, [refreshPeople]);
+  useEffect(() => idleDefer(() => void refreshPeople()), [refreshPeople]);
 
   useEffect(() => {
     if (view === "people") void refreshPeople();

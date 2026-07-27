@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{copy, BufReader};
+use std::io::{copy, BufReader, Cursor, Write};
 use std::path::{Path, PathBuf};
 
+use image::ImageFormat;
 use rusqlite::{params, Connection};
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
@@ -11,10 +12,26 @@ use zip::ZipWriter;
 use crate::error::{AppError, AppResult};
 use crate::models::ExportResult;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ExportOptions {
+    pub strip_metadata: bool,
+    pub jpeg_quality: u8,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self {
+            strip_metadata: false,
+            jpeg_quality: 95,
+        }
+    }
+}
+
 pub fn export_assets_to_zip(
     conn: &Connection,
     asset_ids: &[String],
     dest: &Path,
+    options: ExportOptions,
 ) -> AppResult<ExportResult> {
     if asset_ids.is_empty() {
         return Err(AppError::msg(
@@ -54,7 +71,7 @@ pub fn export_assets_to_zip(
     let file = File::create(dest)?;
     let mut zip = ZipWriter::new(file);
     // Media formats are already compressed; Stored keeps export fast.
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let options_zip = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
 
     let mut used_names: HashMap<String, usize> = HashMap::new();
     let mut exported = 0u32;
@@ -69,23 +86,27 @@ pub fn export_assets_to_zip(
         }
 
         let entry_name = unique_entry_name(path, &mut used_names);
-        match File::open(path) {
-            Ok(src) => {
-                if let Err(e) = zip.start_file(&entry_name, options) {
-                    errors.push(format!("{}: {e}", path.display()));
-                    continue;
+        if let Err(e) = zip.start_file(&entry_name, options_zip) {
+            errors.push(format!("{}: {e}", path.display()));
+            continue;
+        }
+
+        let write_result = if options.strip_metadata {
+            match stripped_image_bytes(path, options.jpeg_quality) {
+                Ok(Some(bytes)) => zip.write_all(&bytes).map_err(|e| e.to_string()),
+                Ok(None) => {
+                    // Videos / unsupported: fall back to byte-copy (cannot strip).
+                    copy_file_into_zip(path, &mut zip)
                 }
-                let mut reader = BufReader::new(src);
-                if let Err(e) = copy(&mut reader, &mut zip) {
-                    errors.push(format!("{}: {e}", path.display()));
-                    continue;
-                }
-                exported += 1;
+                Err(e) => Err(e.to_string()),
             }
-            Err(e) => {
-                missing += 1;
-                errors.push(format!("{}: {e}", path.display()));
-            }
+        } else {
+            copy_file_into_zip(path, &mut zip)
+        };
+
+        match write_result {
+            Ok(()) => exported += 1,
+            Err(e) => errors.push(format!("{}: {e}", path.display())),
         }
     }
 
@@ -107,6 +128,46 @@ pub fn export_assets_to_zip(
         missing,
         errors,
     })
+}
+
+fn copy_file_into_zip(path: &Path, zip: &mut ZipWriter<File>) -> Result<(), String> {
+    let src = File::open(path).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(src);
+    copy(&mut reader, zip).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Re-encode still images without EXIF/GPS. Returns `None` for non-image files.
+fn stripped_image_bytes(path: &Path, jpeg_quality: u8) -> AppResult<Option<Vec<u8>>> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let format = match ext.as_str() {
+        "jpg" | "jpeg" => ImageFormat::Jpeg,
+        "png" => ImageFormat::Png,
+        "webp" => ImageFormat::WebP,
+        "tif" | "tiff" => ImageFormat::Tiff,
+        "bmp" => ImageFormat::Bmp,
+        _ => return Ok(None),
+    };
+
+    let img = image::open(path).map_err(|e| AppError::msg(format!("decode failed: {e}")))?;
+    let mut buf = Cursor::new(Vec::new());
+    match format {
+        ImageFormat::Jpeg => {
+            let q = jpeg_quality.clamp(50, 100);
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, q);
+            encoder
+                .encode_image(&img)
+                .map_err(|e| AppError::msg(format!("jpeg encode failed: {e}")))?;
+        }
+        other => {
+            img.write_to(&mut buf, other)
+                .map_err(|e| AppError::msg(format!("encode failed: {e}")))?;
+        }
+    }
+    Ok(Some(buf.into_inner()))
 }
 
 fn unique_entry_name(path: &Path, used_names: &mut HashMap<String, usize>) -> String {
@@ -174,7 +235,9 @@ mod tests {
         seed_asset(&conn, "3", &media.join("extra.png"));
 
         let dest = dir.path().join("share.zip");
-        let result = export_assets_to_zip(&conn, &["1".into(), "2".into()], &dest).unwrap();
+        let result =
+            export_assets_to_zip(&conn, &["1".into(), "2".into()], &dest, ExportOptions::default())
+                .unwrap();
 
         assert_eq!(result.exported, 2);
         assert_eq!(result.missing, 0);
@@ -204,7 +267,13 @@ mod tests {
     fn export_rejects_empty_selection() {
         let dir = tempdir().unwrap();
         let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
-        let err = export_assets_to_zip(&conn, &[], &dir.path().join("out.zip")).unwrap_err();
+        let err = export_assets_to_zip(
+            &conn,
+            &[],
+            &dir.path().join("out.zip"),
+            ExportOptions::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("select at least one"));
     }
 }

@@ -152,12 +152,20 @@ fn top_k(
     let probs = softmax(logits);
     let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    indexed
-        .into_iter()
+    let mut out: Vec<(String, f32)> = indexed
+        .iter()
         .take(k)
         .filter(|(_, s)| *s >= min_score)
-        .map(|(i, s)| (display_label(&labels[i]), s))
-        .collect()
+        .map(|(i, s)| (display_label(&labels[*i]), *s))
+        .collect();
+    // Always keep the top prediction so a low-confidence photo is still marked
+    // processed and searchable, instead of stalling the queue as "pending".
+    if out.is_empty() {
+        if let Some((i, s)) = indexed.first() {
+            out.push((display_label(&labels[*i]), *s));
+        }
+    }
+    out
 }
 
 fn softmax(logits: &[f32]) -> Vec<f32> {
@@ -187,5 +195,14 @@ mod tests {
         let logits = [0.1f32, 5.0, 0.2, 1.0, 0.0];
         let top = top_k(&logits, &labels, 2, 0.01);
         assert_eq!(top[0].0, "c1");
+    }
+
+    #[test]
+    fn top_k_keeps_best_even_below_min_score() {
+        let labels: Vec<String> = (0..5).map(|i| format!("c{i}")).collect();
+        // Flat logits → ~0.2 each after softmax, all below 0.5.
+        let logits = [1.0f32, 1.0, 1.0, 1.0, 1.0];
+        let top = top_k(&logits, &labels, 5, 0.5);
+        assert_eq!(top.len(), 1, "must keep a top-1 so jobs leave the queue");
     }
 }

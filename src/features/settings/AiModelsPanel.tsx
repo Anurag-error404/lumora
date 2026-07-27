@@ -10,17 +10,79 @@ import {
   type OcrProgress,
   type TagsProgress,
 } from "../../lib/tauri";
+import type { PrefsUpdater } from "./settingsUi";
 
 const SEMANTIC_BUNDLE = "clip-vit-b32";
 const OCR_BUNDLE = "rapidocr-ppv4";
 const FACES_BUNDLE = "insightface-buffalo-l";
 const TAGS_BUNDLE = "mobilenetv4-in1k";
 
+type PipelineKind = "embed" | "ocr" | "faces" | "tags";
+
+type PipelineStatus =
+  | "waiting"
+  | "running"
+  | "paused"
+  | "pending"
+  | "failed"
+  | "done";
+
+function pipelineStatus(opts: {
+  ready: boolean;
+  running: boolean;
+  paused: boolean;
+  pending: number;
+  failed: number;
+}): PipelineStatus {
+  if (!opts.ready) return "waiting";
+  if (opts.paused) return "paused";
+  if (opts.running) return "running";
+  if (opts.pending > 0) return "pending";
+  if (opts.failed > 0) return "failed";
+  return "done";
+}
+
+function statusLabel(
+  status: PipelineStatus,
+  pending: number,
+  failed: number,
+): string {
+  switch (status) {
+    case "waiting":
+      return "Waiting for models";
+    case "running":
+      return "Running";
+    case "paused":
+      return pending + failed > 0
+        ? `Paused · ${pending + failed} left`
+        : "Paused";
+    case "pending":
+      return failed > 0
+        ? `${pending} pending · ${failed} failed`
+        : `${pending} pending`;
+    case "failed":
+      return `${failed} failed`;
+    case "done":
+      return "Up to date";
+  }
+}
+
+function progressPct(done: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(100, Math.round((100 * done) / total));
+}
+
+function fileName(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
 /**
  * On-device intelligence controls: install CLIP / OCR / Faces bundles, watch
  * progress, and clear derived data. Lives under Settings → AI Features.
  */
-export function AiModelsPanel() {
+export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
   const [status, setStatus] = useState<MlStatus | null>(null);
   const [progress, setProgress] = useState<EmbedProgress | null>(null);
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
@@ -284,6 +346,63 @@ export function AiModelsPanel() {
     }
   }
 
+  async function setPipelinePaused(kind: PipelineKind, paused: boolean) {
+    setBusy(true);
+    try {
+      if (paused) {
+        switch (kind) {
+          case "embed":
+            await api.pauseEmbedding();
+            break;
+          case "ocr":
+            await api.pauseOcr();
+            break;
+          case "faces":
+            await api.pauseFaces();
+            break;
+          case "tags":
+            await api.pauseTags();
+            break;
+        }
+      } else {
+        // Workers no-op when their feature toggle is off or global AI is paused.
+        await ensurePipelineEnabled(kind);
+        switch (kind) {
+          case "embed":
+            await api.kickEmbedding();
+            break;
+          case "ocr":
+            await api.kickOcr();
+            break;
+          case "faces":
+            await api.kickFaces();
+            break;
+          case "tags":
+            await api.kickTags();
+            break;
+        }
+      }
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function ensurePipelineEnabled(kind: PipelineKind) {
+    await updatePrefs((prefs) => {
+      if (prefs.ai.backgroundProcessing === "paused") {
+        prefs.ai.backgroundProcessing = "always";
+      }
+      if (kind === "ocr") prefs.ai.ocr = true;
+      if (kind === "faces") prefs.ai.faceRecognition = true;
+      if (kind === "tags") prefs.ai.objectDetection = true;
+      if (kind === "embed") prefs.ai.semanticSearch = true;
+      return prefs;
+    });
+  }
+
   const semanticReady = status?.semanticReady ?? false;
   const ocrReady = status?.ocrReady ?? false;
   const facesReady = status?.facesReady ?? false;
@@ -295,6 +414,13 @@ export function AiModelsPanel() {
       ? Math.min(100, Math.round((100 * download.downloaded) / download.total))
       : null;
   const anyReady = semanticReady || ocrReady || facesReady || tagsReady;
+
+  const installedBytes = (bundle: string) =>
+    formatBytes(
+      status?.models
+        .filter((m) => m.bundle === bundle && m.installed)
+        .reduce((sum, m) => sum + m.sizeBytes, 0) ?? 0,
+    );
 
   return (
     <div className="settings-ai-models">
@@ -366,411 +492,343 @@ export function AiModelsPanel() {
         </div>
       </article>
 
-      <div className="semantic-models-grid">
-        <article className="developer-card">
-          <span className="developer-card-label">Semantic search</span>
-          <strong>
-            {semanticReady
+      <div className="ai-pipeline-list">
+        <AiPipelineRow
+          modelLabel="Semantic search"
+          modelName={
+            semanticReady
               ? "CLIP ViT-B/32"
-              : formatBytes(status?.semanticDownloadBytes ?? 0)}
-          </strong>
-          <dl>
-            <div>
-              <dt>License</dt>
-              <dd>MIT</dd>
-            </div>
-            <div>
-              <dt>Installed</dt>
-              <dd>
-                {formatBytes(
-                  status?.models
-                    .filter((m) => m.bundle === SEMANTIC_BUNDLE && m.installed)
-                    .reduce((sum, m) => sum + m.sizeBytes, 0) ?? 0,
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Models folder</dt>
-              <dd className="developer-path">{status?.modelsDir ?? "—"}</dd>
-            </div>
-          </dl>
-          {!semanticReady ? (
-            <button
-              className="primary"
-              onClick={() => void installSemantic()}
-              disabled={installing || busy}
-            >
-              {installingSemantic
-                ? downloadPct != null
-                  ? `Downloading… ${downloadPct}%`
-                  : "Downloading…"
-                : "Download models"}
-            </button>
-          ) : (
-            <button
-              onClick={() =>
-                void removeBundle(SEMANTIC_BUNDLE, "semantic search")
-              }
-              disabled={busy || installing}
-            >
-              Remove models
-            </button>
-          )}
-          {installingSemantic && download && (
-            <p className="muted semantic-download-detail">
-              File {download.fileIndex}/{download.fileCount}: {download.modelId}
-            </p>
-          )}
-        </article>
+              : formatBytes(status?.semanticDownloadBytes ?? 0)
+          }
+          license="MIT"
+          installed={installedBytes(SEMANTIC_BUNDLE)}
+          modelsDir={status?.modelsDir}
+          ready={semanticReady}
+          installing={installingSemantic}
+          downloadPct={installingSemantic ? downloadPct : null}
+          download={installingSemantic ? download : null}
+          installLabel="Download models"
+          onInstall={() => void installSemantic()}
+          onRemove={() => void removeBundle(SEMANTIC_BUNDLE, "semantic search")}
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Library embeddings"
+          done={progress?.embedded ?? 0}
+          total={progress?.total ?? 0}
+          pending={progress?.pending ?? 0}
+          failed={progress?.failed ?? 0}
+          running={progress?.running ?? false}
+          paused={progress?.paused ?? false}
+          lastPath={progress?.lastPath ?? null}
+          lastError={progress?.lastError ?? null}
+          onPause={() => void setPipelinePaused("embed", true)}
+          onResume={() => void setPipelinePaused("embed", false)}
+          onClear={() => void clearEmbeddings()}
+          clearLabel="Clear embeddings"
+          busy={busy}
+        />
 
-        <article className="developer-card">
-          <span className="developer-card-label">Library embeddings</span>
-          <strong>
-            {progress ? `${progress.embedded} / ${progress.total}` : "—"}
-          </strong>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                {!semanticReady
-                  ? "Waiting for models"
-                  : progress?.running
-                    ? "Embedding…"
-                    : progress && progress.pending > 0
-                      ? `${progress.pending} pending`
-                      : "Up to date"}
-              </dd>
-            </div>
-            {progress?.lastPath && (
-              <div>
-                <dt>Last</dt>
-                <dd className="developer-path" title={progress.lastPath}>
-                  {progress.lastPath}
-                </dd>
-              </div>
-            )}
-          </dl>
-          <div className="semantic-models-actions">
-            <button
-              onClick={() => void api.kickEmbedding().then(refresh)}
-              disabled={!semanticReady || busy}
-            >
-              Resume embedding
-            </button>
-            <button
-              onClick={() => void clearEmbeddings()}
-              disabled={!semanticReady || busy}
-            >
-              Clear embeddings
-            </button>
-          </div>
-        </article>
-
-        <article className="developer-card">
-          <span className="developer-card-label">Text recognition (OCR)</span>
-          <strong>
-            {ocrReady
+        <AiPipelineRow
+          modelLabel="Text recognition (OCR)"
+          modelName={
+            ocrReady
               ? "RapidOCR PP-OCRv4"
-              : formatBytes(status?.ocrDownloadBytes ?? 0)}
-          </strong>
-          <dl>
-            <div>
-              <dt>License</dt>
-              <dd>Apache-2.0</dd>
-            </div>
-            <div>
-              <dt>Installed</dt>
-              <dd>
-                {formatBytes(
-                  status?.models
-                    .filter((m) => m.bundle === OCR_BUNDLE && m.installed)
-                    .reduce((sum, m) => sum + m.sizeBytes, 0) ?? 0,
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Coverage</dt>
-              <dd>
-                {ocrProgress
-                  ? `${ocrProgress.done} / ${ocrProgress.total}`
-                  : "—"}
-              </dd>
-            </div>
-          </dl>
-          {!ocrReady ? (
-            <button
-              className="primary"
-              onClick={() => void installOcr()}
-              disabled={installing || busy}
-            >
-              {installingOcr
-                ? downloadPct != null
-                  ? `Downloading… ${downloadPct}%`
-                  : "Downloading…"
-                : "Download OCR models"}
-            </button>
-          ) : (
-            <button
-              onClick={() => void removeBundle(OCR_BUNDLE, "OCR")}
-              disabled={busy || installing}
-            >
-              Remove models
-            </button>
-          )}
-          {installingOcr && download && (
-            <p className="muted semantic-download-detail">
-              File {download.fileIndex}/{download.fileCount}: {download.modelId}
-            </p>
-          )}
-        </article>
+              : formatBytes(status?.ocrDownloadBytes ?? 0)
+          }
+          license="Apache-2.0"
+          installed={installedBytes(OCR_BUNDLE)}
+          ready={ocrReady}
+          installing={installingOcr}
+          downloadPct={installingOcr ? downloadPct : null}
+          download={installingOcr ? download : null}
+          installLabel="Download OCR models"
+          onInstall={() => void installOcr()}
+          onRemove={() => void removeBundle(OCR_BUNDLE, "OCR")}
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Extracted text"
+          done={ocrProgress?.done ?? 0}
+          total={ocrProgress?.total ?? 0}
+          pending={ocrProgress?.pending ?? 0}
+          failed={ocrProgress?.failed ?? 0}
+          running={ocrProgress?.running ?? false}
+          paused={ocrProgress?.paused ?? false}
+          lastPath={ocrProgress?.lastPath ?? null}
+          lastError={ocrProgress?.lastError ?? null}
+          onPause={() => void setPipelinePaused("ocr", true)}
+          onResume={() => void setPipelinePaused("ocr", false)}
+          onClear={() => void clearOcrText()}
+          clearLabel="Clear text"
+          busy={busy}
+        />
 
-        <article className="developer-card">
-          <span className="developer-card-label">Extracted text</span>
-          <strong>
-            {ocrProgress ? `${ocrProgress.done} / ${ocrProgress.total}` : "—"}
-          </strong>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                {!ocrReady
-                  ? "Waiting for models"
-                  : ocrProgress?.running
-                    ? "Reading…"
-                    : ocrProgress && ocrProgress.pending > 0
-                      ? `${ocrProgress.pending} pending`
-                      : "Up to date"}
-              </dd>
-            </div>
-            {ocrProgress?.lastPath && (
-              <div>
-                <dt>Last</dt>
-                <dd className="developer-path" title={ocrProgress.lastPath}>
-                  {ocrProgress.lastPath}
-                </dd>
-              </div>
-            )}
-          </dl>
-          <div className="semantic-models-actions">
-            <button
-              onClick={() => void api.kickOcr().then(refresh)}
-              disabled={!ocrReady || busy}
-            >
-              Resume OCR
-            </button>
-            <button
-              onClick={() => void clearOcrText()}
-              disabled={!ocrReady || busy}
-            >
-              Clear text
-            </button>
-          </div>
-        </article>
-
-        <article className="developer-card">
-          <span className="developer-card-label">Face recognition</span>
-          <strong>
-            {facesReady
+        <AiPipelineRow
+          modelLabel="Face recognition"
+          modelName={
+            facesReady
               ? "InsightFace buffalo_l"
-              : formatBytes(status?.facesDownloadBytes ?? 0)}
-          </strong>
-          <dl>
-            <div>
-              <dt>License</dt>
-              <dd>InsightFace (non-commercial research)</dd>
-            </div>
-            <div>
-              <dt>Installed</dt>
-              <dd>
-                {formatBytes(
-                  status?.models
-                    .filter((m) => m.bundle === FACES_BUNDLE && m.installed)
-                    .reduce((sum, m) => sum + m.sizeBytes, 0) ?? 0,
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Coverage</dt>
-              <dd>
-                {facesProgress
-                  ? `${facesProgress.done} / ${facesProgress.total}`
-                  : "—"}
-              </dd>
-            </div>
-          </dl>
-          {!facesReady ? (
-            <button
-              className="primary"
-              onClick={() => void installFaces()}
-              disabled={installing || busy}
-            >
-              {installingFaces
-                ? downloadPct != null
-                  ? `Downloading… ${downloadPct}%`
-                  : "Downloading…"
-                : "Download face models"}
-            </button>
-          ) : (
-            <button
-              onClick={() => void removeBundle(FACES_BUNDLE, "face recognition")}
-              disabled={busy || installing}
-            >
-              Remove models
-            </button>
-          )}
-          {installingFaces && download && (
-            <p className="muted semantic-download-detail">
-              File {download.fileIndex}/{download.fileCount}: {download.modelId}
-            </p>
-          )}
-        </article>
+              : formatBytes(status?.facesDownloadBytes ?? 0)
+          }
+          license="InsightFace (non-commercial research)"
+          installed={installedBytes(FACES_BUNDLE)}
+          ready={facesReady}
+          installing={installingFaces}
+          downloadPct={installingFaces ? downloadPct : null}
+          download={installingFaces ? download : null}
+          installLabel="Download face models"
+          onInstall={() => void installFaces()}
+          onRemove={() =>
+            void removeBundle(FACES_BUNDLE, "face recognition")
+          }
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Detected faces"
+          done={facesProgress?.done ?? 0}
+          total={facesProgress?.total ?? 0}
+          pending={facesProgress?.pending ?? 0}
+          failed={facesProgress?.failed ?? 0}
+          running={facesProgress?.running ?? false}
+          paused={facesProgress?.paused ?? false}
+          lastPath={facesProgress?.lastPath ?? null}
+          lastError={facesProgress?.lastError ?? null}
+          onPause={() => void setPipelinePaused("faces", true)}
+          onResume={() => void setPipelinePaused("faces", false)}
+          onClear={() => void clearFaceData()}
+          clearLabel="Clear face data"
+          busy={busy}
+        />
 
-        <article className="developer-card">
-          <span className="developer-card-label">Detected faces</span>
-          <strong>
-            {facesProgress
-              ? `${facesProgress.done} / ${facesProgress.total}`
-              : "—"}
-          </strong>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                {!facesReady
-                  ? "Waiting for models"
-                  : facesProgress?.running
-                    ? "Detecting…"
-                    : facesProgress && facesProgress.pending > 0
-                      ? `${facesProgress.pending} pending`
-                      : "Up to date"}
-              </dd>
-            </div>
-            {facesProgress?.lastPath && (
-              <div>
-                <dt>Last</dt>
-                <dd className="developer-path" title={facesProgress.lastPath}>
-                  {facesProgress.lastPath}
-                </dd>
-              </div>
-            )}
-          </dl>
-          <div className="semantic-models-actions">
-            <button
-              onClick={() => void api.kickFaces().then(refresh)}
-              disabled={!facesReady || busy}
-            >
-              Resume faces
-            </button>
-            <button
-              onClick={() => void clearFaceData()}
-              disabled={!facesReady || busy}
-            >
-              Clear face data
-            </button>
-          </div>
-        </article>
-
-        <article className="developer-card">
-          <span className="developer-card-label">Auto-tags (MobileNetV4)</span>
-          <strong>
-            {tagsReady
+        <AiPipelineRow
+          modelLabel="Auto-tags (MobileNetV4)"
+          modelName={
+            tagsReady
               ? "MobileNetV4 ImageNet"
-              : formatBytes(status?.tagsDownloadBytes ?? 0)}
-          </strong>
-          <dl>
-            <div>
-              <dt>License</dt>
-              <dd>Apache-2.0</dd>
-            </div>
-            <div>
-              <dt>Installed</dt>
-              <dd>
-                {formatBytes(
-                  status?.models
-                    .filter((m) => m.bundle === TAGS_BUNDLE && m.installed)
-                    .reduce((sum, m) => sum + m.sizeBytes, 0) ?? 0,
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Coverage</dt>
-              <dd>
-                {tagsProgress
-                  ? `${tagsProgress.done} / ${tagsProgress.total}`
-                  : "—"}
-              </dd>
-            </div>
-          </dl>
-          {!tagsReady ? (
-            <button
-              className="primary"
-              onClick={() => void installTags()}
-              disabled={installing || busy}
-            >
-              {installingTags
-                ? downloadPct != null
-                  ? `Downloading… ${downloadPct}%`
-                  : "Downloading…"
-                : "Download auto-tag models"}
-            </button>
-          ) : (
-            <button
-              onClick={() => void removeBundle(TAGS_BUNDLE, "auto-tags")}
-              disabled={busy || installing}
-            >
-              Remove models
-            </button>
-          )}
-          {installingTags && download && (
-            <p className="muted semantic-download-detail">
-              File {download.fileIndex}/{download.fileCount}: {download.modelId}
-            </p>
-          )}
-        </article>
-
-        <article className="developer-card">
-          <span className="developer-card-label">Auto-tag progress</span>
-          <strong>
-            {tagsProgress ? `${tagsProgress.done} / ${tagsProgress.total}` : "—"}
-          </strong>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                {!tagsReady
-                  ? "Waiting for models"
-                  : tagsProgress?.running
-                    ? "Tagging…"
-                    : tagsProgress && tagsProgress.pending > 0
-                      ? `${tagsProgress.pending} pending`
-                      : "Up to date"}
-              </dd>
-            </div>
-            {tagsProgress?.lastPath && (
-              <div>
-                <dt>Last</dt>
-                <dd className="developer-path" title={tagsProgress.lastPath}>
-                  {tagsProgress.lastPath}
-                </dd>
-              </div>
-            )}
-          </dl>
-          <div className="semantic-models-actions">
-            <button
-              onClick={() => void api.kickTags().then(refresh)}
-              disabled={!tagsReady || busy}
-            >
-              Resume auto-tags
-            </button>
-            <button
-              onClick={() => void clearAutoTags()}
-              disabled={!tagsReady || busy}
-            >
-              Clear auto-tags
-            </button>
-          </div>
-        </article>
+              : formatBytes(status?.tagsDownloadBytes ?? 0)
+          }
+          license="Apache-2.0"
+          installed={installedBytes(TAGS_BUNDLE)}
+          ready={tagsReady}
+          installing={installingTags}
+          downloadPct={installingTags ? downloadPct : null}
+          download={installingTags ? download : null}
+          installLabel="Download auto-tag models"
+          onInstall={() => void installTags()}
+          onRemove={() => void removeBundle(TAGS_BUNDLE, "auto-tags")}
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Auto-tag progress"
+          done={tagsProgress?.done ?? 0}
+          total={tagsProgress?.total ?? 0}
+          pending={tagsProgress?.pending ?? 0}
+          failed={tagsProgress?.failed ?? 0}
+          running={tagsProgress?.running ?? false}
+          paused={tagsProgress?.paused ?? false}
+          lastPath={tagsProgress?.lastPath ?? null}
+          lastError={tagsProgress?.lastError ?? null}
+          onPause={() => void setPipelinePaused("tags", true)}
+          onResume={() => void setPipelinePaused("tags", false)}
+          onClear={() => void clearAutoTags()}
+          clearLabel="Clear auto-tags"
+          busy={busy}
+        />
       </div>
     </div>
+  );
+}
+
+function AiPipelineRow({
+  modelLabel,
+  modelName,
+  license,
+  installed,
+  modelsDir,
+  ready,
+  installing,
+  downloadPct,
+  download,
+  installLabel,
+  onInstall,
+  onRemove,
+  installDisabled,
+  removeDisabled,
+  progressLabel,
+  done,
+  total,
+  pending,
+  failed,
+  running,
+  paused,
+  lastPath,
+  lastError,
+  onPause,
+  onResume,
+  onClear,
+  clearLabel,
+  busy,
+}: {
+  modelLabel: string;
+  modelName: string;
+  license: string;
+  installed: string;
+  modelsDir?: string;
+  ready: boolean;
+  installing: boolean;
+  downloadPct: number | null;
+  download: ModelProgressEvent | null;
+  installLabel: string;
+  onInstall: () => void;
+  onRemove: () => void;
+  installDisabled: boolean;
+  removeDisabled: boolean;
+  progressLabel: string;
+  done: number;
+  total: number;
+  pending: number;
+  failed: number;
+  running: boolean;
+  paused: boolean;
+  lastPath: string | null;
+  lastError: string | null;
+  onPause: () => void;
+  onResume: () => void;
+  onClear: () => void;
+  clearLabel: string;
+  busy: boolean;
+}) {
+  const status = pipelineStatus({ ready, running, paused, pending, failed });
+  const pct = progressPct(done, total);
+  const incomplete = pending > 0 || failed > 0;
+  // Hide Pause/Resume once the library is fully processed (including failures cleared).
+  const showPause = ready && pending > 0 && running && !paused;
+  const showResume = ready && incomplete && (paused || !running);
+  const resumeLabel =
+    failed > 0 && pending === 0 ? "Retry failed" : "Resume";
+  const currentFile = fileName(lastPath);
+
+  return (
+    <section className={`ai-pipeline-row is-${status}`}>
+      <article className="developer-card ai-pipeline-model">
+        <span className="developer-card-label">{modelLabel}</span>
+        <strong>{modelName}</strong>
+        <dl>
+          <div>
+            <dt>License</dt>
+            <dd>{license}</dd>
+          </div>
+          <div>
+            <dt>Installed</dt>
+            <dd>{installed}</dd>
+          </div>
+          {modelsDir && (
+            <div>
+              <dt>Models folder</dt>
+              <dd className="developer-path">{modelsDir}</dd>
+            </div>
+          )}
+        </dl>
+        {!ready ? (
+          <button
+            type="button"
+            className="primary"
+            onClick={onInstall}
+            disabled={installDisabled}
+          >
+            {installing
+              ? downloadPct != null
+                ? `Downloading… ${downloadPct}%`
+                : "Downloading…"
+              : installLabel}
+          </button>
+        ) : (
+          <button type="button" onClick={onRemove} disabled={removeDisabled}>
+            Remove models
+          </button>
+        )}
+        {installing && download && (
+          <p className="muted semantic-download-detail">
+            File {download.fileIndex}/{download.fileCount}: {download.modelId}
+          </p>
+        )}
+      </article>
+
+      <article className="developer-card ai-pipeline-progress">
+        <div className="ai-pipeline-progress-head">
+          <span className="developer-card-label">{progressLabel}</span>
+          <span className={`ai-pipeline-badge is-${status}`} aria-live="polite">
+            {statusLabel(status, pending, failed)}
+          </span>
+        </div>
+
+        <div className="ai-pipeline-count">
+          <strong>
+            {ready ? `${done} / ${total}` : "—"}
+          </strong>
+          {ready && total > 0 && (
+            <span className="muted">{pct}%</span>
+          )}
+        </div>
+
+        <div
+          className={`ai-pipeline-track ${status === "running" ? "is-active" : ""}`}
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={ready ? pct : 0}
+          aria-label={progressLabel}
+        >
+          <div
+            className="ai-pipeline-fill"
+            style={{ width: ready ? `${pct}%` : "0%" }}
+          />
+        </div>
+
+        {status === "running" && currentFile && (
+          <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
+            {currentFile}
+          </p>
+        )}
+        {status === "paused" && currentFile && (
+          <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
+            Last: {currentFile}
+          </p>
+        )}
+        {lastError && (status === "failed" || status === "pending" || failed > 0) && (
+          <p className="ai-pipeline-error" title={lastError} role="status">
+            {lastError}
+          </p>
+        )}
+
+        <div className="ai-pipeline-actions">
+          {showPause && (
+            <button
+              type="button"
+              className="primary"
+              onClick={onPause}
+              disabled={busy}
+            >
+              Pause
+            </button>
+          )}
+          {showResume && (
+            <button
+              type="button"
+              className="primary"
+              onClick={onResume}
+              disabled={busy}
+            >
+              {resumeLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            className="danger"
+            onClick={onClear}
+            disabled={!ready || busy}
+          >
+            {clearLabel}
+          </button>
+        </div>
+      </article>
+    </section>
   );
 }

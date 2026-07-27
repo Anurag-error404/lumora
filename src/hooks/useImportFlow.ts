@@ -1,7 +1,8 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type ImportProgressEvent } from "../lib/tauri";
+import { api, type ImportProgressEvent, type Preferences } from "../lib/tauri";
 import { MEDIA_DIALOG_FILTERS } from "../lib/constants";
+import type { View } from "../types/app";
 
 /** The import modal plus the file/folder pickers and import execution. */
 export function useImportFlow({
@@ -9,11 +10,15 @@ export function useImportFlow({
   setImportProgress,
   loadAssets,
   setError,
+  prefs,
+  setView,
 }: {
   setBusy: Dispatch<SetStateAction<boolean>>;
   setImportProgress: Dispatch<SetStateAction<ImportProgressEvent | null>>;
   loadAssets: () => Promise<void>;
   setError: Dispatch<SetStateAction<string | null>>;
+  prefs: Preferences | null;
+  setView: Dispatch<SetStateAction<View>>;
 }) {
   const [importModal, setImportModal] = useState(false);
 
@@ -47,6 +52,9 @@ export function useImportFlow({
         );
       }
       await loadAssets();
+      if (prefs?.general.revealImportedPhotos !== false && !result.cancelled) {
+        setView("library");
+      }
     } catch (e) {
       setError(String(e));
       setImportProgress(null);

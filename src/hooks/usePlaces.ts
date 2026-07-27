@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type PlaceGroup } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 export function usePlaces({
@@ -20,9 +21,7 @@ export function usePlaces({
     }
   }, [setError]);
 
-  useEffect(() => {
-    void refreshPlaces();
-  }, [refreshPlaces]);
+  useEffect(() => idleDefer(() => void refreshPlaces()), [refreshPlaces]);
 
   useEffect(() => {
     if (view === "places") void refreshPlaces();

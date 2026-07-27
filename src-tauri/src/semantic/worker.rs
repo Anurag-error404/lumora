@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::ml::{self, catalog::ModelKind, clip::ClipEngine};
+use crate::preferences;
 use crate::semantic::{self, IMAGE_MODEL_ID};
 
 const BATCH: u32 = 8;
@@ -28,30 +29,43 @@ pub struct EmbedProgress {
     pub pending: i64,
     pub embedded: i64,
     pub total: i64,
+    /// Assets that failed 3 times and need an explicit retry.
+    pub failed: i64,
     pub running: bool,
+    /// True when the user paused this pipeline (independent of global AI pause).
+    pub paused: bool,
     pub last_path: Option<String>,
+    /// Most recent failure message (job or engine), if any.
+    pub last_error: Option<String>,
     pub model_ready: bool,
 }
 
 pub struct EmbedWorker {
     db_path: PathBuf,
+    app_data: PathBuf,
     engine: Mutex<Option<Arc<ClipEngine>>>,
     running: AtomicBool,
+    /// User-requested pause for this pipeline only.
+    paused: AtomicBool,
     processed: AtomicU64,
     last_path: Mutex<Option<String>>,
+    last_error: Mutex<Option<String>>,
     /// Set when the user asks us to (re)start after installing models.
     wake: AtomicBool,
 }
 
 impl EmbedWorker {
-    pub fn new(db_path: PathBuf, _models_dir: PathBuf) -> Arc<Self> {
+    pub fn new(db_path: PathBuf, app_data: PathBuf) -> Arc<Self> {
         let worker = Arc::new(Self {
             db_path,
+            app_data,
             engine: Mutex::new(None),
             running: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
             processed: AtomicU64::new(0),
             last_path: Mutex::new(None),
-            wake: AtomicBool::new(true),
+            last_error: Mutex::new(None),
+            wake: AtomicBool::new(false),
         });
         let thread_worker = Arc::clone(&worker);
         thread::spawn(move || thread_worker.run_loop());
@@ -66,7 +80,28 @@ impl EmbedWorker {
     }
 
     pub fn kick(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+        // Permanently-failed assets are excluded from the queue — reset them so
+        // Resume actually has work to do.
+        if let Ok(conn) = Connection::open(&self.db_path) {
+            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+            match ml::reset_failed_jobs(&conn, ModelKind::ClipImage.as_str()) {
+                Ok(n) if n > 0 => {
+                    tracing::info!(reset = n, "re-queued failed embedding jobs");
+                    *self.last_error.lock() = None;
+                }
+                Err(e) => {
+                    *self.last_error.lock() = Some(format!("failed to reset jobs: {e}"));
+                }
+                _ => {}
+            }
+        }
         self.wake.store(true, Ordering::Relaxed);
+    }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+        self.running.store(false, Ordering::Relaxed);
     }
 
     /// Load (or reuse) the CLIP engine. Returns `None` when the model is not
@@ -79,13 +114,20 @@ impl EmbedWorker {
         let conn = Connection::open(&self.db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let (embedded, total) = semantic::coverage(&conn)?;
-        let pending = total.saturating_sub(embedded);
+        let failures = ml::job_failure_stats(&conn, ModelKind::ClipImage.as_str())?;
+        let remaining = total.saturating_sub(embedded);
+        let pending = remaining.saturating_sub(failures.failed);
+        let runtime_error = self.last_error.lock().clone();
         Ok(EmbedProgress {
             pending,
             embedded,
             total,
-            running: self.running.load(Ordering::Relaxed),
+            failed: failures.failed,
+            // Don't report running after the queue is empty (last-batch lag).
+            running: pending > 0 && self.running.load(Ordering::Relaxed),
+            paused: self.paused.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
+            last_error: runtime_error.or(failures.last_error),
             model_ready: ml::semantic_ready(&conn)?,
         })
     }
@@ -95,7 +137,25 @@ impl EmbedWorker {
             if !self.wake.swap(false, Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(IDLE_MS));
                 // Periodically re-check for newly indexed photos even without a kick.
-                self.wake.store(true, Ordering::Relaxed);
+                if !self.paused.load(Ordering::Relaxed) {
+                    self.wake.store(true, Ordering::Relaxed);
+                }
+                continue;
+            }
+
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(IDLE_MS));
+                continue;
+            }
+
+            let prefs = match preferences::load(&self.app_data) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if prefs.ai.background_processing == "paused" {
+                self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(IDLE_MS));
                 continue;
             }
 
@@ -107,6 +167,7 @@ impl EmbedWorker {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "semantic embedder unavailable");
+                    *self.last_error.lock() = Some(e.to_string());
                     self.running.store(false, Ordering::Relaxed);
                     continue;
                 }
@@ -116,6 +177,7 @@ impl EmbedWorker {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "embedding batch failed");
+                    *self.last_error.lock() = Some(e.to_string());
                     0
                 }
             };
@@ -161,6 +223,10 @@ impl EmbedWorker {
 
         let mut done = 0usize;
         for (id, path) in pending {
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                break;
+            }
             *self.last_path.lock() = Some(path.clone());
             match engine.embed_image_path(PathBuf::from(&path).as_path()) {
                 Ok(embedding) => {
@@ -180,6 +246,7 @@ impl EmbedWorker {
                 }
                 Err(e) => {
                     tracing::debug!(asset = %id, error = %e, "image embed skipped");
+                    *self.last_error.lock() = Some(format!("{}: {e}", path));
                     let _ = semantic::mark_job(
                         &conn,
                         &id,

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -15,12 +16,22 @@ use crate::indexer::queue::{IndexJob, IndexerQueue};
 
 pub struct WatcherService {
     roots: Mutex<Vec<PathBuf>>,
+    enabled: AtomicBool,
 }
 
 impl WatcherService {
     pub fn new() -> Self {
         Self {
             roots: Mutex::new(Vec::new()),
+            enabled: AtomicBool::new(true),
+        }
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            // Drop active watches on the next sync tick.
+            self.roots.lock().clear();
         }
     }
 
@@ -57,11 +68,19 @@ impl WatcherService {
 
             loop {
                 match rx.recv_timeout(Duration::from_millis(500)) {
-                    Ok(Ok(event)) => handle_event(&queue, event),
+                    Ok(Ok(event)) => {
+                        if service.enabled.load(Ordering::Relaxed) {
+                            handle_event(&queue, event);
+                        }
+                    }
                     Ok(Err(err)) => tracing::warn!(?err, "watch error"),
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        let desired: HashSet<PathBuf> =
-                            service.roots.lock().iter().cloned().collect();
+                        let desired: HashSet<PathBuf> = if service.enabled.load(Ordering::Relaxed)
+                        {
+                            service.roots.lock().iter().cloned().collect()
+                        } else {
+                            HashSet::new()
+                        };
                         for path in active.difference(&desired) {
                             if let Err(err) = watcher.unwatch(path) {
                                 tracing::warn!(
@@ -89,6 +108,9 @@ impl WatcherService {
     }
 
     pub fn add_root(&self, path: PathBuf) {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
         let mut roots = self.roots.lock();
         if !roots.iter().any(|p| p == &path) {
             roots.push(path);
@@ -97,6 +119,11 @@ impl WatcherService {
 
     pub fn remove_root(&self, path: &Path) {
         self.roots.lock().retain(|p| p != path);
+    }
+
+    /// Replace watched roots (used when re-enabling folder watching).
+    pub fn set_roots(&self, paths: Vec<PathBuf>) {
+        *self.roots.lock() = paths;
     }
 }
 

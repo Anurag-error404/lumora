@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { api, type Album } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 /** Album list plus the currently opened album in the Albums view. */
@@ -27,9 +28,7 @@ export function useAlbums({
     }
   }, [setError]);
 
-  useEffect(() => {
-    void refreshAlbums();
-  }, [refreshAlbums]);
+  useEffect(() => idleDefer(() => void refreshAlbums()), [refreshAlbums]);
 
   useEffect(() => {
     if (view === "albums") void refreshAlbums();

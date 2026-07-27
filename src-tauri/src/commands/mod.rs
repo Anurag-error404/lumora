@@ -121,15 +121,20 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     }
 
     // Extract owned paths so we don't hold `State<'_>` across threads.
-    let (db_path, thumbs, cancel) = {
+    let (db_path, thumbs, cancel, app_data) = {
         let state = app.state::<AppState>();
         state.import_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
         (
             state.paths.db_path.clone(),
             state.paths.thumbs_dir.clone(),
             Arc::clone(&state.import_cancel),
+            state.paths.app_data.clone(),
         )
     };
+
+    let skip_content_dupes = preferences::load(&app_data)
+        .map(|p| p.import_export.skip_duplicates)
+        .unwrap_or(true);
 
     let label = if roots.len() == 1 {
         roots[0].display().to_string()
@@ -164,6 +169,7 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
             &roots_for_job,
             &thumbs,
             cancel,
+            skip_content_dupes,
             |current, total, file| {
                 let _ = app_for_job.emit(
                     "import-progress",
@@ -331,10 +337,31 @@ pub fn get_preferences(state: State<'_, AppState>) -> AppResult<Preferences> {
 
 #[tauri::command]
 pub fn set_preferences(
+    app: AppHandle,
     state: State<'_, AppState>,
     prefs: Preferences,
 ) -> AppResult<Preferences> {
     preferences::save(&state.paths.app_data, &prefs)?;
+
+    if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
+        ws.set_enabled(prefs.library.watch_folders_enabled);
+        if prefs.library.watch_folders_enabled {
+            let roots = state
+                .with_db(watcher::load_watched_paths)
+                .unwrap_or_default();
+            ws.set_roots(roots);
+        }
+    }
+
+    // Resume background workers immediately when the user un-pauses.
+    if prefs.ai.background_processing != "paused" {
+        state.embedder.kick();
+        state.ocr.kick();
+        state.faces.kick();
+        state.places.kick();
+        state.tags.kick();
+    }
+
     Ok(prefs)
 }
 
@@ -1360,6 +1387,13 @@ pub fn kick_embedding(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
+/// Pause the embedding worker until the next kick/resume.
+#[tauri::command]
+pub fn pause_embedding(state: State<'_, AppState>) -> AppResult<()> {
+    state.embedder.pause();
+    Ok(())
+}
+
 /// Download the RapidOCR PP-OCRv4 bundle (det + rec + dict).
 #[tauri::command]
 pub async fn install_ocr_models(app: AppHandle) -> AppResult<ml::MlStatus> {
@@ -1445,6 +1479,12 @@ pub fn ocr_progress(state: State<'_, AppState>) -> AppResult<ocr::worker::OcrPro
 #[tauri::command]
 pub fn kick_ocr(state: State<'_, AppState>) -> AppResult<()> {
     state.ocr.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn pause_ocr(state: State<'_, AppState>) -> AppResult<()> {
+    state.ocr.pause();
     Ok(())
 }
 
@@ -1558,6 +1598,12 @@ pub fn kick_faces(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn pause_faces(state: State<'_, AppState>) -> AppResult<()> {
+    state.faces.pause();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn clear_face_data(state: State<'_, AppState>) -> AppResult<usize> {
     let faces_dir = state.paths.faces_dir.clone();
     let n = state.with_db(|conn| faces::clear_all(conn, &faces_dir))?;
@@ -1580,8 +1626,9 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
 
     let app_for_job = app.clone();
     let dir_for_job = models_dir.clone();
+    let db_path_for_install = db_path.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path)?;
+        let conn = Connection::open(&db_path_for_install)?;
         conn.busy_timeout(std::time::Duration::from_secs(30))?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
@@ -1590,6 +1637,12 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
         for (index, entry) in entries.into_iter().enumerate() {
             let app_progress = app_for_job.clone();
             let file_label = entry.file_name.to_string();
+            tracing::info!(
+                model = entry.id,
+                file = index + 1,
+                of = total_files,
+                "installing auto-tags bundle file"
+            );
             ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
                 let _ = app_progress.emit(
                     "model-progress",
@@ -1603,6 +1656,7 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
                 );
             })?;
         }
+        tracing::info!("auto-tags bundle install finished");
         Ok(())
     })
     .await
@@ -1616,7 +1670,18 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     let state = app.state::<AppState>();
     state.tags.invalidate();
     state.tags.kick();
-    state.with_db(|conn| ml::status(conn, &models_dir))
+    // Prefer a fresh connection so a busy worker write cannot hold up the UI
+    // after download completes.
+    let models_dir_for_status = models_dir.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || -> AppResult<ml::MlStatus> {
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        ml::status(&conn, &models_dir_for_status)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("auto-tags status failed: {e}")))??;
+    Ok(status)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1650,6 +1715,12 @@ pub fn tags_progress(state: State<'_, AppState>) -> AppResult<tags::worker::Tags
 #[tauri::command]
 pub fn kick_tags(state: State<'_, AppState>) -> AppResult<()> {
     state.tags.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn pause_tags(state: State<'_, AppState>) -> AppResult<()> {
+    state.tags.pause();
     Ok(())
 }
 
@@ -1722,6 +1793,13 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
         for (index, entry) in entries.into_iter().enumerate() {
             let app_progress = app_for_job.clone();
             let file_label = entry.file_name.to_string();
+            tracing::info!(
+                model = entry.id,
+                file = index + 1,
+                of = total_files,
+                option = option_id.as_str(),
+                "installing model library file"
+            );
             ml::download_and_install(&conn, &dir_for_job, entry, move |done, total| {
                 let _ = app_progress.emit(
                     "model-progress",
@@ -1735,6 +1813,7 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
                 );
             })?;
         }
+        tracing::info!(option = option_id.as_str(), "model library install finished");
         Ok(())
     })
     .await
@@ -2328,7 +2407,14 @@ pub fn export_assets_zip(
     dest: String,
 ) -> AppResult<ExportResult> {
     let dest_path = PathBuf::from(&dest);
-    let result = state.with_db(|conn| export::export_assets_to_zip(conn, &ids, &dest_path))?;
+    let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    let options = export::ExportOptions {
+        strip_metadata: prefs.privacy.strip_metadata_on_export
+            || prefs.import_export.strip_metadata,
+        jpeg_quality: prefs.import_export.jpeg_quality,
+    };
+    let result =
+        state.with_db(|conn| export::export_assets_to_zip(conn, &ids, &dest_path, options))?;
     let note = if result.missing > 0 || !result.errors.is_empty() {
         Some(format!(
             "{} missing · {} warning(s)",

@@ -24,8 +24,12 @@ pub struct TagsProgress {
     pub pending: i64,
     pub done: i64,
     pub total: i64,
+    pub failed: i64,
     pub running: bool,
+    /// True when the user paused this pipeline (independent of global AI pause).
+    pub paused: bool,
     pub last_path: Option<String>,
+    pub last_error: Option<String>,
     pub model_ready: bool,
 }
 
@@ -34,7 +38,9 @@ pub struct TagsWorker {
     app_data: PathBuf,
     engine: Mutex<Option<Arc<TagsEngine>>>,
     running: AtomicBool,
+    paused: AtomicBool,
     last_path: Mutex<Option<String>>,
+    last_error: Mutex<Option<String>>,
     wake: AtomicBool,
 }
 
@@ -45,7 +51,9 @@ impl TagsWorker {
             app_data,
             engine: Mutex::new(None),
             running: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
             last_path: Mutex::new(None),
+            last_error: Mutex::new(None),
             wake: AtomicBool::new(true),
         });
         let thread_worker = Arc::clone(&worker);
@@ -59,21 +67,67 @@ impl TagsWorker {
     }
 
     pub fn kick(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+        if let Ok(conn) = Connection::open(&self.db_path) {
+            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+            match crate::ml::reset_failed_jobs(&conn, crate::ml::catalog::ModelKind::Tags.as_str())
+            {
+                Ok(n) if n > 0 => {
+                    tracing::info!(reset = n, "re-queued failed auto-tag jobs");
+                    *self.last_error.lock() = None;
+                }
+                Err(e) => {
+                    *self.last_error.lock() = Some(format!("failed to reset jobs: {e}"));
+                }
+                _ => {}
+            }
+            // Older runs marked empty classifications as done without labels —
+            // clear those so Resume can store at least a top-1 label.
+            match conn.execute(
+                "DELETE FROM ml_jobs
+                 WHERE kind = ?1
+                   AND state = 'done'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM asset_labels l WHERE l.asset_id = ml_jobs.asset_id
+                   )",
+                rusqlite::params![crate::ml::catalog::ModelKind::Tags.as_str()],
+            ) {
+                Ok(n) if n > 0 => {
+                    tracing::info!(reset = n, "re-queued empty auto-tag jobs");
+                }
+                Err(e) => {
+                    *self.last_error.lock() = Some(format!("failed to reset empty jobs: {e}"));
+                }
+                _ => {}
+            }
+        }
         self.wake.store(true, Ordering::Relaxed);
+    }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+        self.running.store(false, Ordering::Relaxed);
     }
 
     pub fn progress(&self) -> AppResult<TagsProgress> {
         let conn = Connection::open(&self.db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let cov = tags::coverage(&conn)?;
-        let pending = cov.total.saturating_sub(cov.done);
+        let failures =
+            crate::ml::job_failure_stats(&conn, crate::ml::catalog::ModelKind::Tags.as_str())?;
+        let remaining = cov.total.saturating_sub(cov.done);
+        let pending = remaining.saturating_sub(failures.failed);
         let bundle = tags::active_bundle(&self.app_data);
+        let runtime_error = self.last_error.lock().clone();
         Ok(TagsProgress {
             pending,
             done: cov.done,
             total: cov.total,
-            running: self.running.load(Ordering::Relaxed),
+            failed: failures.failed,
+            running: pending > 0 && self.running.load(Ordering::Relaxed),
+            paused: self.paused.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
+            last_error: runtime_error.or(failures.last_error),
             model_ready: tags::tags_ready_bundle(&conn, &bundle)?,
         })
     }
@@ -82,7 +136,15 @@ impl TagsWorker {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(IDLE_MS));
-                self.wake.store(true, Ordering::Relaxed);
+                if !self.paused.load(Ordering::Relaxed) {
+                    self.wake.store(true, Ordering::Relaxed);
+                }
+                continue;
+            }
+
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(IDLE_MS));
                 continue;
             }
 
@@ -90,8 +152,17 @@ impl TagsWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !prefs.ai.object_detection {
+            if !prefs.ai.object_detection || prefs.ai.background_processing == "paused" {
                 self.running.store(false, Ordering::Relaxed);
+                if !prefs.ai.object_detection {
+                    *self.last_error.lock() = Some(
+                        "Object detection is turned off in Settings → AI Features.".into(),
+                    );
+                } else {
+                    *self.last_error.lock() =
+                        Some("Background AI processing is paused.".into());
+                }
+                thread::sleep(Duration::from_millis(IDLE_MS));
                 continue;
             }
 
@@ -99,11 +170,17 @@ impl TagsWorker {
                 Ok(Some(e)) => e,
                 Ok(None) => {
                     self.running.store(false, Ordering::Relaxed);
+                    *self.last_error.lock() = Some(
+                        "Auto-tag models are not fully installed yet.".into(),
+                    );
+                    thread::sleep(Duration::from_millis(IDLE_MS));
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "auto-tags engine unavailable");
+                    *self.last_error.lock() = Some(e.to_string());
                     self.running.store(false, Ordering::Relaxed);
+                    thread::sleep(Duration::from_millis(IDLE_MS));
                     continue;
                 }
             };
@@ -112,6 +189,7 @@ impl TagsWorker {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "auto-tags batch failed");
+                    *self.last_error.lock() = Some(e.to_string());
                     0
                 }
             };
@@ -159,6 +237,10 @@ impl TagsWorker {
 
         let mut done = 0usize;
         for (id, path) in pending {
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                break;
+            }
             *self.last_path.lock() = Some(path.clone());
             match engine.run_path(std::path::Path::new(&path)) {
                 Ok(labels) => {
@@ -172,6 +254,7 @@ impl TagsWorker {
                 }
                 Err(e) => {
                     tracing::debug!(asset = %id, error = %e, "auto-tags skipped");
+                    *self.last_error.lock() = Some(format!("{}: {e}", path));
                     let _ = tags::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }

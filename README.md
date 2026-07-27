@@ -32,7 +32,7 @@ Repository: [github.com/Anurag-error404/lumora](https://github.com/Anurag-error4
 
 - Import folders recursively; originals are never moved or rewritten by indexing
 - Watched folders for live add / change / remove
-- Photos and videos in one library (video frame thumbs via system **ffmpeg** when available)
+- Photos and videos in one library (video frame thumbs via system **ffmpeg** when available; soft-fail placeholder otherwise)
 - Albums, tags, favourites, 1–5 ratings, colour labels
 - Timeline by year / month; recently added and recently viewed
 - Smart collections: Videos, RAW, Screenshots, Selfies, Panoramas, Documents, Receipts
@@ -66,7 +66,7 @@ Switch backends in the **model library**, then re-run processing if needed. Deri
 
 ### Places & vault
 
-- **Places** — GPS EXIF + offline reverse geocode (bundled GeoNames; no map tile network)
+- **Places** — GPS EXIF + offline reverse geocode (bundled GeoNames) and an offline geometry map (Natural Earth land + pins; no tile network)
 - **Locked folder** — encrypted vault with recovery code
 
 ---

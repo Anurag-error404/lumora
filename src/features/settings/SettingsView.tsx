@@ -194,8 +194,6 @@ export function SettingsView({
                 }
               }}
             />
-          ) : section === "performance" ? (
-            <PerformanceSection prefs={prefs} update={update} />
           ) : section === "shortcuts" ? (
             <ShortcutsSection />
           ) : section === "importExport" ? (
@@ -507,7 +505,7 @@ function AiSection({
         />
         <ChoiceRow
           label="Background processing"
-          description="Pause stops new embedding work until you resume."
+          description="Pause stops all on-device AI / Places background jobs until you resume."
           value={prefs.ai.backgroundProcessing === "paused" ? "paused" : "always"}
           options={[
             { value: "always", label: "Always" },
@@ -522,7 +520,7 @@ function AiSection({
         />
       </SettingsBlock>
       <SettingsBlock title="Models">
-        <AiModelsPanel />
+        <AiModelsPanel updatePrefs={update} />
       </SettingsBlock>
       <SettingsBlock title="Model library">
         <ModelLibraryPanel />
@@ -564,30 +562,29 @@ function PrivacySection({
             Open Locked folder
           </button>
         </div>
+        <SelectRow
+          label="Auto-lock vault"
+          description="Lock after inactivity while a vault is unlocked. Never keeps it open until you lock manually."
+          value={String(p.autoLockMinutes)}
+          options={[
+            { value: "0", label: "Never" },
+            { value: "5", label: "5 minutes" },
+            { value: "15", label: "15 minutes" },
+            { value: "30", label: "30 minutes" },
+            { value: "60", label: "1 hour" },
+          ]}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.autoLockMinutes = Number(v);
+              return cur;
+            })
+          }
+        />
       </SettingsBlock>
       <SettingsBlock title="Metadata">
         <ToggleRow
-          label="Preserve GPS"
-          checked={p.preserveGps}
-          onChange={(v) =>
-            void update((cur) => {
-              cur.privacy.preserveGps = v;
-              return cur;
-            })
-          }
-        />
-        <ToggleRow
-          label="Preserve EXIF"
-          checked={p.preserveExif}
-          onChange={(v) =>
-            void update((cur) => {
-              cur.privacy.preserveExif = v;
-              return cur;
-            })
-          }
-        />
-        <ToggleRow
           label="Strip metadata on export"
+          description="Re-encode still images without EXIF/GPS when exporting a ZIP. Videos are copied as-is."
           checked={p.stripMetadataOnExport}
           onChange={(v) =>
             void update((cur) => {
@@ -702,67 +699,6 @@ function StorageSection({
   );
 }
 
-function PerformanceSection({
-  prefs,
-  update,
-}: {
-  prefs: Preferences;
-  update: PrefsUpdater;
-}) {
-  const perf = prefs.performance;
-  return (
-    <>
-      <SettingsBlock title="CPU usage">
-        <ChoiceRow
-          label="Profile"
-          description="Hints for background indexing intensity."
-          value={perf.cpuProfile}
-          options={[
-            { value: "low", label: "Low" },
-            { value: "balanced", label: "Balanced" },
-            { value: "maximum", label: "Maximum" },
-          ]}
-          onChange={(v) =>
-            void update((p) => {
-              p.performance.cpuProfile = v;
-              return p;
-            })
-          }
-        />
-      </SettingsBlock>
-      <SettingsBlock title="Indexing">
-        <ToggleRow
-          label="Pause on battery"
-          checked={perf.pauseOnBattery}
-          onChange={(v) =>
-            void update((p) => {
-              p.performance.pauseOnBattery = v;
-              return p;
-            })
-          }
-        />
-      </SettingsBlock>
-      <SettingsBlock title="Memory">
-        <ChoiceRow
-          label="Thumbnail cache budget"
-          value={String(perf.thumbnailCacheMb)}
-          options={[
-            { value: "512", label: "512 MB" },
-            { value: "1024", label: "1 GB" },
-            { value: "2048", label: "2 GB" },
-          ]}
-          onChange={(v) =>
-            void update((p) => {
-              p.performance.thumbnailCacheMb = Number(v);
-              return p;
-            })
-          }
-        />
-      </SettingsBlock>
-    </>
-  );
-}
-
 function ShortcutsSection() {
   return (
     <SettingsBlock title="Keyboard shortcuts">
@@ -791,6 +727,7 @@ function ImportExportSection({
       <SettingsBlock title="Import">
         <ToggleRow
           label="Skip duplicates"
+          description="Skip files whose content hash already exists in the library (different path, same bytes)."
           checked={ie.skipDuplicates}
           onChange={(v) =>
             void update((p) => {
@@ -799,20 +736,11 @@ function ImportExportSection({
             })
           }
         />
-        <ToggleRow
-          label="Preserve folder structure"
-          checked={ie.preserveFolderStructure}
-          onChange={(v) =>
-            void update((p) => {
-              p.importExport.preserveFolderStructure = v;
-              return p;
-            })
-          }
-        />
       </SettingsBlock>
       <SettingsBlock title="Export">
         <SliderRow
           label="JPEG quality"
+          description="Used when stripping metadata re-encodes JPEGs on export."
           value={ie.jpegQuality}
           min={60}
           max={100}
@@ -820,16 +748,6 @@ function ImportExportSection({
           onChange={(v) =>
             void update((p) => {
               p.importExport.jpegQuality = v;
-              return p;
-            })
-          }
-        />
-        <ToggleRow
-          label="Strip metadata"
-          checked={ie.stripMetadata}
-          onChange={(v) =>
-            void update((p) => {
-              p.importExport.stripMetadata = v;
               return p;
             })
           }

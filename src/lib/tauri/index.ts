@@ -221,8 +221,11 @@ export type EmbedProgress = {
   pending: number;
   embedded: number;
   total: number;
+  failed: number;
   running: boolean;
+  paused: boolean;
   lastPath: string | null;
+  lastError: string | null;
   modelReady: boolean;
 };
 
@@ -230,8 +233,11 @@ export type OcrProgress = {
   pending: number;
   done: number;
   total: number;
+  failed: number;
   running: boolean;
+  paused: boolean;
   lastPath: string | null;
+  lastError: string | null;
   modelReady: boolean;
 };
 
@@ -254,8 +260,11 @@ export type FacesProgress = {
   pending: number;
   done: number;
   total: number;
+  failed: number;
   running: boolean;
+  paused: boolean;
   lastPath: string | null;
+  lastError: string | null;
   modelReady: boolean;
 };
 
@@ -271,8 +280,11 @@ export type TagsProgress = {
   pending: number;
   done: number;
   total: number;
+  failed: number;
   running: boolean;
+  paused: boolean;
   lastPath: string | null;
+  lastError: string | null;
   modelReady: boolean;
 };
 
@@ -672,12 +684,14 @@ export const api = {
   semanticStatus: () => invoke<SemanticStatus>("semantic_status"),
   embedProgress: () => invoke<EmbedProgress>("embed_progress"),
   kickEmbedding: () => invoke<void>("kick_embedding"),
+  pauseEmbedding: () => invoke<void>("pause_embedding"),
   semanticSearch: (query: string, limit: number) =>
     invoke<AssetSummary[]>("semantic_search", { query, limit }),
   installOcrModels: () => invoke<MlStatus>("install_ocr_models"),
   ocrStatus: () => invoke<OcrStatus>("ocr_status"),
   ocrProgress: () => invoke<OcrProgress>("ocr_progress"),
   kickOcr: () => invoke<void>("kick_ocr"),
+  pauseOcr: () => invoke<void>("pause_ocr"),
   clearOcrText: () => invoke<number>("clear_ocr_text"),
   getAssetText: (assetId: string) =>
     invoke<AssetText | null>("get_asset_text", {
@@ -688,11 +702,13 @@ export const api = {
   facesStatus: () => invoke<FacesStatus>("faces_status"),
   facesProgress: () => invoke<FacesProgress>("faces_progress"),
   kickFaces: () => invoke<void>("kick_faces"),
+  pauseFaces: () => invoke<void>("pause_faces"),
   clearFaceData: () => invoke<number>("clear_face_data"),
   installTagsModels: () => invoke<MlStatus>("install_tags_models"),
   tagsStatus: () => invoke<TagsStatus>("tags_status"),
   tagsProgress: () => invoke<TagsProgress>("tags_progress"),
   kickTags: () => invoke<void>("kick_tags"),
+  pauseTags: () => invoke<void>("pause_tags"),
   clearAutoTags: () => invoke<number>("clear_auto_tags"),
   listAssetLabels: (assetId: string) =>
     invoke<AssetLabel[]>("list_asset_labels", {

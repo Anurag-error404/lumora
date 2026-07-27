@@ -27,8 +27,12 @@ pub struct OcrProgress {
     pub pending: i64,
     pub done: i64,
     pub total: i64,
+    pub failed: i64,
     pub running: bool,
+    /// True when the user paused this pipeline (independent of global AI pause).
+    pub paused: bool,
     pub last_path: Option<String>,
+    pub last_error: Option<String>,
     pub model_ready: bool,
 }
 
@@ -37,7 +41,9 @@ pub struct OcrWorker {
     app_data: PathBuf,
     engine: Mutex<Option<Arc<OcrEngine>>>,
     running: AtomicBool,
+    paused: AtomicBool,
     last_path: Mutex<Option<String>>,
+    last_error: Mutex<Option<String>>,
     wake: AtomicBool,
 }
 
@@ -48,7 +54,9 @@ impl OcrWorker {
             app_data,
             engine: Mutex::new(None),
             running: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
             last_path: Mutex::new(None),
+            last_error: Mutex::new(None),
             wake: AtomicBool::new(true),
         });
         let thread_worker = Arc::clone(&worker);
@@ -62,21 +70,47 @@ impl OcrWorker {
     }
 
     pub fn kick(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+        if let Ok(conn) = Connection::open(&self.db_path) {
+            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+            match crate::ml::reset_failed_jobs(&conn, crate::ml::catalog::ModelKind::Ocr.as_str()) {
+                Ok(n) if n > 0 => {
+                    tracing::info!(reset = n, "re-queued failed OCR jobs");
+                    *self.last_error.lock() = None;
+                }
+                Err(e) => {
+                    *self.last_error.lock() = Some(format!("failed to reset jobs: {e}"));
+                }
+                _ => {}
+            }
+        }
         self.wake.store(true, Ordering::Relaxed);
+    }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+        self.running.store(false, Ordering::Relaxed);
     }
 
     pub fn progress(&self) -> AppResult<OcrProgress> {
         let conn = Connection::open(&self.db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let cov = ocr::coverage(&conn)?;
-        let pending = cov.total.saturating_sub(cov.done);
+        let failures =
+            crate::ml::job_failure_stats(&conn, crate::ml::catalog::ModelKind::Ocr.as_str())?;
+        let remaining = cov.total.saturating_sub(cov.done);
+        let pending = remaining.saturating_sub(failures.failed);
         let bundle = ocr::active_bundle(&self.app_data);
+        let runtime_error = self.last_error.lock().clone();
         Ok(OcrProgress {
             pending,
             done: cov.done,
             total: cov.total,
-            running: self.running.load(Ordering::Relaxed),
+            failed: failures.failed,
+            running: pending > 0 && self.running.load(Ordering::Relaxed),
+            paused: self.paused.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
+            last_error: runtime_error.or(failures.last_error),
             model_ready: ocr::ocr_ready_bundle(&conn, &bundle)?,
         })
     }
@@ -85,7 +119,15 @@ impl OcrWorker {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(IDLE_MS));
-                self.wake.store(true, Ordering::Relaxed);
+                if !self.paused.load(Ordering::Relaxed) {
+                    self.wake.store(true, Ordering::Relaxed);
+                }
+                continue;
+            }
+
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(IDLE_MS));
                 continue;
             }
 
@@ -93,8 +135,9 @@ impl OcrWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !prefs.ai.ocr {
+            if !prefs.ai.ocr || prefs.ai.background_processing == "paused" {
                 self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(IDLE_MS));
                 continue;
             }
 
@@ -106,6 +149,7 @@ impl OcrWorker {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "OCR engine unavailable");
+                    *self.last_error.lock() = Some(e.to_string());
                     self.running.store(false, Ordering::Relaxed);
                     continue;
                 }
@@ -115,6 +159,7 @@ impl OcrWorker {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "OCR batch failed");
+                    *self.last_error.lock() = Some(e.to_string());
                     0
                 }
             };
@@ -160,6 +205,10 @@ impl OcrWorker {
 
         let mut done = 0usize;
         for (id, path) in pending {
+            if self.paused.load(Ordering::Relaxed) {
+                self.running.store(false, Ordering::Relaxed);
+                break;
+            }
             *self.last_path.lock() = Some(path.clone());
             match engine.run_path(std::path::Path::new(&path)) {
                 Ok(result) => {
@@ -174,6 +223,7 @@ impl OcrWorker {
                 }
                 Err(e) => {
                     tracing::debug!(asset = %id, error = %e, "OCR skipped");
+                    *self.last_error.lock() = Some(format!("{}: {e}", path));
                     let _ = ocr::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }

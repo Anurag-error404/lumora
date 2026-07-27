@@ -151,7 +151,11 @@ pub fn pending_assets(conn: &Connection, limit: u32) -> AppResult<Vec<(String, S
          WHERE a.deleted_at IS NULL
            AND a.media_type = 'image'
            AND l.asset_id IS NULL
-           AND (j.state IS NULL OR (j.state = 'failed' AND j.attempts < 3))
+           AND (
+             j.state IS NULL
+             OR j.state = 'done'
+             OR (j.state = 'failed' AND j.attempts < 3)
+           )
          ORDER BY a.indexed_at DESC
          LIMIT ?2",
     )?;

@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { api, type SavedSearch } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 /** Recent search history — auto-recorded when a query is run. */
@@ -26,8 +27,10 @@ export function useRecentSearches({
     }
   }, [setError]);
 
+  useEffect(() => idleDefer(() => void refresh()), [refresh]);
+
   useEffect(() => {
-    void refresh();
+    if (view === "savedSearches" || view === "home") void refresh();
   }, [refresh, view]);
 
   async function record(query: string) {

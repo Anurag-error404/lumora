@@ -12,7 +12,7 @@ Early product work needed concrete media-stack choices before indexing and searc
 
 1. **EXIF:** `kamadak-exif` (pure Rust) for reads only. EXIF write deferred.
 2. **Thumbnails:** JPEG, max 320px long edge, under app-data thumbs keyed by content hash. No eviction policy yet.
-3. **Video:** Index in the same library as photos. Frame extraction uses **system ffmpeg / ffprobe** when present on `PATH` (soft-fail to a placeholder if missing). ffmpeg is not bundled.
+3. **Video:** Index in the same library as photos. Frame extraction uses **system ffmpeg / ffprobe** when present on `PATH` (soft-fail to a placeholder if missing). ffmpeg is not bundled — this is the locked Phase 1 residual decision.
 4. **Near-duplicates:** Average hash (aHash) over an 8×8 luma preview — not ML. Current UI threshold is Hamming ≤ 2.
 5. **Editing / saved searches:** Shipped later than the initial MVP cut; present in the app today.
 

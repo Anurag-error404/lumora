@@ -20,5 +20,8 @@ backend or leaving face recognition disabled if your use case is commercial.
 Bundled offline Places data uses GeoNames (CC-BY 4.0) via the
 `reverse_geocoder` crate — attribution applies when redistributing that data.
 
+The Places map land silhouette is derived from [Natural Earth](https://www.naturalearthdata.com/)
+110m land (public domain) as local SVG geometry — no map tile servers are contacted.
+
 Always verify the licence text that ships with a specific model download before
 redistributing model weights.

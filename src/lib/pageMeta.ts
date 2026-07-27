@@ -72,6 +72,6 @@ export const LIBRARY_PAGE_META: Partial<
   places: {
     title: "Places",
     description:
-      "Photos grouped by where they were taken, reverse-geocoded entirely on-device from GPS EXIF.",
+      "Photos grouped by where they were taken — offline reverse geocode plus an offline geometry map. No tile network.",
   },
 };

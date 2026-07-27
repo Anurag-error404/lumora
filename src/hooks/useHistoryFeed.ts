@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { api, type HistorySnapshot } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 /** Undo/redo stacks and the activity feed snapshot. */
@@ -27,9 +28,7 @@ export function useHistoryFeed({
     }
   }, [setError]);
 
-  useEffect(() => {
-    void refreshHistory();
-  }, [refreshHistory]);
+  useEffect(() => idleDefer(() => void refreshHistory()), [refreshHistory]);
 
   useEffect(() => {
     if (view === "activity") void refreshHistory();

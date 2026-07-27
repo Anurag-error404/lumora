@@ -12,6 +12,7 @@ import {
   type Tag,
   type TagBrowseFilter,
 } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import { labelName } from "../lib/labels";
 import type { View } from "../types/app";
 
@@ -52,9 +53,7 @@ export function useTagBrowse({
     }
   }, [setError]);
 
-  useEffect(() => {
-    void refreshTags();
-  }, [refreshTags]);
+  useEffect(() => idleDefer(() => void refreshTags()), [refreshTags]);
 
   useEffect(() => {
     if (view === "tags") void refreshTags();

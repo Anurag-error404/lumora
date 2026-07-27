@@ -39,7 +39,7 @@ pub fn upsert_asset(
     let Some(prepared) = prepare_asset(path, thumbs_dir, generate_thumb)? else {
         return Ok(UpsertOutcome::Skipped);
     };
-    commit_prepared(conn, &prepared)
+    commit_prepared(conn, &prepared, false)
 }
 
 /// CPU-bound work for one file: hash, EXIF, single image decode → thumb + phash.
@@ -66,7 +66,11 @@ pub fn prepare_asset(
     }))
 }
 
-pub fn commit_prepared(conn: &Connection, prepared: &PreparedAsset) -> AppResult<UpsertOutcome> {
+pub fn commit_prepared(
+    conn: &Connection,
+    prepared: &PreparedAsset,
+    skip_content_dupes: bool,
+) -> AppResult<UpsertOutcome> {
     let path_str = prepared.path.to_string_lossy().to_string();
     let now = Utc::now().to_rfc3339();
     let meta = &prepared.meta;
@@ -107,6 +111,18 @@ pub fn commit_prepared(conn: &Connection, prepared: &PreparedAsset) -> AppResult
         )?;
         (id, UpsertOutcome::Updated)
     } else {
+        if skip_content_dupes {
+            let hash_exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM assets WHERE hash = ?1 AND deleted_at IS NULL LIMIT 1",
+                    params![hash],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if hash_exists {
+                return Ok(UpsertOutcome::Skipped);
+            }
+        }
         let id = Uuid::new_v4().to_string();
         let created_at = file_created_at(&prepared.path).unwrap_or_else(|| now.clone());
         conn.execute(
@@ -143,7 +159,7 @@ pub fn commit_prepared(conn: &Connection, prepared: &PreparedAsset) -> AppResult
         )?;
     }
 
-    refresh_fts(conn, &id)?;
+    refresh_fts_basic(conn, &id, &path_str, meta.camera.as_deref(), meta.lens.as_deref())?;
     Ok(outcome)
 }
 
@@ -181,6 +197,7 @@ pub fn import_folder_with_progress(
         &[root.to_path_buf()],
         thumbs_dir,
         Arc::new(AtomicBool::new(false)),
+        false,
         on_progress,
     )
 }
@@ -192,6 +209,7 @@ pub fn import_paths_with_progress(
     roots: &[std::path::PathBuf],
     thumbs_dir: &Path,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    skip_content_dupes: bool,
     mut on_progress: impl FnMut(u64, u64, &Path),
 ) -> AppResult<ImportResult> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -221,7 +239,7 @@ pub fn import_paths_with_progress(
     }
 
     let workers = thread::available_parallelism()
-        .map(|n| n.get().clamp(2, 8))
+        .map(|n| n.get().clamp(2, 16))
         .unwrap_or(4);
     let files = Arc::new(files);
     let thumbs_dir = thumbs_dir.to_path_buf();
@@ -256,6 +274,11 @@ pub fn import_paths_with_progress(
     }
     drop(tx);
 
+    // Batch SQLite writes — per-file auto-commit was a major serial bottleneck.
+    const COMMIT_EVERY: usize = 64;
+    let _ = conn.execute_batch("BEGIN IMMEDIATE");
+    let mut since_commit = 0usize;
+
     let mut received = 0usize;
     while received < files.len() {
         if cancel.load(Ordering::Relaxed) {
@@ -279,9 +302,15 @@ pub fn import_paths_with_progress(
         on_progress(scanned, total, path);
 
         match prepared {
-            Ok(Some(asset)) => match commit_prepared(conn, &asset) {
-                Ok(UpsertOutcome::Inserted) => inserted += 1,
-                Ok(UpsertOutcome::Updated) => updated += 1,
+            Ok(Some(asset)) => match commit_prepared(conn, &asset, skip_content_dupes) {
+                Ok(UpsertOutcome::Inserted) => {
+                    inserted += 1;
+                    since_commit += 1;
+                }
+                Ok(UpsertOutcome::Updated) => {
+                    updated += 1;
+                    since_commit += 1;
+                }
                 Ok(UpsertOutcome::Skipped) => skipped += 1,
                 Err(e) => {
                     tracing::warn!(path = %path.display(), error = %e, "import commit failed");
@@ -294,7 +323,14 @@ pub fn import_paths_with_progress(
                 skipped += 1;
             }
         }
+
+        if since_commit >= COMMIT_EVERY {
+            let _ = conn.execute_batch("COMMIT; BEGIN IMMEDIATE");
+            since_commit = 0;
+        }
     }
+
+    let _ = conn.execute_batch("COMMIT");
 
     for handle in handles {
         let _ = handle.join();
@@ -410,7 +446,7 @@ fn read_media_meta(
         perceptual_hash: None,
         blur_score: None,
         thumbnail_path: None,
-        force_write: generate_thumb,
+        force_write: false,
     };
 
     if kind == MediaKind::Image {
@@ -430,19 +466,30 @@ fn read_media_meta(
             }
         }
 
-        // One decode: dimensions + perceptual hash + thumbnail.
-                match thumbnails::open_oriented(path) {
+        // One decode: dimensions + perceptual hash + thumbnail-sized blur + JPEG thumb.
+        // Resize once to thumb max edge, then score blur on that (not full-res).
+        match thumbnails::open_oriented(path) {
             Ok(img) => {
                 let (w, h) = img.dimensions();
                 meta.width = Some(w as i64);
                 meta.height = Some(h as i64);
                 meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
-                meta.blur_score = Some(crate::blur::blur_score_from_image(&img));
+
+                let thumb_src = if w > thumbnails::THUMB_MAX_EDGE || h > thumbnails::THUMB_MAX_EDGE {
+                    img.resize(
+                        thumbnails::THUMB_MAX_EDGE,
+                        thumbnails::THUMB_MAX_EDGE,
+                        image::imageops::FilterType::Triangle,
+                    )
+                } else {
+                    img
+                };
+                meta.blur_score = Some(crate::blur::blur_score_from_image(&thumb_src));
                 if generate_thumb {
                     let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
                     if dest.exists() {
                         meta.thumbnail_path = Some(dest);
-                    } else if thumbnails::write_thumbnail_jpeg(&img, &dest).is_ok() {
+                    } else if thumbnails::write_thumbnail_jpeg(&thumb_src, &dest).is_ok() {
                         meta.thumbnail_path = Some(dest);
                     }
                 }
@@ -487,6 +534,36 @@ fn file_created_at(path: &Path) -> Option<String> {
     let modified = meta.modified().ok()?;
     let datetime: DateTime<Utc> = modified.into();
     Some(datetime.to_rfc3339())
+}
+
+/// Fast FTS update for import: filename + camera/lens only (no tag/OCR/people joins).
+/// Full `refresh_fts` remains for edits that change derived search fields.
+pub fn refresh_fts_basic(
+    conn: &Connection,
+    asset_id: &str,
+    path: &str,
+    camera: Option<&str>,
+    lens: Option<&str>,
+) -> AppResult<()> {
+    let filename = Path::new(path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    conn.execute(
+        "DELETE FROM assets_fts WHERE asset_id = ?1",
+        params![asset_id],
+    )?;
+    conn.execute(
+        "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags)
+         VALUES (?1,?2,'',?3,?4,'','','')",
+        params![
+            asset_id,
+            filename,
+            camera.unwrap_or_default(),
+            lens.unwrap_or_default()
+        ],
+    )?;
+    Ok(())
 }
 
 /// `(path, camera, lens, tag names, ocr, people, auto_tags)` — kept for call-site docs.
@@ -608,6 +685,7 @@ mod import_tests {
             std::slice::from_ref(&file),
             &thumbs,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            false,
             |_, _, _| {},
         )
         .unwrap();
@@ -631,6 +709,7 @@ mod import_tests {
             &[notes],
             &dir.path().join("thumbs"),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            false,
             |_, _, _| {},
         )
         .unwrap_err();
