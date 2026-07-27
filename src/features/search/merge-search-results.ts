@@ -1,4 +1,4 @@
-import type { AssetSummary } from "../lib/tauri";
+import type { AssetSummary } from "../../lib/tauri";
 
 /**
  * Prefer exact FTS hits (filename, tags, OCR text, people, auto-tags) and fill
