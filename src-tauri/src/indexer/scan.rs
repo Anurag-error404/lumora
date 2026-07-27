@@ -29,6 +29,12 @@ pub const RAW_EXT: &[&str] = &[
 const VIDEO_EXT: &[&str] = &["mp4", "mov", "m4v", "avi", "mkv", "webm"];
 
 pub fn media_type_for_path(path: &Path) -> Option<MediaKind> {
+    // macOS writes AppleDouble sidecars (`._photo.jpg`) on non-APFS volumes
+    // (exFAT/FAT external drives). They share the media extension but are not
+    // photos — Finder hides them, so users see N items while a naive scan sees 2N.
+    if is_appledouble_sidecar(path) {
+        return None;
+    }
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     if IMAGE_EXT.contains(&ext.as_str()) || RAW_EXT.contains(&ext.as_str()) {
         Some(MediaKind::Image)
@@ -41,6 +47,12 @@ pub fn media_type_for_path(path: &Path) -> Option<MediaKind> {
 
 pub fn is_supported_media(path: &Path) -> bool {
     media_type_for_path(path).is_some()
+}
+
+fn is_appledouble_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| name.starts_with("._"))
 }
 
 #[cfg(test)]
@@ -59,5 +71,18 @@ mod tests {
             Some(MediaKind::Video)
         );
         assert_eq!(media_type_for_path(&PathBuf::from("notes.txt")), None);
+    }
+
+    #[test]
+    fn ignores_appledouble_sidecars() {
+        assert_eq!(
+            media_type_for_path(&PathBuf::from("._20250719_122527.jpg")),
+            None
+        );
+        assert_eq!(media_type_for_path(&PathBuf::from("folder/._clip.mp4")), None);
+        assert_eq!(
+            media_type_for_path(&PathBuf::from("20250719_122527.jpg")),
+            Some(MediaKind::Image)
+        );
     }
 }

@@ -10,7 +10,7 @@ use crate::albums;
 use crate::blur;
 use crate::diagnostics;
 use crate::duplicates;
-use crate::edit::{self, EditOps, EditResult, SaveMode};
+use crate::edit::{self, EditOps, EditResult, EditRevisionSummary, SavedEditOps, SaveMode};
 use crate::error::{AppError, AppResult};
 use crate::export;
 use crate::faces;
@@ -26,7 +26,7 @@ use crate::saved_searches;
 use crate::search;
 use crate::semantic;
 use crate::smart;
-use crate::state::{AppState, VaultSession};
+use crate::state::{open_db, AppState, VaultSession};
 use crate::tags;
 use crate::thumbnails;
 use crate::trash;
@@ -156,13 +156,7 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     let app_for_job = app.clone();
     let roots_for_job = roots.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<ImportResult> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch(
-            "PRAGMA foreign_keys = ON;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA temp_store = MEMORY;",
-        )?;
+        let conn = open_db(&db_path)?;
 
         let result = indexer::import_paths_with_progress(
             &conn,
@@ -1305,9 +1299,7 @@ pub async fn install_semantic_models(app: AppHandle) -> AppResult<ml::MlStatus> 
     let app_for_job = app.clone();
     let dir_for_job = models_dir.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
 
         let entries: Vec<_> = ml::catalog::bundle(ml::catalog::SEMANTIC_BUNDLE).collect();
         let total_files = entries.len();
@@ -1409,9 +1401,7 @@ pub async fn install_ocr_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     let app_for_job = app.clone();
     let dir_for_job = models_dir.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
 
         let entries: Vec<_> = ml::catalog::bundle(ml::catalog::OCR_BUNDLE).collect();
         let total_files = entries.len();
@@ -1518,9 +1508,7 @@ pub async fn install_face_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     let app_for_job = app.clone();
     let dir_for_job = models_dir.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
 
         let entries: Vec<_> = ml::catalog::bundle(ml::catalog::FACES_BUNDLE).collect();
         let total_files = entries.len();
@@ -1628,9 +1616,7 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     let dir_for_job = models_dir.clone();
     let db_path_for_install = db_path.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path_for_install)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path_for_install)?;
 
         let entries: Vec<_> = ml::catalog::bundle(ml::catalog::TAGS_BUNDLE).collect();
         let total_files = entries.len();
@@ -1674,9 +1660,7 @@ pub async fn install_tags_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     // after download completes.
     let models_dir_for_status = models_dir.clone();
     let status = tauri::async_runtime::spawn_blocking(move || -> AppResult<ml::MlStatus> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
         ml::status(&conn, &models_dir_for_status)
     })
     .await
@@ -1785,9 +1769,7 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
     let dir_for_job = models_dir.clone();
     let bundle_name = bundle.to_string();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
-        let conn = Connection::open(&db_path)?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
         let entries: Vec<_> = ml::catalog::bundle(&bundle_name).collect();
         let total_files = entries.len();
         for (index, entry) in entries.into_iter().enumerate() {
@@ -2160,8 +2142,7 @@ pub async fn semantic_search(
             return Ok(Vec::new());
         };
         let embedding = semantic::worker::embed_query(&engine, &query)?;
-        let conn = Connection::open(&db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&db_path)?;
         let hits = semantic::search_by_vector(&conn, &embedding, limit)?;
         if hits.is_empty() {
             return Ok(Vec::new());
@@ -2452,6 +2433,7 @@ pub fn export_assets_zip(
 
 /// Apply rotate / crop / exposure, then save over the original or as a sibling copy.
 /// Clears CLIP embeddings for the resulting asset and resumes background embedding.
+/// Also clears non-destructive edit revisions for the source asset after bake.
 #[tauri::command]
 pub fn apply_image_edit(
     state: State<'_, AppState>,
@@ -2475,6 +2457,54 @@ pub fn apply_image_edit(
     state.ocr.kick();
     state.faces.kick();
     Ok(result)
+}
+
+/// Append non-destructive edit ops (original file untouched).
+#[tauri::command]
+pub fn save_edit_ops(
+    state: State<'_, AppState>,
+    asset_id: String,
+    ops: EditOps,
+) -> AppResult<SavedEditOps> {
+    let saved = state.with_db(|conn| edit::save_edit_ops(conn, &asset_id, &ops))?;
+    let _ = state.with_db(|conn| {
+        history::record_activity(conn, "edit", "Saved non-destructive edits", Some(&asset_id))
+    });
+    Ok(saved)
+}
+
+/// Latest non-destructive edit ops, or null when none.
+#[tauri::command]
+pub fn get_edit_ops(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Option<SavedEditOps>> {
+    state.with_db(|conn| edit::get_edit_ops(conn, &asset_id))
+}
+
+/// Newest-first revision list for the editor history strip.
+#[tauri::command]
+pub fn list_edit_revisions(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Vec<EditRevisionSummary>> {
+    state.with_db(|conn| edit::list_edit_revisions(conn, &asset_id))
+}
+
+/// Re-apply an older revision as the new latest (append-only).
+#[tauri::command]
+pub fn revert_edit_revision(
+    state: State<'_, AppState>,
+    asset_id: String,
+    revision_id: String,
+) -> AppResult<SavedEditOps> {
+    state.with_db(|conn| edit::revert_edit_revision(conn, &asset_id, &revision_id))
+}
+
+/// Clear all non-destructive revisions for an asset (reset).
+#[tauri::command]
+pub fn clear_edit_ops(state: State<'_, AppState>, asset_id: String) -> AppResult<()> {
+    state.with_db(|conn| edit::clear_edit_ops(conn, &asset_id))
 }
 
 fn edit_file_name(path: &str) -> String {

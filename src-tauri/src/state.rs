@@ -139,12 +139,18 @@ impl AppState {
     }
 }
 
+/// Open a library DB connection with settings safe for concurrent workers.
+///
+/// WAL allows readers alongside a writer; `busy_timeout` makes competing
+/// writers wait instead of immediately failing with "database is locked".
 pub fn open_db(path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA journal_mode = WAL;
-         PRAGMA synchronous = NORMAL;",
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;",
     )?;
     Ok(conn)
 }

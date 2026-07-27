@@ -13,12 +13,12 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use reverse_geocoder::ReverseGeocoder;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::places;
 use crate::preferences;
+use crate::state::open_db;
 
 const BATCH: u32 = 32;
 const IDLE_MS: u64 = 750;
@@ -69,8 +69,7 @@ impl PlacesWorker {
     }
 
     pub fn progress(&self) -> AppResult<PlacesProgress> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let cov = places::coverage(&conn)?;
         let pending = cov.total.saturating_sub(cov.done);
         Ok(PlacesProgress {
@@ -117,8 +116,7 @@ impl PlacesWorker {
     }
 
     fn drain_batch(&self) -> AppResult<usize> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let pending = places::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
             return Ok(0);
@@ -139,8 +137,12 @@ impl PlacesWorker {
                         label.as_deref(),
                         country.as_deref(),
                     ) {
-                        tracing::warn!(asset = %id, error = %e, "failed to store place");
-                        let _ = places::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        if e.is_db_busy() {
+                            tracing::warn!(asset = %id, error = %e, "place store deferred (db busy)");
+                        } else {
+                            tracing::warn!(asset = %id, error = %e, "failed to store place");
+                            let _ = places::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        }
                     } else {
                         done += 1;
                     }

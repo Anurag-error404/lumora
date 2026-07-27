@@ -13,6 +13,7 @@ import {
   type CropRect,
   type EditOps,
   type EditResult,
+  type EditRevisionSummary,
   type EditSaveMode,
 } from "../../lib/tauri";
 
@@ -39,6 +40,13 @@ const ASPECT_PRESETS: AspectPreset[] = [
 
 const FULL_CROP: CropBox = { x: 0, y: 0, width: 1, height: 1 };
 const MIN_CROP = 0.08;
+const IDENTITY_OPS: EditOps = {
+  rotateDegrees: 0,
+  flipHorizontal: false,
+  flipVertical: false,
+  crop: null,
+  exposure: 0,
+};
 
 type Handle = "move" | "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
@@ -92,6 +100,31 @@ function toApiCrop(c: CropBox): CropRect | null {
   return { x: c.x, y: c.y, width: c.width, height: c.height };
 }
 
+function cropFromApi(c: CropRect | null | undefined): CropBox {
+  if (!c) return { ...FULL_CROP };
+  return clampCrop({ x: c.x, y: c.y, width: c.width, height: c.height });
+}
+
+function opsEqual(a: EditOps, b: EditOps): boolean {
+  const ac = a.crop ?? null;
+  const bc = b.crop ?? null;
+  const cropSame =
+    (ac === null && bc === null) ||
+    (!!ac &&
+      !!bc &&
+      Math.abs(ac.x - bc.x) < 0.0001 &&
+      Math.abs(ac.y - bc.y) < 0.0001 &&
+      Math.abs(ac.width - bc.width) < 0.0001 &&
+      Math.abs(ac.height - bc.height) < 0.0001);
+  return (
+    a.rotateDegrees === b.rotateDegrees &&
+    !!a.flipHorizontal === !!b.flipHorizontal &&
+    !!a.flipVertical === !!b.flipVertical &&
+    Math.abs(a.exposure - b.exposure) < 0.001 &&
+    cropSame
+  );
+}
+
 function orientedAspect(
   naturalW: number,
   naturalH: number,
@@ -101,6 +134,17 @@ function orientedAspect(
   const w = swap ? naturalH : naturalW;
   const h = swap ? naturalW : naturalH;
   return w / Math.max(1, h);
+}
+
+function formatRevisionTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /** In-viewer image editor: rotate, flip, aspect crop, exposure. */
@@ -121,8 +165,12 @@ export function ImageEditor({
   const [aspectId, setAspectId] = useState("free");
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [imgFailed, setImgFailed] = useState(false);
+  const [baseline, setBaseline] = useState<EditOps>(IDENTITY_OPS);
+  const [revisions, setRevisions] = useState<EditRevisionSummary[]>([]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -137,19 +185,67 @@ export function ImageEditor({
     frameH: number;
   } | null>(null);
 
+  const currentOps = useMemo<EditOps>(
+    () => ({
+      rotateDegrees: rotate,
+      flipHorizontal: flipH,
+      flipVertical: flipV,
+      crop: toApiCrop(crop),
+      exposure,
+    }),
+    [rotate, flipH, flipV, crop, exposure],
+  );
+
+  const dirty = !opsEqual(currentOps, baseline);
+
+  function applyOpsLocally(ops: EditOps) {
+    setRotate(((ops.rotateDegrees % 360) + 360) % 360);
+    setFlipH(!!ops.flipHorizontal);
+    setFlipV(!!ops.flipVertical);
+    setExposure(ops.exposure);
+    setCrop(cropFromApi(ops.crop));
+    setAspectId("free");
+  }
+
+  async function refreshRevisions() {
+    const list = await api.listEditRevisions(asset.id);
+    setRevisions(list);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setHydrating(true);
+    setError(null);
+    setStatus(null);
+    (async () => {
+      try {
+        const [saved, list] = await Promise.all([
+          api.getEditOps(asset.id),
+          api.listEditRevisions(asset.id),
+        ]);
+        if (cancelled) return;
+        const ops = saved?.ops ?? IDENTITY_OPS;
+        applyOpsLocally(ops);
+        setBaseline(ops);
+        setRevisions(list);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
   const imageAspect = useMemo(() => {
     if (!natural) return 1;
     return orientedAspect(natural.w, natural.h, rotate);
   }, [natural, rotate]);
 
-  const activeAspect = ASPECT_PRESETS.find((p) => p.id === aspectId)?.ratio ?? null;
-
-  const dirty =
-    rotate !== 0 ||
-    flipH ||
-    flipV ||
-    exposure !== 0 ||
-    !cropIsFull(crop);
+  const activeAspect =
+    ASPECT_PRESETS.find((p) => p.id === aspectId)?.ratio ?? null;
 
   const previewFilter = useMemo(() => {
     const brightness = Math.pow(2, exposure);
@@ -312,7 +408,7 @@ export function ImageEditor({
   }
 
   function onCropPointerDown(e: ReactPointerEvent, handle: Handle) {
-    if (busy || frame.width <= 0) return;
+    if (busy || hydrating || frame.width <= 0) return;
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = {
@@ -325,11 +421,27 @@ export function ImageEditor({
     };
   }
 
-  async function save(mode: EditSaveMode) {
+  async function saveEdits() {
     if (!dirty) {
       setError("Make a change before saving");
       return;
     }
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await api.saveEditOps(asset.id, currentOps);
+      setBaseline(currentOps);
+      await refreshRevisions();
+      setStatus("Edits saved (original file unchanged)");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function bake(mode: EditSaveMode) {
     if (mode === "replace") {
       if (
         !window.confirm(
@@ -341,16 +453,51 @@ export function ImageEditor({
     }
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
-      const ops: EditOps = {
-        rotateDegrees: rotate,
-        flipHorizontal: flipH,
-        flipVertical: flipV,
-        crop: toApiCrop(crop),
-        exposure,
-      };
-      const result = await api.applyImageEdit(asset.id, ops, mode);
+      const result = await api.applyImageEdit(asset.id, currentOps, mode);
       onSaved(result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRevert(revisionId: string) {
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const saved = await api.revertEditRevision(asset.id, revisionId);
+      applyOpsLocally(saved.ops);
+      setBaseline(saved.ops);
+      await refreshRevisions();
+      setStatus("Reverted to selected revision");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onResetHistory() {
+    if (
+      !window.confirm(
+        "Clear all saved edit revisions for this photo?\n\nThe original file is unchanged. Editor controls will reset.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    try {
+      await api.clearEditOps(asset.id);
+      applyOpsLocally(IDENTITY_OPS);
+      setBaseline(IDENTITY_OPS);
+      setRevisions([]);
+      setStatus("Edit history cleared");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -365,6 +512,7 @@ export function ImageEditor({
     width: `${crop.width * 100}%`,
     height: `${crop.height * 100}%`,
   };
+  const controlsDisabled = busy || hydrating;
 
   return (
     <div
@@ -378,6 +526,7 @@ export function ImageEditor({
         <div>
           <strong>Edit photo</strong>
           <span className="muted">{fileName}</span>
+          {hydrating && <span className="muted">Loading edits…</span>}
         </div>
         <button type="button" onClick={onCancel} disabled={busy}>
           Cancel
@@ -444,7 +593,7 @@ export function ImageEditor({
                   type="button"
                   className={`image-editor-crop-handle ${cls}`}
                   aria-label={`Resize crop ${handle}`}
-                  disabled={busy}
+                  disabled={controlsDisabled}
                   onPointerDown={(e) => onCropPointerDown(e, handle)}
                 />
               ))}
@@ -459,7 +608,7 @@ export function ImageEditor({
           <div className="image-editor-row">
             <button
               type="button"
-              disabled={busy}
+              disabled={controlsDisabled}
               onClick={() => onRotate(270)}
               title="Rotate left"
             >
@@ -467,7 +616,7 @@ export function ImageEditor({
             </button>
             <button
               type="button"
-              disabled={busy}
+              disabled={controlsDisabled}
               onClick={() => onRotate(90)}
               title="Rotate right"
             >
@@ -476,7 +625,7 @@ export function ImageEditor({
             <button
               type="button"
               className={flipH ? "primary" : undefined}
-              disabled={busy}
+              disabled={controlsDisabled}
               onClick={() => setFlipH((v) => !v)}
               title="Flip horizontal"
             >
@@ -485,7 +634,7 @@ export function ImageEditor({
             <button
               type="button"
               className={flipV ? "primary" : undefined}
-              disabled={busy}
+              disabled={controlsDisabled}
               onClick={() => setFlipV((v) => !v)}
               title="Flip vertical"
             >
@@ -495,7 +644,9 @@ export function ImageEditor({
           <div className="image-editor-row">
             <button
               type="button"
-              disabled={busy || (rotate === 0 && !flipH && !flipV)}
+              disabled={
+                controlsDisabled || (rotate === 0 && !flipH && !flipV)
+              }
               onClick={() => {
                 setRotate(0);
                 setFlipH(false);
@@ -510,13 +661,17 @@ export function ImageEditor({
 
         <section>
           <h3>Crop aspect</h3>
-          <div className="image-editor-aspects" role="group" aria-label="Aspect ratio">
+          <div
+            className="image-editor-aspects"
+            role="group"
+            aria-label="Aspect ratio"
+          >
             {ASPECT_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 className={aspectId === p.id ? "primary" : undefined}
-                disabled={busy || (!natural && p.ratio !== null)}
+                disabled={controlsDisabled || (!natural && p.ratio !== null)}
                 onClick={() => applyAspect(p.id)}
               >
                 {p.label}
@@ -526,7 +681,7 @@ export function ImageEditor({
           <div className="image-editor-row">
             <button
               type="button"
-              disabled={busy || cropIsFull(crop)}
+              disabled={controlsDisabled || cropIsFull(crop)}
               onClick={() => {
                 setAspectId("free");
                 setCrop(FULL_CROP);
@@ -554,38 +709,80 @@ export function ImageEditor({
               max={2}
               step={0.1}
               value={exposure}
-              disabled={busy}
+              disabled={controlsDisabled}
               onChange={(e) => setExposure(Number(e.target.value))}
             />
           </label>
           <button
             type="button"
-            disabled={busy || exposure === 0}
+            disabled={controlsDisabled || exposure === 0}
             onClick={() => setExposure(0)}
           >
             Reset exposure
           </button>
         </section>
+
+        <section className="image-editor-history">
+          <h3>History</h3>
+          {revisions.length === 0 ? (
+            <p className="muted">No saved revisions yet</p>
+          ) : (
+            <ul className="image-editor-history-list">
+              {revisions.map((rev, i) => (
+                <li key={rev.id}>
+                  <span className="muted">
+                    {i === 0 ? "Latest · " : ""}
+                    {formatRevisionTime(rev.createdAt)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={controlsDisabled || i === 0}
+                    onClick={() => void onRevert(rev.id)}
+                  >
+                    Revert
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            disabled={controlsDisabled || revisions.length === 0}
+            onClick={() => void onResetHistory()}
+          >
+            Reset history
+          </button>
+        </section>
       </div>
 
       {error && <p className="error-banner image-editor-error">{error}</p>}
+      {status && !error && (
+        <p className="image-editor-status muted">{status}</p>
+      )}
 
       <footer className="image-editor-actions">
         <button
           type="button"
-          className="danger"
-          disabled={busy || !dirty}
-          onClick={() => void save("replace")}
+          className="primary"
+          disabled={controlsDisabled || !dirty}
+          onClick={() => void saveEdits()}
         >
-          {busy ? "Saving…" : "Save (replace original)"}
+          {busy ? "Saving…" : "Save edits"}
         </button>
         <button
           type="button"
-          className="primary"
-          disabled={busy || !dirty}
-          onClick={() => void save("copy")}
+          disabled={controlsDisabled}
+          onClick={() => void bake("copy")}
         >
-          {busy ? "Saving…" : "Save as copy"}
+          Save as copy
+        </button>
+        <button
+          type="button"
+          className="danger"
+          disabled={controlsDisabled}
+          onClick={() => void bake("replace")}
+        >
+          Save (replace original)
         </button>
       </footer>
     </div>

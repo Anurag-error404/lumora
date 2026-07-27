@@ -7,12 +7,12 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::faces::{self, engine::FaceEngine};
 use crate::preferences;
+use crate::state::open_db;
 
 const BATCH: u32 = 2;
 const IDLE_MS: u64 = 750;
@@ -72,8 +72,7 @@ impl FaceWorker {
 
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        if let Ok(conn) = open_db(&self.db_path) {
             match crate::ml::reset_failed_jobs(
                 &conn,
                 crate::ml::catalog::ModelKind::Faces.as_str(),
@@ -97,8 +96,7 @@ impl FaceWorker {
     }
 
     pub fn progress(&self) -> AppResult<FacesProgress> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let cov = faces::coverage(&conn)?;
         let failures =
             crate::ml::job_failure_stats(&conn, crate::ml::catalog::ModelKind::Faces.as_str())?;
@@ -185,8 +183,7 @@ impl FaceWorker {
             }
         }
 
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let bundle = faces::active_bundle(&self.app_data);
         if !faces::faces_ready_bundle(&conn, &bundle)? {
             return Ok(None);
@@ -199,8 +196,7 @@ impl FaceWorker {
     }
 
     fn drain_batch(&self, engine: &FaceEngine) -> AppResult<usize> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let pending = faces::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
             return Ok(0);
@@ -219,8 +215,12 @@ impl FaceWorker {
                     if let Err(e) =
                         faces::store_detections(&conn, &self.faces_dir, &id, &detections)
                     {
-                        tracing::warn!(asset = %id, error = %e, "failed to store faces");
-                        let _ = faces::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        if e.is_db_busy() {
+                            tracing::warn!(asset = %id, error = %e, "faces store deferred (db busy)");
+                        } else {
+                            tracing::warn!(asset = %id, error = %e, "failed to store faces");
+                            let _ = faces::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        }
                     } else {
                         done += 1;
                     }

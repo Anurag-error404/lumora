@@ -10,12 +10,12 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::ocr::{self, engine::OcrEngine};
 use crate::preferences;
+use crate::state::open_db;
 
 const BATCH: u32 = 4;
 const IDLE_MS: u64 = 750;
@@ -71,8 +71,7 @@ impl OcrWorker {
 
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        if let Ok(conn) = open_db(&self.db_path) {
             match crate::ml::reset_failed_jobs(&conn, crate::ml::catalog::ModelKind::Ocr.as_str()) {
                 Ok(n) if n > 0 => {
                     tracing::info!(reset = n, "re-queued failed OCR jobs");
@@ -93,8 +92,7 @@ impl OcrWorker {
     }
 
     pub fn progress(&self) -> AppResult<OcrProgress> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let cov = ocr::coverage(&conn)?;
         let failures =
             crate::ml::job_failure_stats(&conn, crate::ml::catalog::ModelKind::Ocr.as_str())?;
@@ -181,8 +179,7 @@ impl OcrWorker {
             }
         }
 
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let bundle = ocr::active_bundle(&self.app_data);
         if !ocr::ocr_ready_bundle(&conn, &bundle)? {
             return Ok(None);
@@ -195,8 +192,7 @@ impl OcrWorker {
     }
 
     fn drain_batch(&self, engine: &OcrEngine) -> AppResult<usize> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let pending = ocr::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
             return Ok(0);
@@ -215,8 +211,12 @@ impl OcrWorker {
                     // Empty text is still a successful OCR pass — mark done so
                     // we don't loop forever on photos with no readable text.
                     if let Err(e) = ocr::store(&conn, &id, &result.text, result.confidence, None) {
-                        tracing::warn!(asset = %id, error = %e, "failed to store OCR text");
-                        let _ = ocr::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        if e.is_db_busy() {
+                            tracing::warn!(asset = %id, error = %e, "OCR store deferred (db busy)");
+                        } else {
+                            tracing::warn!(asset = %id, error = %e, "failed to store OCR text");
+                            let _ = ocr::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        }
                     } else {
                         done += 1;
                     }

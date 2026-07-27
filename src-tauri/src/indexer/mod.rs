@@ -715,4 +715,24 @@ mod import_tests {
         .unwrap_err();
         assert!(err.to_string().contains("unsupported"));
     }
+
+    #[test]
+    fn collect_skips_appledouble_sidecars() {
+        let dir = tempdir().unwrap();
+        let media = dir.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let img = RgbImage::from_pixel(16, 16, Rgb([1, 2, 3]));
+        img.save(media.join("photo.jpg")).unwrap();
+        std::fs::write(media.join("._photo.jpg"), [0u8; 4096]).unwrap();
+
+        let files = collect_media_files(&[media]).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("photo.jpg"));
+        assert!(!files[0]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("._"));
+    }
 }

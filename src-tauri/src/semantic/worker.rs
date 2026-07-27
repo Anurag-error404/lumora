@@ -11,13 +11,13 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::ml::{self, catalog::ModelKind, clip::ClipEngine};
 use crate::preferences;
 use crate::semantic::{self, IMAGE_MODEL_ID};
+use crate::state::open_db;
 
 const BATCH: u32 = 8;
 const IDLE_MS: u64 = 500;
@@ -83,8 +83,7 @@ impl EmbedWorker {
         self.paused.store(false, Ordering::Relaxed);
         // Permanently-failed assets are excluded from the queue — reset them so
         // Resume actually has work to do.
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        if let Ok(conn) = open_db(&self.db_path) {
             match ml::reset_failed_jobs(&conn, ModelKind::ClipImage.as_str()) {
                 Ok(n) if n > 0 => {
                     tracing::info!(reset = n, "re-queued failed embedding jobs");
@@ -111,8 +110,7 @@ impl EmbedWorker {
     }
 
     pub fn progress(&self) -> AppResult<EmbedProgress> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let (embedded, total) = semantic::coverage(&conn)?;
         let failures = ml::job_failure_stats(&conn, ModelKind::ClipImage.as_str())?;
         let remaining = total.saturating_sub(embedded);
@@ -200,8 +198,7 @@ impl EmbedWorker {
             }
         }
 
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         if !ml::semantic_ready(&conn)? {
             return Ok(None);
         }
@@ -213,8 +210,7 @@ impl EmbedWorker {
     }
 
     fn drain_batch(&self, engine: &ClipEngine) -> AppResult<usize> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let pending = semantic::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
             return Ok(0);
@@ -231,14 +227,18 @@ impl EmbedWorker {
             match engine.embed_image_path(PathBuf::from(&path).as_path()) {
                 Ok(embedding) => {
                     if let Err(e) = semantic::store(&conn, &id, IMAGE_MODEL_ID, &embedding) {
-                        tracing::warn!(asset = %id, error = %e, "failed to store embedding");
-                        let _ = semantic::mark_job(
-                            &conn,
-                            &id,
-                            ModelKind::ClipImage,
-                            "failed",
-                            Some(&e.to_string()),
-                        );
+                        if e.is_db_busy() {
+                            tracing::warn!(asset = %id, error = %e, "embedding store deferred (db busy)");
+                        } else {
+                            tracing::warn!(asset = %id, error = %e, "failed to store embedding");
+                            let _ = semantic::mark_job(
+                                &conn,
+                                &id,
+                                ModelKind::ClipImage,
+                                "failed",
+                                Some(&e.to_string()),
+                            );
+                        }
                     } else {
                         done += 1;
                         self.processed.fetch_add(1, Ordering::Relaxed);

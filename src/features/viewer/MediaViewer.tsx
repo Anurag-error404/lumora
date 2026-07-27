@@ -1,9 +1,20 @@
-import { useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { Icon } from "../../components/icons";
 import { MediaFallback } from "../../components/MediaFallback";
 import { SafeImage } from "../../components/SafeImage";
 import { LABEL_COLORS } from "../../lib/constants";
-import { fileSrc, type AssetSummary, type EditResult } from "../../lib/tauri";
+import {
+  api,
+  fileSrc,
+  isIdentityEditOps,
+  type AssetSummary,
+  type EditResult,
+} from "../../lib/tauri";
 import { ImageEditor } from "./ImageEditor";
 
 /**
@@ -41,10 +52,31 @@ export function MediaViewer({
 }) {
   const wheelLockRef = useRef(0);
   const [editing, setEditing] = useState(false);
+  const [hasPendingEdits, setHasPendingEdits] = useState(false);
   const hasPrev = index > 0;
   const hasNext = index >= 0 && index < total - 1;
   const fileName = asset.path.split("/").pop() ?? asset.path;
   const isVideo = asset.mediaType === "video";
+
+  useEffect(() => {
+    if (isVideo) {
+      setHasPendingEdits(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await api.getEditOps(asset.id);
+        if (cancelled) return;
+        setHasPendingEdits(!!saved && !isIdentityEditOps(saved.ops));
+      } catch {
+        if (!cancelled) setHasPendingEdits(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, isVideo, editing]);
 
   function onWheel(e: ReactWheelEvent<HTMLDivElement>) {
     if (editing) return;
@@ -87,6 +119,11 @@ export function MediaViewer({
           <span className="viewer-name" title={asset.path}>
             {fileName}
           </span>
+          {hasPendingEdits && (
+            <span className="viewer-edited-badge" title="Has unsaved bake edits">
+              Edited
+            </span>
+          )}
           {total > 1 && index >= 0 && (
             <span className="viewer-count">
               {index + 1} of {total}

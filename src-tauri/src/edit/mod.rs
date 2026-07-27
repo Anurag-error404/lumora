@@ -1,15 +1,18 @@
-//! Destructive image edits: rotate, flip, crop, exposure.
+//! Image edits: non-destructive ops history plus optional bake to disk.
 //!
-//! Edits rewrite pixels on disk (replace or sibling copy). After write we
-//! re-upsert the asset so hash/thumbs/metadata stay correct, drop any CLIP
-//! embedding for that asset, and kick the embedder to rebuild.
+//! **Save edits** appends JSON ops to `asset_edits` without touching pixels.
+//! **Bake** (`apply_edit` replace/copy) rewrites pixels, then clears that
+//! asset's revision rows. After bake we re-upsert so hash/thumbs/metadata stay
+//! correct, drop CLIP/OCR/faces/tags derived data, and kick workers to rebuild.
 
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use image::imageops;
 use image::{DynamicImage, ImageFormat, RgbaImage};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::indexer;
@@ -61,7 +64,190 @@ pub struct EditResult {
     pub embedding_queued: bool,
 }
 
-/// Apply edits and persist. Videos and missing files are rejected.
+/// One append-only revision of non-destructive edit ops.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedEditOps {
+    pub asset_id: String,
+    pub revision_id: String,
+    pub ops: EditOps,
+    pub created_at: String,
+}
+
+/// Thin history strip entry (newest first).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditRevisionSummary {
+    pub id: String,
+    pub created_at: String,
+}
+
+/// True when ops leave the image unchanged (for UI “edited” badges).
+pub fn is_identity(ops: &EditOps) -> bool {
+    let rotate = ((ops.rotate_degrees % 360) + 360) % 360;
+    let crop_full = match &ops.crop {
+        None => true,
+        Some(c) => {
+            c.x <= 0.001
+                && c.y <= 0.001
+                && c.width >= 0.999
+                && c.height >= 0.999
+        }
+    };
+    rotate == 0
+        && !ops.flip_horizontal
+        && !ops.flip_vertical
+        && ops.exposure.abs() <= 0.001
+        && crop_full
+}
+
+fn ensure_image_asset(conn: &Connection, asset_id: &str) -> AppResult<()> {
+    let media_type: String = conn
+        .query_row(
+            "SELECT media_type FROM assets WHERE id = ?1 AND deleted_at IS NULL",
+            params![asset_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::msg("asset not found"))?;
+    if media_type != "image" {
+        return Err(AppError::msg("only images can be edited"));
+    }
+    Ok(())
+}
+
+fn validate_ops(ops: &EditOps) -> AppResult<()> {
+    let _ = normalize_rotate(ops.rotate_degrees)?;
+    if ops.exposure.abs() > 2.0 {
+        return Err(AppError::msg("exposure must be between -2 and +2 stops"));
+    }
+    if let Some(crop) = &ops.crop {
+        if crop.width <= 0.0 || crop.height <= 0.0 {
+            return Err(AppError::msg("crop size must be positive"));
+        }
+    }
+    Ok(())
+}
+
+/// Append a revision of edit ops without touching the original file.
+pub fn save_edit_ops(
+    conn: &Connection,
+    asset_id: &str,
+    ops: &EditOps,
+) -> AppResult<SavedEditOps> {
+    ensure_image_asset(conn, asset_id)?;
+    validate_ops(ops)?;
+    let ops_json =
+        serde_json::to_string(ops).map_err(|e| AppError::msg(format!("ops json: {e}")))?;
+    let revision_id = Uuid::new_v4().to_string();
+    let created_at = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO asset_edits (id, asset_id, ops_json, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![revision_id, asset_id, ops_json, created_at],
+    )?;
+    Ok(SavedEditOps {
+        asset_id: asset_id.to_string(),
+        revision_id,
+        ops: ops.clone(),
+        created_at,
+    })
+}
+
+/// Latest ops for an asset, or `None` when no revisions exist.
+pub fn get_edit_ops(conn: &Connection, asset_id: &str) -> AppResult<Option<SavedEditOps>> {
+    ensure_image_asset(conn, asset_id)?;
+    let row: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT id, ops_json, created_at FROM asset_edits
+             WHERE asset_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1",
+            params![asset_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    match row {
+        None => Ok(None),
+        Some((revision_id, ops_json, created_at)) => {
+            let ops: EditOps = serde_json::from_str(&ops_json)
+                .map_err(|e| AppError::msg(format!("ops json: {e}")))?;
+            Ok(Some(SavedEditOps {
+                asset_id: asset_id.to_string(),
+                revision_id,
+                ops,
+                created_at,
+            }))
+        }
+    }
+}
+
+/// Newest-first revision list for the history strip.
+pub fn list_edit_revisions(
+    conn: &Connection,
+    asset_id: &str,
+) -> AppResult<Vec<EditRevisionSummary>> {
+    ensure_image_asset(conn, asset_id)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, created_at FROM asset_edits
+         WHERE asset_id = ?1
+         ORDER BY created_at DESC, id DESC",
+    )?;
+    let rows = stmt.query_map(params![asset_id], |r| {
+        Ok(EditRevisionSummary {
+            id: r.get(0)?,
+            created_at: r.get(1)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Append a copy of an older revision’s ops as the new latest.
+pub fn revert_edit_revision(
+    conn: &Connection,
+    asset_id: &str,
+    revision_id: &str,
+) -> AppResult<SavedEditOps> {
+    ensure_image_asset(conn, asset_id)?;
+    let ops_json: String = conn
+        .query_row(
+            "SELECT ops_json FROM asset_edits WHERE id = ?1 AND asset_id = ?2",
+            params![revision_id, asset_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::msg("edit revision not found"))?;
+    let ops: EditOps = serde_json::from_str(&ops_json)
+        .map_err(|e| AppError::msg(format!("ops json: {e}")))?;
+    save_edit_ops(conn, asset_id, &ops)
+}
+
+/// Delete all revisions for an asset (reset / after bake).
+pub fn clear_edit_ops(conn: &Connection, asset_id: &str) -> AppResult<()> {
+    // Allow clear even if asset was deleted mid-flow; still require it exists as image when present.
+    let exists: Option<String> = conn
+        .query_row(
+            "SELECT media_type FROM assets WHERE id = ?1",
+            params![asset_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(media_type) = exists {
+        if media_type != "image" {
+            return Err(AppError::msg("only images can be edited"));
+        }
+    }
+    conn.execute(
+        "DELETE FROM asset_edits WHERE asset_id = ?1",
+        params![asset_id],
+    )?;
+    Ok(())
+}
+
+/// Bake edits to disk (replace or sibling copy). Videos and missing files are rejected.
+/// Clears non-destructive revision rows for the source asset after a successful write.
 pub fn apply_edit(
     conn: &Connection,
     thumbs_dir: &Path,
@@ -118,6 +304,9 @@ pub fn apply_edit(
         }
     };
     let _ = outcome;
+
+    // Pixels now embody the ops — drop sidecar revisions on the source asset.
+    clear_edit_ops(conn, asset_id)?;
 
     let embedding_queued = invalidate_embedding(conn, &id)?;
     let _ = crate::ocr::invalidate_asset(conn, &id);
@@ -498,5 +687,136 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn save_get_edit_ops_round_trip() {
+        let dir = tempdir().unwrap();
+        let path = seed_image(dir.path(), "ops.jpg", 20, 20);
+        let (conn, id) = open_db_with_asset(dir.path(), &path);
+
+        let ops = EditOps {
+            rotate_degrees: 90,
+            flip_horizontal: true,
+            flip_vertical: false,
+            crop: Some(CropRect {
+                x: 0.1,
+                y: 0.2,
+                width: 0.5,
+                height: 0.6,
+            }),
+            exposure: 0.5,
+        };
+        let saved = save_edit_ops(&conn, &id, &ops).unwrap();
+        assert_eq!(saved.asset_id, id);
+        assert!(!saved.revision_id.is_empty());
+
+        let latest = get_edit_ops(&conn, &id).unwrap().expect("ops present");
+        assert_eq!(latest.revision_id, saved.revision_id);
+        assert_eq!(latest.ops.rotate_degrees, 90);
+        assert!(latest.ops.flip_horizontal);
+        assert_eq!(latest.ops.exposure, 0.5);
+        let crop = latest.ops.crop.as_ref().expect("crop");
+        assert!((crop.x - 0.1).abs() < 0.001);
+        assert!(!is_identity(&latest.ops));
+    }
+
+    #[test]
+    fn append_list_and_revert_edit_ops() {
+        let dir = tempdir().unwrap();
+        let path = seed_image(dir.path(), "hist.jpg", 16, 16);
+        let (conn, id) = open_db_with_asset(dir.path(), &path);
+
+        let first = save_edit_ops(
+            &conn,
+            &id,
+            &EditOps {
+                rotate_degrees: 90,
+                flip_horizontal: false,
+                flip_vertical: false,
+                crop: None,
+                exposure: 0.0,
+            },
+        )
+        .unwrap();
+        // Ensure distinct created_at ordering if clock resolution is coarse.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let second = save_edit_ops(
+            &conn,
+            &id,
+            &EditOps {
+                rotate_degrees: 180,
+                flip_horizontal: false,
+                flip_vertical: false,
+                crop: None,
+                exposure: 1.0,
+            },
+        )
+        .unwrap();
+
+        let list = list_edit_revisions(&conn, &id).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, second.revision_id);
+        assert_eq!(list[1].id, first.revision_id);
+
+        let reverted = revert_edit_revision(&conn, &id, &first.revision_id).unwrap();
+        assert_eq!(reverted.ops.rotate_degrees, 90);
+        assert_eq!(reverted.ops.exposure, 0.0);
+        let latest = get_edit_ops(&conn, &id).unwrap().unwrap();
+        assert_eq!(latest.revision_id, reverted.revision_id);
+        assert_eq!(latest.ops.rotate_degrees, 90);
+        assert_eq!(list_edit_revisions(&conn, &id).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn bake_replace_clears_edit_ops() {
+        let dir = tempdir().unwrap();
+        let path = seed_image(dir.path(), "bake.jpg", 32, 24);
+        let (conn, id) = open_db_with_asset(dir.path(), &path);
+        let thumbs = dir.path().join("thumbs");
+
+        save_edit_ops(
+            &conn,
+            &id,
+            &EditOps {
+                rotate_degrees: 90,
+                flip_horizontal: false,
+                flip_vertical: false,
+                crop: None,
+                exposure: 0.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(list_edit_revisions(&conn, &id).unwrap().len(), 1);
+
+        let before: String = conn
+            .query_row("SELECT hash FROM assets WHERE id = ?1", params![id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+
+        apply_edit(
+            &conn,
+            &thumbs,
+            &id,
+            &EditOps {
+                rotate_degrees: 90,
+                flip_horizontal: false,
+                flip_vertical: false,
+                crop: None,
+                exposure: 0.0,
+            },
+            SaveMode::Replace,
+        )
+        .unwrap();
+
+        let after: String = conn
+            .query_row("SELECT hash FROM assets WHERE id = ?1", params![id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_ne!(before, after);
+        assert!(get_edit_ops(&conn, &id).unwrap().is_none());
+        assert!(list_edit_revisions(&conn, &id).unwrap().is_empty());
     }
 }

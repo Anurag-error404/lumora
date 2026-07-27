@@ -571,6 +571,37 @@ export type EditResult = {
   embeddingQueued: boolean;
 };
 
+export type SavedEditOps = {
+  assetId: string;
+  revisionId: string;
+  ops: EditOps;
+  createdAt: string;
+};
+
+export type EditRevisionSummary = {
+  id: string;
+  createdAt: string;
+};
+
+/** True when ops leave pixels unchanged (UI “edited” badge). */
+export function isIdentityEditOps(ops: EditOps): boolean {
+  const rotate = ((ops.rotateDegrees % 360) + 360) % 360;
+  const crop = ops.crop;
+  const cropFull =
+    !crop ||
+    (crop.x <= 0.001 &&
+      crop.y <= 0.001 &&
+      crop.width >= 0.999 &&
+      crop.height >= 0.999);
+  return (
+    rotate === 0 &&
+    !ops.flipHorizontal &&
+    !ops.flipVertical &&
+    Math.abs(ops.exposure) <= 0.001 &&
+    cropFull
+  );
+}
+
 export const api = {
   getLibraryStats: () => invoke<LibraryStats>("get_library_stats"),
   importFolder: (path: string) => invoke<ImportResult>("import_folder", { path }),
@@ -805,6 +836,34 @@ export const api = {
       asset_id: assetId,
       ops,
       mode,
+    }),
+  saveEditOps: (assetId: string, ops: EditOps) =>
+    invoke<SavedEditOps>("save_edit_ops", {
+      assetId,
+      asset_id: assetId,
+      ops,
+    }),
+  getEditOps: (assetId: string) =>
+    invoke<SavedEditOps | null>("get_edit_ops", {
+      assetId,
+      asset_id: assetId,
+    }),
+  listEditRevisions: (assetId: string) =>
+    invoke<EditRevisionSummary[]>("list_edit_revisions", {
+      assetId,
+      asset_id: assetId,
+    }),
+  revertEditRevision: (assetId: string, revisionId: string) =>
+    invoke<SavedEditOps>("revert_edit_revision", {
+      assetId,
+      asset_id: assetId,
+      revisionId,
+      revision_id: revisionId,
+    }),
+  clearEditOps: (assetId: string) =>
+    invoke<void>("clear_edit_ops", {
+      assetId,
+      asset_id: assetId,
     }),
   getHistory: () => invoke<HistorySnapshot>("get_history"),
   listExports: (limit = 50) => invoke<ExportRecord[]>("list_exports", { limit }),

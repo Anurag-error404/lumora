@@ -18,6 +18,7 @@ const MIGRATION_012: &str = include_str!("../../migrations/012_face_ignore.sql")
 const MIGRATION_013: &str = include_str!("../../migrations/013_places.sql");
 const MIGRATION_014: &str = include_str!("../../migrations/014_auto_tags.sql");
 const MIGRATION_015: &str = include_str!("../../migrations/015_blur_score.sql");
+const MIGRATION_016: &str = include_str!("../../migrations/016_edit_history.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -272,6 +273,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         tracing::info!("applied migration 015_blur_score");
     }
 
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 16 {
+        conn.execute_batch(MIGRATION_016)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (16)", [])?;
+        tracing::info!("applied migration 016_edit_history");
+    }
+
     Ok(())
 }
 
@@ -423,13 +438,14 @@ mod tests {
         assert!(tables.iter().any(|t| t == "people"));
         assert!(tables.iter().any(|t| t == "asset_labels"));
         assert!(tables.iter().any(|t| t == "import_runs"));
+        assert!(tables.iter().any(|t| t == "asset_edits"));
 
         let version: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -460,6 +476,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 15);
+        assert_eq!(version2, 16);
     }
 }

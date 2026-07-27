@@ -3218,6 +3218,34 @@ button .nav-icon {
   margin: 0 1rem;
 }
 
+.image-editor-status {
+  margin: 0 1rem 0.5rem;
+}
+
+.image-editor-history p {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.image-editor-history-list {
+  list-style: none;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  max-height: 7.5rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.image-editor-history-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
 .image-editor-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3225,6 +3253,20 @@ button .nav-icon {
   gap: 0.5rem;
   padding: 0.85rem 1rem 1rem;
   border-top: 1px solid var(--border);
+}
+
+.viewer-edited-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
 }
 
 @media (max-width: 900px) {

@@ -7,11 +7,11 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::preferences;
+use crate::state::open_db;
 use crate::tags::{self, engine::TagsEngine};
 
 const BATCH: u32 = 8;
@@ -68,8 +68,7 @@ impl TagsWorker {
 
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+        if let Ok(conn) = open_db(&self.db_path) {
             match crate::ml::reset_failed_jobs(&conn, crate::ml::catalog::ModelKind::Tags.as_str())
             {
                 Ok(n) if n > 0 => {
@@ -110,8 +109,7 @@ impl TagsWorker {
     }
 
     pub fn progress(&self) -> AppResult<TagsProgress> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let cov = tags::coverage(&conn)?;
         let failures =
             crate::ml::job_failure_stats(&conn, crate::ml::catalog::ModelKind::Tags.as_str())?;
@@ -211,8 +209,7 @@ impl TagsWorker {
             }
         }
 
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let opt = tags::active_option(&self.app_data);
         let bundle = opt.bundle.unwrap_or(crate::ml::catalog::TAGS_BUNDLE);
         if !tags::tags_ready_bundle(&conn, bundle)? {
@@ -227,8 +224,7 @@ impl TagsWorker {
     }
 
     fn drain_batch(&self, engine: &TagsEngine) -> AppResult<usize> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         let pending = tags::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
             return Ok(0);
@@ -246,8 +242,12 @@ impl TagsWorker {
                 Ok(labels) => {
                     let model_id = tags::active_option(&self.app_data).id;
                     if let Err(e) = tags::store(&conn, &id, &labels, model_id) {
-                        tracing::warn!(asset = %id, error = %e, "failed to store auto-tags");
-                        let _ = tags::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        if e.is_db_busy() {
+                            tracing::warn!(asset = %id, error = %e, "auto-tags store deferred (db busy)");
+                        } else {
+                            tracing::warn!(asset = %id, error = %e, "failed to store auto-tags");
+                            let _ = tags::mark_job(&conn, &id, "failed", Some(&e.to_string()));
+                        }
                     } else {
                         done += 1;
                     }

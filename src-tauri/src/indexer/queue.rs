@@ -5,11 +5,11 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
 
 use crate::error::AppResult;
 use crate::indexer;
 use crate::models::IndexProgress;
+use crate::state::open_db;
 
 #[derive(Debug, Clone)]
 pub enum IndexJob {
@@ -74,8 +74,7 @@ impl IndexerQueue {
     }
 
     fn process(&self, job: IndexJob) -> AppResult<()> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let conn = open_db(&self.db_path)?;
         match job {
             IndexJob::Upsert {
                 path,
