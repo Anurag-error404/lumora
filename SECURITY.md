@@ -20,9 +20,7 @@ Please **do not create a public GitHub issue** for security vulnerabilities.
 
 Instead, report vulnerabilities privately by emailing:
 
-**security@yourdomain.com**
-
-*(Replace this with your actual security contact.)*
+**anuragv1058@gmail.com**
 
 If email is not yet available, you may open a **private GitHub Security Advisory** if the repository has GitHub Security Advisories enabled.
 
