@@ -16,6 +16,7 @@ import {
 } from "../lib/tauri";
 import { PAGE_SIZE } from "../lib/constants";
 import type { View } from "../types/app";
+import { mergeSearchResults } from "../features/search/merge-search-results";
 
 /** Tokens that mean the query is FTS/filter syntax, not natural language. */
 function hasStructuredFilters(query: string): boolean {
@@ -111,18 +112,24 @@ export function useLibraryAssets({
       }
       if (query.trim()) {
         const q = query.trim();
-        // Structured filters stay on FTS. Plain language tries CLIP first.
+        // Structured filters stay on FTS. Plain language blends CLIP recall with
+        // FTS (filename / tags / OCR text / people / auto-tags) so a keyword that
+        // appears in an image is never dropped just because CLIP returned hits.
         if (
           semanticSearchEnabled &&
           !hasStructuredFilters(q) &&
           offset === 0
         ) {
+          const ftsPromise = api.searchAssets(q, PAGE_SIZE, 0);
+          let semantic: AssetSummary[] = [];
           try {
-            const semantic = await api.semanticSearch(q, PAGE_SIZE);
-            if (semantic.length > 0) return semantic;
+            semantic = await api.semanticSearch(q, PAGE_SIZE);
           } catch {
-            // Model missing or inference failed — fall through to FTS.
+            // Model missing or inference failed — FTS alone is still useful.
           }
+          const fts = await ftsPromise;
+          const merged = mergeSearchResults(fts, semantic, PAGE_SIZE);
+          if (merged.length > 0) return merged;
         }
         return api.searchAssets(q, PAGE_SIZE, offset);
       }

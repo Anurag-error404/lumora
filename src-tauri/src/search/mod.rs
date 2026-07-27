@@ -198,12 +198,23 @@ fn search_assets_impl(
     let mut joins = String::new();
     let mut wheres = vec!["a.deleted_at IS NULL".to_string()];
     let mut values: Vec<String> = Vec::new();
+    let mut order_by = "COALESCE(a.captured_at, a.created_at) DESC".to_string();
 
     if let Some(text) = &parsed.text {
-        joins.push_str(" JOIN assets_fts f ON f.asset_id = a.id");
-        wheres
-            .push("f.rowid IN (SELECT rowid FROM assets_fts WHERE assets_fts MATCH ?)".to_string());
+        // Subquery keeps MATCH on the FTS table name (required by SQLite) while
+        // still exposing bm25 rank. OCR text is weighted highest so a keyword
+        // printed in a photo outranks a weak filename coincidence.
+        // Weights: filename, tags, camera, lens, ocr_text, people, auto_tags
+        joins.push_str(
+            " JOIN (
+                SELECT rowid, asset_id,
+                       bm25(assets_fts, 5.0, 4.0, 1.0, 1.0, 12.0, 6.0, 3.0) AS rank
+                FROM assets_fts
+                WHERE assets_fts MATCH ?
+              ) f ON f.asset_id = a.id",
+        );
         values.push(format_fts_query(text));
+        order_by = "f.rank, COALESCE(a.captured_at, a.created_at) DESC".to_string();
     }
 
     if let Some(camera) = &parsed.camera {
@@ -236,10 +247,11 @@ fn search_assets_impl(
                 a.thumbnail_path, a.camera, a.lens, a.deleted_at
          FROM assets a{joins}
          WHERE {where_clause}
-         ORDER BY COALESCE(a.captured_at, a.created_at) DESC
+         ORDER BY {order_by}
          LIMIT ? OFFSET ?",
         joins = joins,
-        where_clause = wheres.join(" AND ")
+        where_clause = wheres.join(" AND "),
+        order_by = order_by,
     );
 
     let mut stmt = conn.prepare(&sql)?;
