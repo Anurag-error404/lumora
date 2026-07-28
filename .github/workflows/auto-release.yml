@@ -1,0 +1,84 @@
+# On every push to master (except release bump commits):
+#   1. Run quality checks (via Release workflow)
+#   2. Auto-bump semver from conventional commits since the last tag
+#   3. Commit version files, create tag, and invoke the Release workflow
+#
+# Bump rules (from commit subjects since last v* tag):
+#   - major: BREAKING CHANGE / type!: …
+#   - minor: feat …
+#   - patch: everything else (fix, chore, docs, …)
+
+name: Auto Release
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: auto-release-master
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    name: Bump version & tag
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      released: ${{ steps.bump.outputs.released }}
+      previous_tag: ${{ steps.bump.outputs.previous_tag }}
+      tagged: ${{ steps.publish.outputs.tagged }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version
+        id: bump
+        run: |
+          git fetch --tags --force origin
+          chmod +x .github/scripts/bump-version.sh
+          .github/scripts/bump-version.sh auto
+
+      - name: Commit, tag, and push
+        id: publish
+        if: steps.bump.outputs.released == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock; then
+            echo "Version files unchanged (manual bump already committed)."
+          else
+            git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+            git commit -m "chore(release): v${VERSION}"
+          fi
+
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists; skipping duplicate release."
+            echo "tagged=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git tag "v${VERSION}"
+          git push origin "HEAD:master"
+          git push origin "v${VERSION}"
+          echo "tagged=true" >>"$GITHUB_OUTPUT"
+
+  release:
+    name: Build & publish
+    needs: bump
+    if: needs.bump.outputs.released == 'true' && needs.bump.outputs.tagged == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.bump.outputs.version }}
+      previous_tag: ${{ needs.bump.outputs.previous_tag }}
+    secrets: inherit

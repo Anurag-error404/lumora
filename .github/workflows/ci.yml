@@ -1,3 +1,6 @@
+# Quality gate for PRs and pushes. Release builds also re-run these tests
+# before publishing installers (see release.yml).
+
 name: CI
 
 on:

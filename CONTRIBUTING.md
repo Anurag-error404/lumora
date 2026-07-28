@@ -81,7 +81,16 @@ Avoid vague subjects (`update`, `fix stuff`, `wip`) and giant catch-all commits.
 
 ## Releasing / in-app updates
 
-Tagged releases (`v*`) run [`.github/workflows/release.yml`](./.github/workflows/release.yml), which builds installers **and** signed updater artifacts (`*.sig` + `latest.json`).
+Pushes to `master` run [`.github/workflows/auto-release.yml`](./.github/workflows/auto-release.yml):
+
+1. Skip if the commit is already a `chore(release):` bump.
+2. Auto-bump semver from commits since the last `v*` tag (`feat` → minor, `BREAKING`/`type!:` → major, otherwise patch).
+3. Commit version files (`package.json`, `tauri.conf.json`, `Cargo.toml` / lock) and push tag `vX.Y.Z`.
+4. Invoke [`.github/workflows/release.yml`](./.github/workflows/release.yml), which **runs frontend + Rust tests first**, then builds installers and signed updater artifacts (`*.sig` + `latest.json`).
+
+Release notes are generated automatically from commits since the previous tag (GitHub “generate notes”), plus install / updater instructions.
+
+You can still ship manually by pushing a `v*` tag or running **Release** from the Actions tab. CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) also runs typecheck + tests on every PR and push.
 
 Required repo secrets (Settings → Secrets and variables → Actions):
 
