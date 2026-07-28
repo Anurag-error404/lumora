@@ -200,6 +200,7 @@ jobs:
           fetch-tags: true
 
       - name: Check out release tag
+        shell: bash
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |

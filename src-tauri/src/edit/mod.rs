@@ -82,25 +82,6 @@ pub struct EditRevisionSummary {
     pub created_at: String,
 }
 
-/// True when ops leave the image unchanged (for UI “edited” badges).
-pub fn is_identity(ops: &EditOps) -> bool {
-    let rotate = ((ops.rotate_degrees % 360) + 360) % 360;
-    let crop_full = match &ops.crop {
-        None => true,
-        Some(c) => {
-            c.x <= 0.001
-                && c.y <= 0.001
-                && c.width >= 0.999
-                && c.height >= 0.999
-        }
-    };
-    rotate == 0
-        && !ops.flip_horizontal
-        && !ops.flip_vertical
-        && ops.exposure.abs() <= 0.001
-        && crop_full
-}
-
 fn ensure_image_asset(conn: &Connection, asset_id: &str) -> AppResult<()> {
     let media_type: String = conn
         .query_row(
@@ -718,7 +699,6 @@ mod tests {
         assert_eq!(latest.ops.exposure, 0.5);
         let crop = latest.ops.crop.as_ref().expect("crop");
         assert!((crop.x - 0.1).abs() < 0.001);
-        assert!(!is_identity(&latest.ops));
     }
 
     #[test]
