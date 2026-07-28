@@ -299,6 +299,35 @@ export function useAssetActions({
     }
   }
 
+  async function removeMissingFromLibrary(asset: AssetSummary) {
+    if (
+      !window.confirm(
+        `Remove this item from the library?\n\nFile not found at:\n${asset.path}\n\nThe library entry will be removed permanently. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const result = await api.permanentlyDeleteAssets([asset.id], false);
+      setSelected((prev) => {
+        if (!prev.has(asset.id)) return prev;
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
+      setLightboxId(null);
+      setError(
+        result.removedFromLibrary > 0
+          ? "Removed missing file from library"
+          : "Nothing was removed",
+      );
+      await refreshHistory();
+      await loadAssets();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function emptyTrash() {
     const count = stats?.inTrash ?? assets.length;
     if (!count) {
@@ -419,6 +448,7 @@ export function useAssetActions({
     trashBlurryAssets,
     restoreSelected,
     permanentlyDeleteSelected,
+    removeMissingFromLibrary,
     emptyTrash,
     openExportInFolder,
     openLocalPath,

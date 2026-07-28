@@ -2376,7 +2376,7 @@ pub fn permanently_delete_assets(
         removed = result.removed_from_library,
         files = result.files_deleted,
         delete_files,
-        "permanent delete from trash"
+        "permanent delete from library"
     );
     Ok(result)
 }

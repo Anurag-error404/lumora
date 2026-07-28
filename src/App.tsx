@@ -412,6 +412,7 @@ export default function App() {
     trashBlurryAssets,
     restoreSelected,
     permanentlyDeleteSelected,
+    removeMissingFromLibrary,
     emptyTrash,
     openExportInFolder,
     openLocalPath,
@@ -1045,6 +1046,7 @@ export default function App() {
           onLabel={labelAsset}
           onToggleFavorite={toggleFavorite}
           onShowInfo={() => setInfoAssetId(lightboxAsset.id)}
+          onRemoveFromLibrary={(asset) => void removeMissingFromLibrary(asset)}
           onEdited={(result) => {
             setAssets((rows) => {
               if (result.mode === "replace") {

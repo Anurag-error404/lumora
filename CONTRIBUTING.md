@@ -34,6 +34,45 @@ cd src-tauri && cargo test
 - User-facing behaviour changes → update [`guide.html`](./guide.html) (and the landing features list in [`index.html`](./index.html) when the pitch changes).
 - Keep commits focused; avoid bundling unrelated refactors with feature work.
 
+## Commit messages
+
+Write commits so history stays readable and reviewable. Prefer [Conventional Commits](https://www.conventionalcommits.org/):
+
+```text
+<type>: <short summary in imperative mood>
+
+[optional body — why the change exists, not a restatement of the diff]
+```
+
+**Rules**
+
+- Subject ≤ ~72 characters; imperative mood (`add`, `fix`, `remove` — not `added` / `fixes`).
+- Explain **why**, not what the diff already shows.
+- One logical change per commit; don’t mix features, refactors, and drive-by formatting.
+- Use a type prefix:
+
+| Type | Use for |
+| --- | --- |
+| `feat` | New user-facing behaviour |
+| `fix` | Bug fix |
+| `refactor` | Internal change with no behaviour change |
+| `test` | Tests only |
+| `docs` | Docs / guide / ADR only |
+| `chore` | Tooling, CI, deps, config |
+| `perf` | Performance improvement |
+
+**Examples**
+
+```text
+feat: retry embedding pipeline on cold start
+
+fix: restore OCR hits in image search results
+
+docs: document updater signing secrets for releases
+```
+
+Avoid vague subjects (`update`, `fix stuff`, `wip`) and giant catch-all commits.
+
 ## Pull requests
 
 - Describe **why** the change exists and how you tested it.

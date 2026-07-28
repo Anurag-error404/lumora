@@ -5,7 +5,6 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Icon } from "../../components/icons";
-import { MediaFallback } from "../../components/MediaFallback";
 import { SafeImage } from "../../components/SafeImage";
 import { LABEL_COLORS } from "../../lib/constants";
 import {
@@ -16,6 +15,7 @@ import {
   type EditResult,
 } from "../../lib/tauri";
 import { ImageEditor } from "./ImageEditor";
+import { MissingFileState } from "./MissingFileState";
 
 /**
  * Full-screen media viewer: images render inline, videos use the platform
@@ -34,6 +34,7 @@ export function MediaViewer({
   onToggleFavorite,
   onShowInfo,
   onEdited,
+  onRemoveFromLibrary,
 }: {
   asset: AssetSummary;
   index: number;
@@ -49,14 +50,20 @@ export function MediaViewer({
   onToggleFavorite: (asset: AssetSummary) => void | Promise<void>;
   onShowInfo: () => void;
   onEdited: (result: EditResult) => void;
+  onRemoveFromLibrary: (asset: AssetSummary) => void | Promise<void>;
 }) {
   const wheelLockRef = useRef(0);
   const [editing, setEditing] = useState(false);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const hasPrev = index > 0;
   const hasNext = index >= 0 && index < total - 1;
   const fileName = asset.path.split("/").pop() ?? asset.path;
   const isVideo = asset.mediaType === "video";
+
+  useEffect(() => {
+    setRetryKey(0);
+  }, [asset.id]);
 
   useEffect(() => {
     if (isVideo) {
@@ -179,19 +186,24 @@ export function MediaViewer({
 
       <div className="viewer-stage">
         {isVideo ? (
-          <ViewerVideo key={asset.id} asset={asset} />
+          <ViewerVideo
+            key={`${asset.id}:${retryKey}`}
+            asset={asset}
+            onRetry={() => setRetryKey((n) => n + 1)}
+            onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
+          />
         ) : (
           <SafeImage
-            key={`${asset.id}:${asset.hash}:${asset.thumbnailPath ?? ""}`}
+            key={`${asset.id}:${asset.hash}:${retryKey}`}
             src={fileSrc(asset.path)}
             alt={fileName}
             fallback={
-              <div
-                className="viewer-fallback"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MediaFallback type="image" />
-              </div>
+              <MissingFileState
+                path={asset.path}
+                mediaType="image"
+                onRetry={() => setRetryKey((n) => n + 1)}
+                onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
+              />
             }
             onClick={(e) => e.stopPropagation()}
           />
@@ -272,14 +284,25 @@ export function MediaViewer({
   );
 }
 
-function ViewerVideo({ asset }: { asset: AssetSummary }) {
+function ViewerVideo({
+  asset,
+  onRetry,
+  onRemoveFromLibrary,
+}: {
+  asset: AssetSummary;
+  onRetry: () => void;
+  onRemoveFromLibrary: () => void;
+}) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
     return (
-      <div className="viewer-fallback" onClick={(e) => e.stopPropagation()}>
-        <MediaFallback type="video" />
-      </div>
+      <MissingFileState
+        path={asset.path}
+        mediaType="video"
+        onRetry={onRetry}
+        onRemoveFromLibrary={onRemoveFromLibrary}
+      />
     );
   }
 

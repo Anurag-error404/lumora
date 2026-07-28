@@ -56,9 +56,11 @@ pub fn list_trash(conn: &Connection, limit: u32, offset: u32) -> AppResult<Vec<A
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Permanently remove trash items from the library.
-/// When `delete_files` is true, also deletes original files from disk (irreversible).
-/// Only operates on assets already in trash (`deleted_at IS NOT NULL`).
+/// Permanently remove assets from the library.
+/// When `delete_files` is true, also deletes original files from disk (irreversible)
+/// and only operates on items already in trash (`deleted_at IS NOT NULL`).
+/// When `delete_files` is false, removes library entries for active or trashed assets
+/// and leaves original files on disk (used for missing-file cleanup and trash keep-files).
 pub fn permanently_delete(
     conn: &Connection,
     asset_ids: &[String],
@@ -70,17 +72,34 @@ pub fn permanently_delete(
     let mut errors = Vec::new();
 
     for id in asset_ids {
-        let row: Option<(String, Option<String>)> = conn
-            .query_row(
+        // Disk deletion is trash-only; library-only removal may target active rows
+        // (e.g. missing files still indexed but gone from disk).
+        let row: Option<(String, Option<String>)> = if delete_files {
+            conn.query_row(
                 "SELECT path, thumbnail_path FROM assets
                  WHERE id = ?1 AND deleted_at IS NOT NULL",
                 params![id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .ok();
+            .ok()
+        } else {
+            conn.query_row(
+                "SELECT path, thumbnail_path FROM assets WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok()
+        };
 
         let Some((path, thumb)) = row else {
-            errors.push(format!("{id}: not in trash or missing"));
+            errors.push(format!(
+                "{id}: {}",
+                if delete_files {
+                    "not in trash or missing"
+                } else {
+                    "missing"
+                }
+            ));
             continue;
         };
 
@@ -289,5 +308,49 @@ mod tests {
         assert_eq!(result.removed_from_library, 1);
         assert_eq!(result.thumbs_deleted, 0);
         assert!(thumb.exists());
+    }
+
+    #[test]
+    fn permanently_delete_keep_files_removes_active_missing_entry() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = db::open_and_migrate(&path).unwrap();
+        // Path points at a file that is already gone — typical missing-file case.
+        conn.execute(
+            "INSERT INTO assets (id, path, hash, media_type, created_at, indexed_at)
+             VALUES ('missing', '/gone/photo.jpg', 'h', 'image', 't', 't')",
+            [],
+        )
+        .unwrap();
+
+        let result = permanently_delete(&conn, &["missing".into()], false).unwrap();
+        assert_eq!(result.removed_from_library, 1);
+        assert_eq!(result.files_deleted, 0);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM assets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn permanently_delete_files_rejects_active_assets() {
+        let dir = tempdir().unwrap();
+        let media = dir.path().join("photo.jpg");
+        std::fs::write(&media, b"fake").unwrap();
+        let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, path, hash, media_type, created_at, indexed_at)
+             VALUES ('active', ?1, 'h', 'image', 't', 't')",
+            params![media.to_string_lossy().to_string()],
+        )
+        .unwrap();
+
+        let err = permanently_delete(&conn, &["active".into()], true).unwrap_err();
+        assert!(err.to_string().contains("not in trash"));
+        assert!(media.exists());
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM assets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

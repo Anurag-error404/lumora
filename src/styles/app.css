@@ -2883,6 +2883,103 @@ button .nav-icon {
   fill: rgba(255, 255, 255, 0.72);
 }
 
+.missing-file-state {
+  width: min(32rem, 92%);
+  max-height: 100%;
+  padding: 1.75rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(20, 22, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.missing-file-icon {
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.missing-file-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  fill: rgba(255, 255, 255, 0.78);
+}
+
+.missing-file-title {
+  margin: 0.15rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.missing-file-copy {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.missing-file-path {
+  margin: 0.15rem 0 0.35rem;
+  width: 100%;
+  max-width: 28rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.4;
+  text-align: left;
+  word-break: break-all;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+}
+
+.missing-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.missing-file-actions button {
+  min-width: 8.5rem;
+}
+
+.missing-file-actions button.primary {
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  border-color: transparent;
+}
+
+.missing-file-actions button.primary:hover:not(:disabled) {
+  background: #fff;
+}
+
+.missing-file-actions button.danger {
+  background: transparent;
+  color: #ffb4a9;
+  border-color: rgba(255, 180, 169, 0.45);
+}
+
+.missing-file-actions button.danger:hover:not(:disabled) {
+  background: rgba(180, 35, 24, 0.28);
+  border-color: rgba(255, 180, 169, 0.7);
+  color: #ffd2cb;
+}
+
 .viewer-nav {
   position: absolute;
   top: 50%;
