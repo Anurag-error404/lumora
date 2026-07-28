@@ -12,6 +12,8 @@
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-exists",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "fs:scope",
       "allow": [

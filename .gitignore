@@ -7,6 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Tauri updater private keys — never commit
+.tauri-keys/
+
 # Local living specs (not published with the open-source tree)
 SPEC.md
 prd.md

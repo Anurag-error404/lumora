@@ -19,6 +19,7 @@ import {
   type PrefsUpdater,
   type SettingsSectionId,
 } from "./settingsUi";
+import type { useAppUpdater } from "../../hooks/useAppUpdater";
 
 const SHORTCUTS: { action: string; keys: string }[] = [
   { action: "Next photo", keys: "→" },
@@ -48,6 +49,7 @@ export function SettingsView({
   onOpenLocked,
   vaultStatus,
   appVersion,
+  updater,
 }: {
   prefs: Preferences | null;
   loading: boolean;
@@ -62,6 +64,7 @@ export function SettingsView({
   onOpenLocked: () => void;
   vaultStatus: VaultStatus | null;
   appVersion: string;
+  updater: ReturnType<typeof useAppUpdater>;
 }) {
   const [section, setSection] = useState<SettingsSectionId>("general");
   const [storage, setStorage] = useState<StorageSummary | null>(null);
@@ -199,7 +202,12 @@ export function SettingsView({
           ) : section === "importExport" ? (
             <ImportExportSection prefs={prefs} update={update} />
           ) : section === "updates" ? (
-            <UpdatesSection appVersion={appVersion} />
+            <UpdatesSection
+              appVersion={appVersion}
+              prefs={prefs}
+              update={update}
+              updater={updater}
+            />
           ) : (
             <AboutSection appVersion={appVersion} />
           )}
@@ -757,18 +765,110 @@ function ImportExportSection({
   );
 }
 
-function UpdatesSection({ appVersion }: { appVersion: string }) {
+function UpdatesSection({
+  appVersion,
+  prefs,
+  update,
+  updater,
+}: {
+  appVersion: string;
+  prefs: Preferences | null;
+  update: PrefsUpdater;
+  updater: ReturnType<typeof useAppUpdater>;
+}) {
+  const u = prefs?.updates;
+  const busy =
+    updater.status === "checking" ||
+    updater.status === "downloading" ||
+    updater.status === "ready";
+  const pct =
+    updater.progress?.contentLength && updater.progress.contentLength > 0
+      ? Math.min(
+          100,
+          Math.round(
+            (updater.progress.downloaded / updater.progress.contentLength) * 100,
+          ),
+        )
+      : null;
+
+  let statusLabel = "Not checked yet";
+  if (updater.isDev) {
+    statusLabel = "Updater runs in release builds only";
+  } else if (updater.status === "checking") {
+    statusLabel = "Checking for updates…";
+  } else if (updater.status === "upToDate") {
+    statusLabel = "You're on the latest version";
+  } else if (updater.status === "available" && updater.available) {
+    statusLabel = `Update available: v${updater.available.version}`;
+  } else if (updater.status === "downloading") {
+    statusLabel =
+      pct != null ? `Downloading update… ${pct}%` : "Downloading update…";
+  } else if (updater.status === "ready") {
+    statusLabel = "Update installed — restarting…";
+  } else if (updater.status === "error") {
+    statusLabel = updater.error ?? "Update check failed";
+  }
+
   return (
-    <SettingsBlock title="Updates">
-      <div className="settings-about-hero">
-        <strong>LUMORA</strong>
-        <span>v{appVersion}</span>
-      </div>
-      <p className="muted settings-note">
-        Updates are manual for now. Install a new build when you choose — nothing
-        checks or downloads in the background.
-      </p>
-    </SettingsBlock>
+    <>
+      <SettingsBlock title="Updates">
+        <div className="settings-about-hero">
+          <strong>LUMORA</strong>
+          <span>v{appVersion}</span>
+        </div>
+        <p className="muted settings-note">{statusLabel}</p>
+        {updater.available?.body ? (
+          <pre className="settings-update-notes">{updater.available.body}</pre>
+        ) : null}
+        <div className="settings-inline-actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || updater.isDev}
+            onClick={() => void updater.checkForUpdates()}
+          >
+            {updater.status === "checking" ? "Checking…" : "Check for updates"}
+          </button>
+          {updater.status === "available" ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => void updater.downloadAndInstall()}
+            >
+              Download & install
+            </button>
+          ) : null}
+        </div>
+      </SettingsBlock>
+      {u ? (
+        <SettingsBlock title="Preferences">
+          <ToggleRow
+            label="Check automatically"
+            description="Look for a new release when LUMORA starts."
+            checked={u.checkAutomatically}
+            onChange={(v) =>
+              void update((p) => {
+                p.updates.checkAutomatically = v;
+                return p;
+              })
+            }
+          />
+          <ToggleRow
+            label="Download in background"
+            description="When an update is found automatically, download and install without asking. The app restarts after install."
+            checked={u.downloadInBackground}
+            disabled={!u.checkAutomatically}
+            onChange={(v) =>
+              void update((p) => {
+                p.updates.downloadInBackground = v;
+                return p;
+              })
+            }
+          />
+        </SettingsBlock>
+      ) : null}
+    </>
   );
 }
 
@@ -791,7 +891,7 @@ function AboutSection({ appVersion }: { appVersion: string }) {
         </div>
         <div>
           <dt>Network</dt>
-          <dd>Only when you download AI models</dd>
+          <dd>Model downloads, and optional update checks against GitHub Releases</dd>
         </div>
       </dl>
     </SettingsBlock>

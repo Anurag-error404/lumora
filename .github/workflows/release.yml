@@ -76,6 +76,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Ad-hoc sign so Apple Silicon Gatekeeper doesn't report the app as "damaged".
           APPLE_SIGNING_IDENTITY: "-"
+          # Required for in-app updates (Tauri updater signatures).
+          # Repo secret: paste the full private key string from `tauri signer generate`.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: LUMORA v__VERSION__
@@ -89,6 +93,11 @@ jobs:
             | macOS (Apple Silicon) | `.dmg` |
             | Windows | `.exe` (NSIS) or `.msi` |
             | Linux | `.AppImage` or `.deb` |
+
+            ### In-app updates
+
+            If you already have LUMORA installed, open **Settings → Updates** and
+            click **Check for updates** (or enable automatic checks).
 
             ### macOS note
 
@@ -106,3 +115,4 @@ jobs:
           generateReleaseNotes: true
           tauriScript: bun run tauri
           args: ${{ matrix.args }}
+          updaterJsonPreferNsis: true

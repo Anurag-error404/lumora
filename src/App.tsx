@@ -49,6 +49,7 @@ import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
 import { usePeople } from "./hooks/usePeople";
 import { usePlaces } from "./hooks/usePlaces";
 import { usePreferences } from "./hooks/usePreferences";
+import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useRecentSearches } from "./hooks/useRecentSearches";
 import { useTagBrowse } from "./hooks/useTagBrowse";
 import { useTagWorkflows } from "./hooks/useTagWorkflows";
@@ -146,6 +147,7 @@ export default function App() {
     loading: prefsLoading,
     update: updatePrefs,
   } = usePreferences({ setError });
+  const updater = useAppUpdater(prefs);
   const {
     recentSearches,
     record: recordRecentSearch,
@@ -820,6 +822,7 @@ export default function App() {
               onOpenLocked={() => setView("locked")}
               vaultStatus={vault.status}
               appVersion={developerInfo?.appVersion ?? "—"}
+              updater={updater}
             />
           ) : view === "savedSearches" ? (
             <RecentSearchesView

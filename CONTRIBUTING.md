@@ -40,6 +40,25 @@ cd src-tauri && cargo test
 - Include screenshots or short clips for UI changes.
 - Note any migration or model-download impact for existing libraries.
 
+## Releasing / in-app updates
+
+Tagged releases (`v*`) run [`.github/workflows/release.yml`](./.github/workflows/release.yml), which builds installers **and** signed updater artifacts (`*.sig` + `latest.json`).
+
+Required repo secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Full contents of the private key from `bun run tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Key password, or leave empty if the key has none |
+
+The matching **public** key is embedded in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). Losing the private key permanently breaks in-app updates for existing installs — back it up offline.
+
+Local key material for this repo lives in `.tauri-keys/` (gitignored). Example:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < .tauri-keys/lumora.key
+```
+
 ## License
 
 By contributing, you agree your contributions are licensed under the same

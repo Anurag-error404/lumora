@@ -231,7 +231,7 @@ pub struct UpdatesPrefs {
 impl Default for UpdatesPrefs {
     fn default() -> Self {
         Self {
-            check_automatically: false,
+            check_automatically: true,
             download_in_background: false,
         }
     }

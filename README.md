@@ -140,6 +140,7 @@ app.html             Tauri webview entry
 
 - Core features work with **no network**
 - Model downloads are **user-initiated** and SHA-256 verified
+- Optional **in-app updates** check GitHub Releases when enabled (Settings → Updates)
 - Logs and import analytics stay in local app data — never uploaded
 - No analytics, crash upload, or cloud photo APIs
 
