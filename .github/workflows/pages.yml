@@ -1,0 +1,73 @@
+# Deploy the static marketing site (index.html, guide.html, assets) to GitHub Pages.
+#
+# After merging this workflow, switch the repo to Actions-based Pages:
+#   Settings → Pages → Build and deployment → Source: GitHub Actions
+# (Legacy “Deploy from branch /” redeploys on every master push — including
+# release version bumps — and races/cancels itself.)
+
+name: Deploy Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/pages.yml'
+      - '.nojekyll'
+      - 'index.html'
+      - 'guide.html'
+      - 'styles.css'
+      - 'site.js'
+      - 'favicon.png'
+      - 'Lumora-icon.png'
+      - 'lumora-icon-tp.png'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Assemble static site
+        run: |
+          mkdir -p _site
+          cp \
+            index.html \
+            guide.html \
+            styles.css \
+            site.js \
+            favicon.png \
+            Lumora-icon.png \
+            lumora-icon-tp.png \
+            .nojekyll \
+            _site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
