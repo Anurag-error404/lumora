@@ -13,6 +13,7 @@ const CAPABILITY_ORDER = [
   "faces",
   "autoTags",
   "captions",
+  "memoryProse",
   "duplicates",
   "blurDetection",
 ];

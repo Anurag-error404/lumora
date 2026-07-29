@@ -20,6 +20,7 @@ const MIGRATION_014: &str = include_str!("../../migrations/014_auto_tags.sql");
 const MIGRATION_015: &str = include_str!("../../migrations/015_blur_score.sql");
 const MIGRATION_016: &str = include_str!("../../migrations/016_edit_history.sql");
 const MIGRATION_017: &str = include_str!("../../migrations/017_captions.sql");
+const MIGRATION_018: &str = include_str!("../../migrations/018_memory_prose.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -308,6 +309,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         conn.execute("INSERT INTO schema_migrations (version) VALUES (17)", [])?;
         tracing::info!("applied migration 017_captions");
+    }
+
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 18 {
+        conn.execute_batch(MIGRATION_018)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (18)", [])?;
+        tracing::info!("applied migration 018_memory_prose");
     }
 
     Ok(())

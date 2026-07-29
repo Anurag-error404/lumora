@@ -187,7 +187,7 @@ export function HomeView({
                   type="button"
                   className="home-memory-card"
                   onClick={() => onOpenMemory(memory.id)}
-                  title={memory.quote ?? memory.subtitle}
+                  title={memory.insight}
                 >
                   <div className="home-memory-cover">
                     <SafeImage
@@ -198,9 +198,7 @@ export function HomeView({
                     />
                   </div>
                   <span className="home-memory-title">{memory.title}</span>
-                  <span className="home-memory-sub muted">
-                    {memory.quote ? `“${memory.quote}”` : memory.subtitle}
-                  </span>
+                  <span className="home-memory-sub muted">{memory.insight}</span>
                 </button>
               );
             })}

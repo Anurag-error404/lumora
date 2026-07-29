@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::catalog::{
-    CAPTIONS_BUNDLE, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, SEMANTIC_BUNDLE,
-    TAGS_BUNDLE, TAGS_BUNDLE_MEDIUM,
+    CAPTIONS_BUNDLE, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, PROSE_BUNDLE,
+    SEMANTIC_BUNDLE, TAGS_BUNDLE, TAGS_BUNDLE_MEDIUM,
 };
 
 /// User-facing AI capability that can pick a backend.
@@ -20,6 +20,7 @@ pub enum Capability {
     Faces,
     AutoTags,
     Captions,
+    MemoryProse,
     Duplicates,
     BlurDetection,
 }
@@ -32,6 +33,7 @@ impl Capability {
             Self::Faces => "faces",
             Self::AutoTags => "autoTags",
             Self::Captions => "captions",
+            Self::MemoryProse => "memoryProse",
             Self::Duplicates => "duplicates",
             Self::BlurDetection => "blurDetection",
         }
@@ -46,6 +48,7 @@ impl Capability {
                 Some(Self::AutoTags)
             }
             "captions" | "caption" => Some(Self::Captions),
+            "memoryProse" | "memory_prose" | "prose" => Some(Self::MemoryProse),
             "duplicates" => Some(Self::Duplicates),
             "blurDetection" | "blur" => Some(Self::BlurDetection),
             _ => None,
@@ -59,6 +62,7 @@ impl Capability {
             Self::Faces => "Face detection & recognition",
             Self::AutoTags => "Image classification / auto-tags",
             Self::Captions => "Image captions",
+            Self::MemoryProse => "Memory prose",
             Self::Duplicates => "Duplicate detection",
             Self::BlurDetection => "Blur detection",
         }
@@ -179,6 +183,17 @@ pub const LIBRARY: &[ModelOption] = &[
         default: true,
     },
     ModelOption {
+        id: "lamini-flan-t5-248m",
+        capability: Capability::MemoryProse,
+        bundle: Some(PROSE_BUNDLE),
+        name: "LaMini-Flan-T5 248M",
+        summary: "Optional on-device seq2seq that turns memory facts into a short prose line. Non-commercial (CC-BY-NC-4.0).",
+        runtime: RuntimeKind::Onnx,
+        license: "CC-BY-NC-4.0",
+        input_size: None,
+        default: true,
+    },
+    ModelOption {
         id: "sha256-phash",
         capability: Capability::Duplicates,
         bundle: None,
@@ -235,6 +250,7 @@ mod tests {
             Capability::Faces,
             Capability::AutoTags,
             Capability::Captions,
+            Capability::MemoryProse,
             Capability::Duplicates,
             Capability::BlurDetection,
         ] {

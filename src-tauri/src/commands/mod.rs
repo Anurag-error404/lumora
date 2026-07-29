@@ -1352,6 +1352,8 @@ pub fn remove_ml_model(state: State<'_, AppState>, id: String) -> AppResult<ml::
     state.ocr.invalidate();
     state.faces.invalidate();
     state.tags.invalidate();
+    state.captions.invalidate();
+    memories::prose::invalidate_engine();
     Ok(status)
 }
 
@@ -1902,6 +1904,10 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
                 prefs.ai.captions_model = opt.id.to_string();
                 prefs.ai.captions = true;
             }
+            ml::library::Capability::MemoryProse => {
+                prefs.ai.prose_model = opt.id.to_string();
+                prefs.ai.memory_prose = true;
+            }
             _ => {}
         }
         let _ = preferences::save(&app_data, &prefs);
@@ -1913,6 +1919,7 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
     state.faces.invalidate();
     state.tags.invalidate();
     state.captions.invalidate();
+    memories::prose::invalidate_engine();
     state.embedder.kick();
     state.ocr.kick();
     state.faces.kick();
@@ -1971,6 +1978,10 @@ pub async fn set_active_model(
             prefs.ai.captions_model = opt.id.to_string();
             prefs.ai.captions = true;
         }
+        ml::library::Capability::MemoryProse => {
+            prefs.ai.prose_model = opt.id.to_string();
+            prefs.ai.memory_prose = true;
+        }
         _ => {}
     }
     preferences::save(&app_data, &prefs)?;
@@ -1981,6 +1992,7 @@ pub async fn set_active_model(
     state.faces.invalidate();
     state.tags.invalidate();
     state.captions.invalidate();
+    memories::prose::invalidate_engine();
 
     if reprocess {
         let faces_dir = state.paths.faces_dir.clone();
@@ -2043,6 +2055,9 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
             Some(ml::library::Capability::Faces) => want_faces = true,
             Some(ml::library::Capability::AutoTags) => want_tags = true,
             Some(ml::library::Capability::Captions) => want_captions = true,
+            Some(ml::library::Capability::MemoryProse) => {
+                // Prose is on-demand; clearing cache is enough.
+            }
             Some(ml::library::Capability::Duplicates | ml::library::Capability::BlurDetection) => {
                 // Native capabilities — nothing to reprocess in AI queues.
             }
@@ -2212,17 +2227,67 @@ pub fn get_memory(
     state: State<'_, AppState>,
     memory_id: String,
 ) -> AppResult<memories::MemoryDetail> {
+    // Summary + cached prose only — never run ONNX here.
     state.with_db(|conn| memories::get_memory(conn, &memory_id))
 }
 
+/// Generate (or return cached) memory prose off the UI thread.
 #[tauri::command]
-pub fn list_memory_assets(
+pub async fn enrich_memory_prose(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> AppResult<memories::MemorySummary> {
+    let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    let app_data = state.paths.app_data.clone();
+    let db_path = state.paths.db_path.clone();
+    let enabled = prefs.ai.memory_prose;
+
+    let mut detail = state.with_db(|conn| memories::get_memory(conn, &memory_id))?;
+    if detail.summary.prose.is_some() || !enabled {
+        return Ok(detail.summary);
+    }
+
+    let title = detail.summary.title.clone();
+    let subtitle = detail.summary.subtitle.clone();
+    let quote = detail.summary.quote.clone();
+    let mid = detail.summary.id.clone();
+
+    let prose = tauri::async_runtime::spawn_blocking(move || {
+        memories::prose::enrich_prose_unlocked(
+            &db_path,
+            &app_data,
+            &mid,
+            &title,
+            &subtitle,
+            quote.as_deref(),
+            enabled,
+        )
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("memory prose task failed: {e}")))?;
+
+    match prose {
+        Ok(p) => detail.summary.prose = p,
+        Err(e) => tracing::warn!(error = %e, memory_id = %memory_id, "memory prose failed"),
+    }
+    detail.summary.insight = memories::compose_insight(&detail.summary);
+    Ok(detail.summary)
+}
+
+#[tauri::command]
+pub async fn list_memory_assets(
     state: State<'_, AppState>,
     memory_id: String,
     limit: u32,
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
-    state.with_db(|conn| memories::list_memory_assets(conn, &memory_id, limit, offset))
+    let db_path = state.paths.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&db_path)?;
+        memories::list_memory_assets(&conn, &memory_id, limit, offset)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("list memory assets failed: {e}")))?
 }
 
 /// Persist a memory as a normal album (user-initiated only).
@@ -2233,10 +2298,7 @@ pub fn save_memory_as_album(
     name: Option<String>,
 ) -> AppResult<Album> {
     let (album, asset_ids) = state.with_db(|conn| {
-        let detail = memories::get_memory(conn, &memory_id)?;
-        let asset_ids: Vec<String> = detail.assets.iter().map(|a| a.id.clone()).collect();
-        let album = memories::save_memory_as_album(conn, &memory_id, name)?;
-        Ok((album, asset_ids))
+        memories::save_memory_as_album(conn, &memory_id, name)
     })?;
     if !asset_ids.is_empty() {
         let count = asset_ids.len();
@@ -2259,6 +2321,38 @@ pub fn save_memory_as_album(
         )?;
     }
     Ok(album)
+}
+
+/// Download LaMini-Flan-T5 for optional memory prose.
+#[tauri::command]
+pub async fn install_prose_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let status = install_model_option(app.clone(), "lamini-flan-t5-248m".into()).await?;
+    memories::prose::invalidate_engine();
+    Ok(status)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProseStatusDto {
+    pub model_ready: bool,
+    pub enabled: bool,
+}
+
+#[tauri::command]
+pub fn prose_status(state: State<'_, AppState>) -> AppResult<ProseStatusDto> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| {
+        Ok(ProseStatusDto {
+            model_ready: memories::prose::prose_ready(conn)?,
+            enabled: prefs.ai.memory_prose,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn clear_memory_prose(state: State<'_, AppState>) -> AppResult<usize> {
+    memories::prose::invalidate_engine();
+    state.with_db(memories::prose::clear_all)
 }
 
 /// Live progress of the background GPS / reverse-geocode pass.

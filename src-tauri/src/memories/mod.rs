@@ -7,6 +7,7 @@
 //! auto-create albums.
 
 mod rank;
+pub mod prose;
 
 use chrono::{Datelike, Duration, NaiveDate, Utc, Weekday};
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
@@ -47,9 +48,14 @@ pub struct MemorySummary {
     pub id: String,
     pub kind: MemoryKind,
     pub title: String,
+    /// Compact meta (dates / counts) — prefer [`insight`] for display copy.
     pub subtitle: String,
+    /// Narrative line for UI: prose → caption insight → warm template.
+    pub insight: String,
     /// Florence caption quote when available (v1.5); otherwise null.
     pub quote: Option<String>,
+    /// Optional polished one-liner from the on-device prose model.
+    pub prose: Option<String>,
     pub asset_count: i64,
     pub cover_asset_id: Option<String>,
     pub cover_thumbnail_path: Option<String>,
@@ -118,30 +124,30 @@ fn assets_for_ordered_ids(
     limit: u32,
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
-    let slice: Vec<&String> = ordered
+    let slice: Vec<String> = ordered
         .iter()
         .skip(offset as usize)
         .take(limit as usize)
+        .cloned()
         .collect();
     if slice.is_empty() {
         return Ok(Vec::new());
     }
+    let placeholders = std::iter::repeat("?")
+        .take(slice.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM assets a WHERE a.id IN ({placeholders})");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(slice.iter()), map_asset)?;
     let mut by_id = std::collections::HashMap::new();
-    for id in &slice {
-        let asset = conn
-            .query_row(
-                &format!("SELECT {SELECT_COLUMNS} FROM assets a WHERE a.id = ?1"),
-                params![id.as_str()],
-                map_asset,
-            )
-            .ok();
-        if let Some(a) = asset {
-            by_id.insert(id.to_string(), a);
-        }
+    for row in rows {
+        let asset = row?;
+        by_id.insert(asset.id.clone(), asset);
     }
     Ok(slice
         .into_iter()
-        .filter_map(|id| by_id.remove(id.as_str()))
+        .filter_map(|id| by_id.remove(&id))
         .collect())
 }
 
@@ -165,6 +171,111 @@ fn cover_from_ids(
 
 fn with_quote(conn: &Connection, mut summary: MemorySummary, ordered: &[String]) -> MemorySummary {
     summary.quote = pick_quote(conn, ordered);
+    finalize_insight(summary)
+}
+
+fn with_cached_prose(conn: &Connection, mut summary: MemorySummary) -> MemorySummary {
+    let prompt = prose::build_prompt(
+        &summary.title,
+        &summary.subtitle,
+        summary.quote.as_deref(),
+    );
+    let hash = prose::input_hash(&prompt);
+    if let Ok(Some(p)) = prose::cached_prose(conn, &summary.id, &hash) {
+        summary.prose = Some(p);
+    }
+    finalize_insight(summary)
+}
+
+/// Narrative summary for Memories UI (never raw “N photos” alone).
+pub fn compose_insight(summary: &MemorySummary) -> String {
+    if let Some(prose) = summary
+        .prose
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return prose.to_string();
+    }
+    if let Some(quote) = summary
+        .quote
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return match summary.kind {
+            MemoryKind::WeekendTrip => {
+                if let Some(place) = summary
+                    .place_label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    format!("In {place}: “{quote}”")
+                } else {
+                    format!("“{quote}”")
+                }
+            }
+            MemoryKind::PersonPlace => match (
+                summary
+                    .person_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty()),
+                summary
+                    .place_label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty()),
+            ) {
+                (Some(person), Some(place)) => format!("{person} in {place} — “{quote}”"),
+                _ => format!("“{quote}”"),
+            },
+            MemoryKind::OnThisDay => format!("“{quote}”"),
+        };
+    }
+
+    match summary.kind {
+        MemoryKind::WeekendTrip => {
+            let place = summary
+                .place_label
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let when = summary
+                .subtitle
+                .split(" · ")
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && !s.contains("photo"));
+            match (place, when) {
+                (Some(place), Some(when)) => format!("A weekend in {place}, {when}."),
+                (Some(place), None) => format!("A weekend spent in {place}."),
+                (None, Some(when)) => format!("A weekend trip from {when}."),
+                (None, None) => "A short trip worth remembering.".into(),
+            }
+        }
+        MemoryKind::OnThisDay => "Looking back at this day across the years.".into(),
+        MemoryKind::PersonPlace => match (
+            summary
+                .person_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            summary
+                .place_label
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) {
+            (Some(person), Some(place)) => format!("Moments with {person} in {place}."),
+            _ => "People and places that matter.".into(),
+        },
+    }
+}
+
+fn finalize_insight(mut summary: MemorySummary) -> MemorySummary {
+    summary.insight = compose_insight(&summary);
     summary
 }
 
@@ -176,20 +287,20 @@ pub fn list_memories(conn: &Connection, limit: u32) -> AppResult<Vec<MemorySumma
     let mut out = Vec::new();
 
     if let Some(m) = on_this_day_memory(conn, today)? {
-        out.push(m);
+        out.push(with_cached_prose(conn, m));
     }
     for m in weekend_trip_memories(conn, today)? {
         if out.len() >= limit {
             break;
         }
-        out.push(m);
+        out.push(with_cached_prose(conn, m));
     }
     if out.len() < limit {
         for m in person_place_memories(conn)? {
             if out.len() >= limit {
                 break;
             }
-            out.push(m);
+            out.push(with_cached_prose(conn, m));
         }
     }
     out.truncate(limit);
@@ -198,8 +309,11 @@ pub fn list_memories(conn: &Connection, limit: u32) -> AppResult<Vec<MemorySumma
 
 pub fn get_memory(conn: &Connection, memory_id: &str) -> AppResult<MemoryDetail> {
     let summary = resolve_summary(conn, memory_id)?;
-    let assets = list_memory_assets(conn, memory_id, MAX_ASSETS_PER_MEMORY, 0)?;
-    Ok(MemoryDetail { summary, assets })
+    // Assets are loaded via list_memory_assets — keep this call cheap for open/enrich.
+    Ok(MemoryDetail {
+        summary: with_cached_prose(conn, summary),
+        assets: Vec::new(),
+    })
 }
 
 pub fn list_memory_assets(
@@ -223,7 +337,7 @@ pub fn save_memory_as_album(
     conn: &Connection,
     memory_id: &str,
     name: Option<String>,
-) -> AppResult<Album> {
+) -> AppResult<(Album, Vec<String>)> {
     let detail = get_memory(conn, memory_id)?;
     let album_name = name
         .map(|n| n.trim().to_string())
@@ -232,7 +346,10 @@ pub fn save_memory_as_album(
     if album_name.is_empty() {
         return Err(AppError::msg("album name required"));
     }
-    let asset_ids: Vec<String> = detail.assets.into_iter().map(|a| a.id).collect();
+    let asset_ids: Vec<String> = list_memory_assets(conn, memory_id, MAX_ASSETS_PER_MEMORY, 0)?
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
     if asset_ids.is_empty() {
         return Err(AppError::msg("memory has no photos to save"));
     }
@@ -260,14 +377,17 @@ pub fn save_memory_as_album(
         .ok()
         .flatten()
     });
-    Ok(Album {
-        id,
-        name: album_name,
-        cover_asset_id: cover,
-        cover_thumbnail_path,
-        created_at,
-        asset_count: added,
-    })
+    Ok((
+        Album {
+            id,
+            name: album_name,
+            cover_asset_id: cover,
+            cover_thumbnail_path,
+            created_at,
+            asset_count: added,
+        },
+        asset_ids,
+    ))
 }
 
 // ─── ID parsing ─────────────────────────────────────────────────────────────
@@ -418,7 +538,9 @@ fn on_this_day_for_month_day(
             kind: MemoryKind::OnThisDay,
             title,
             subtitle,
+            insight: String::new(),
             quote: None,
+            prose: None,
             asset_count: count,
             cover_asset_id,
             cover_thumbnail_path,
@@ -438,12 +560,15 @@ fn assets_for_on_this_day(
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
     let this_year = Utc::now().year();
+    let take = (offset as usize)
+        .saturating_add(limit as usize)
+        .clamp(1, MAX_CANDIDATES);
     let ordered = diversified_ids(
         conn,
         "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
            AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
         &[&month_day, &this_year],
-        MAX_CANDIDATES,
+        take,
     )?;
     assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
@@ -569,7 +694,9 @@ fn build_weekend_summary(
             kind: MemoryKind::WeekendTrip,
             title,
             subtitle,
+            insight: String::new(),
             quote: None,
+            prose: None,
             asset_count: total,
             cover_asset_id,
             cover_thumbnail_path,
@@ -665,12 +792,15 @@ fn assets_for_weekend(
         .unwrap_or(start);
     let start_s = start.format("%Y-%m-%d").to_string();
     let end_s = end.format("%Y-%m-%d").to_string();
+    let take = (offset as usize)
+        .saturating_add(limit as usize)
+        .clamp(1, MAX_CANDIDATES);
     let ordered = diversified_ids(
         conn,
         "strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
            AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2",
         &[&start_s, &end_s],
-        MAX_CANDIDATES,
+        take,
     )?;
     assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
@@ -760,7 +890,9 @@ fn person_place_summary(
             kind: MemoryKind::PersonPlace,
             title,
             subtitle,
+            insight: String::new(),
             quote: None,
+            prose: None,
             asset_count: count,
             cover_asset_id,
             cover_thumbnail_path,
@@ -780,6 +912,9 @@ fn assets_for_person_place(
     limit: u32,
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
+    let take = (offset as usize)
+        .saturating_add(limit as usize)
+        .clamp(1, MAX_CANDIDATES);
     let ordered = diversified_ids(
         conn,
         "EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1)
@@ -788,7 +923,7 @@ fn assets_for_person_place(
              WHERE ap.asset_id = a.id AND ap.place_label = ?2
            )",
         &[&person_id, &place],
-        MAX_CANDIDATES,
+        take,
     )?;
     assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
@@ -835,6 +970,43 @@ mod tests {
         let (t, s) = template_person_place("Ada", "Paris", 7);
         assert_eq!(t, "Ada in Paris");
         assert_eq!(s, "7 photos");
+    }
+
+    #[test]
+    fn insight_prefers_prose_then_quote_then_warm_template() {
+        let base = MemorySummary {
+            id: "weekend:2026-01-10".into(),
+            kind: MemoryKind::WeekendTrip,
+            title: "Weekend in Jhusi, Uttar Pradesh".into(),
+            subtitle: "Jan 10 – Jan 13, 2026 · 272 photos".into(),
+            insight: String::new(),
+            quote: None,
+            prose: None,
+            asset_count: 272,
+            cover_asset_id: None,
+            cover_thumbnail_path: None,
+            start_date: Some("2026-01-10".into()),
+            end_date: Some("2026-01-13".into()),
+            place_label: Some("Jhusi, Uttar Pradesh".into()),
+            person_name: None,
+        };
+        let warm = compose_insight(&base);
+        assert!(warm.contains("Jhusi"));
+        assert!(!warm.contains("272 photos"));
+
+        let mut with_quote = base.clone();
+        with_quote.quote = Some("a foggy street at dusk".into());
+        assert_eq!(
+            compose_insight(&with_quote),
+            "In Jhusi, Uttar Pradesh: “a foggy street at dusk”"
+        );
+
+        let mut with_prose = with_quote;
+        with_prose.prose = Some("Fog and ritual fires marked a winter weekend in Jhusi.".into());
+        assert_eq!(
+            compose_insight(&with_prose),
+            "Fog and ritual fires marked a winter weekend in Jhusi."
+        );
     }
 
     #[test]
@@ -929,7 +1101,7 @@ mod tests {
         assert_eq!(assets.len(), 3);
         assert_eq!(assets[0].id, "a1"); // favourite ranks first
 
-        let album = save_memory_as_album(&conn, &otd.id, None).unwrap();
+        let (album, _) = save_memory_as_album(&conn, &otd.id, None).unwrap();
         assert_eq!(album.name, "On this day");
         assert_eq!(album.asset_count, 3);
     }

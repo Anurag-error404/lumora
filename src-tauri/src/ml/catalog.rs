@@ -39,6 +39,14 @@ pub enum ModelKind {
     CaptionTokenizer,
     /// Combined image-captioning job kind in `ml_jobs`.
     Captions,
+    /// Memory prose T5 encoder.
+    ProseEncoder,
+    /// Memory prose T5 decoder.
+    ProseDecoder,
+    /// Memory prose tokenizer JSON.
+    ProseTokenizer,
+    /// Combined memory-prose capability (install / status).
+    MemoryProse,
 }
 
 impl ModelKind {
@@ -60,6 +68,10 @@ impl ModelKind {
             Self::CaptionDecoder => "caption_decoder",
             Self::CaptionTokenizer => "caption_tokenizer",
             Self::Captions => "captions",
+            Self::ProseEncoder => "prose_encoder",
+            Self::ProseDecoder => "prose_decoder",
+            Self::ProseTokenizer => "prose_tokenizer",
+            Self::MemoryProse => "memory_prose",
         }
     }
 }
@@ -98,6 +110,9 @@ pub const TAGS_BUNDLE: &str = "mobilenetv4-in1k";
 
 /// On-device image captions: Florence-2-base-ft (quantized ONNX).
 pub const CAPTIONS_BUNDLE: &str = "florence-2-base-ft";
+
+/// Memory prose: LaMini-Flan-T5-248M (quantized ONNX). CC-BY-NC-4.0.
+pub const PROSE_BUNDLE: &str = "lamini-flan-t5-248m";
 
 /// Lighter InsightFace buffalo_s (SCRFD + ArcFace).
 pub const FACES_BUNDLE_S: &str = "insightface-buffalo-s";
@@ -378,6 +393,43 @@ pub const CATALOG: &[CatalogEntry] = &[
         dim: None,
         license: "MIT",
     },
+    // —— Memory prose (LaMini-Flan-T5-248M) ——
+    CatalogEntry {
+        id: "prose-encoder",
+        bundle: PROSE_BUNDLE,
+        kind: ModelKind::ProseEncoder,
+        version: "1",
+        file_name: "prose-encoder.onnx",
+        url: "https://huggingface.co/Xenova/LaMini-Flan-T5-248M/resolve/main/onnx/encoder_model_quantized.onnx",
+        sha256: "4203b9de03bd3498215bc9f0a705fca1cb218a807a67983adff0c33ad7ef0571",
+        size_bytes: 110_502_358,
+        dim: None,
+        license: "CC-BY-NC-4.0",
+    },
+    CatalogEntry {
+        id: "prose-decoder",
+        bundle: PROSE_BUNDLE,
+        kind: ModelKind::ProseDecoder,
+        version: "1",
+        file_name: "prose-decoder.onnx",
+        url: "https://huggingface.co/Xenova/LaMini-Flan-T5-248M/resolve/main/onnx/decoder_model_quantized.onnx",
+        sha256: "45a74d30a328f044cb213ed2ead9f5d48277e983f5182cf05b7988bd958654e0",
+        size_bytes: 164_163_118,
+        dim: None,
+        license: "CC-BY-NC-4.0",
+    },
+    CatalogEntry {
+        id: "prose-tokenizer",
+        bundle: PROSE_BUNDLE,
+        kind: ModelKind::ProseTokenizer,
+        version: "1",
+        file_name: "prose-tokenizer.json",
+        url: "https://huggingface.co/Xenova/LaMini-Flan-T5-248M/resolve/main/tokenizer.json",
+        sha256: "a2fbf7067864579752c3bdd2b03e93e0939dc40732c935550a499ea878eb93d8",
+        size_bytes: 2_422_262,
+        dim: None,
+        license: "CC-BY-NC-4.0",
+    },
 ];
 
 pub fn entry(id: &str) -> Option<&'static CatalogEntry> {
@@ -503,5 +555,18 @@ mod tests {
         let bytes = bundle_size(CAPTIONS_BUNDLE);
         assert!(bytes > 200_000_000);
         assert!(bytes < 350_000_000);
+    }
+
+    #[test]
+    fn prose_bundle_has_encoder_decoder_tokenizer() {
+        let entries: Vec<_> = bundle(PROSE_BUNDLE).collect();
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().any(|e| e.kind == ModelKind::ProseEncoder));
+        assert!(entries.iter().any(|e| e.kind == ModelKind::ProseDecoder));
+        assert!(entries.iter().any(|e| e.kind == ModelKind::ProseTokenizer));
+        let bytes = bundle_size(PROSE_BUNDLE);
+        assert!(bytes > 250_000_000);
+        assert!(bytes < 300_000_000);
+        assert_eq!(ModelKind::MemoryProse.as_str(), "memory_prose");
     }
 }

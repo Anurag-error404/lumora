@@ -64,6 +64,8 @@ pub struct MlStatus {
     pub tags_ready: bool,
     /// Every file of the captions bundle is installed and verified.
     pub captions_ready: bool,
+    /// Every file of the memory-prose bundle is installed and verified.
+    pub prose_ready: bool,
     pub models: Vec<ModelInfo>,
     /// Bytes the semantic bundle would download if not yet installed.
     pub semantic_download_bytes: u64,
@@ -75,6 +77,8 @@ pub struct MlStatus {
     pub tags_download_bytes: u64,
     /// Bytes the captions bundle would download if not yet installed.
     pub captions_download_bytes: u64,
+    /// Bytes the memory-prose bundle would download if not yet installed.
+    pub prose_download_bytes: u64,
     pub installed_bytes: u64,
     pub models_dir: String,
 }
@@ -107,11 +111,13 @@ pub fn status(conn: &Connection, models_dir: &Path) -> AppResult<MlStatus> {
         faces_ready: faces_ready(conn)?,
         tags_ready: tags_ready(conn)?,
         captions_ready: captions_ready(conn)?,
+        prose_ready: prose_ready(conn)?,
         semantic_download_bytes: catalog::bundle_size(catalog::SEMANTIC_BUNDLE),
         ocr_download_bytes: catalog::bundle_size(catalog::OCR_BUNDLE),
         faces_download_bytes: catalog::bundle_size(catalog::FACES_BUNDLE),
         tags_download_bytes: catalog::bundle_size(catalog::TAGS_BUNDLE),
         captions_download_bytes: catalog::bundle_size(catalog::CAPTIONS_BUNDLE),
+        prose_download_bytes: catalog::bundle_size(catalog::PROSE_BUNDLE),
         installed_bytes,
         models_dir: models_dir.display().to_string(),
         models,
@@ -153,6 +159,7 @@ pub fn library_status(
             library::Capability::Faces => prefs.faces_model.as_str(),
             library::Capability::AutoTags => prefs.tags_model.as_str(),
             library::Capability::Captions => prefs.captions_model.as_str(),
+            library::Capability::MemoryProse => prefs.prose_model.as_str(),
             library::Capability::Duplicates | library::Capability::BlurDetection => {
                 library::default_option(opt.capability).id
             }
@@ -232,6 +239,11 @@ pub fn tags_ready(conn: &Connection) -> AppResult<bool> {
 
 pub fn captions_ready(conn: &Connection) -> AppResult<bool> {
     bundle_ready(conn, catalog::CAPTIONS_BUNDLE)
+}
+
+pub fn prose_ready(conn: &Connection) -> AppResult<bool> {
+    let _ = catalog::ModelKind::MemoryProse; // reserved combined job kind
+    bundle_ready(conn, catalog::PROSE_BUNDLE)
 }
 
 #[derive(Debug, Clone)]

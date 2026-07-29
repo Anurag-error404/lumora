@@ -128,6 +128,7 @@ export default function App() {
     memories,
     activeMemory,
     setActiveMemory,
+    openMemoryDetail,
     refreshMemories,
     saveAsAlbum,
     saving: savingMemoryAlbum,
@@ -651,7 +652,8 @@ export default function App() {
 
   function openMemory(memoryId: string) {
     setView("memories");
-    setActiveMemory(memoryId);
+    setAssets([]);
+    void openMemoryDetail(memoryId);
     setSelected(new Set());
   }
 
@@ -953,7 +955,8 @@ export default function App() {
               memories={memories}
               onRefresh={() => void refreshMemories()}
               onOpenMemory={(memoryId) => {
-                setActiveMemory(memoryId);
+                setAssets([]);
+                void openMemoryDetail(memoryId);
                 setSelected(new Set());
               }}
             />
@@ -1006,13 +1009,10 @@ export default function App() {
                   title={
                     memories.find((m) => m.id === activeMemory)?.title ?? "Memory"
                   }
-                  description={(() => {
-                    const m = memories.find((row) => row.id === activeMemory);
-                    if (!m) return "Photos in this memory.";
-                    return m.quote
-                      ? `${m.subtitle} · “${m.quote}”`
-                      : m.subtitle;
-                  })()}
+                  description={
+                    memories.find((row) => row.id === activeMemory)?.insight ??
+                    "Photos in this memory."
+                  }
                   actions={
                     <>
                       <button

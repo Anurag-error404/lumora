@@ -18,6 +18,9 @@ import { PAGE_SIZE } from "../lib/constants";
 import type { View } from "../types/app";
 import { mergeSearchResults } from "../features/search/merge-search-results";
 
+/** Smaller first paint for memory detail (CLIP diversity is O(n²)). */
+const MEMORY_PAGE_SIZE = 72;
+
 /** Tokens that mean the query is FTS/filter syntax, not natural language. */
 function hasStructuredFilters(query: string): boolean {
   return /\b(camera:|lens:|rating[><=]|before:|after:|type:|fav:)/i.test(query);
@@ -105,7 +108,7 @@ export function useLibraryAssets({
       }
       if (view === "memories") {
         return activeMemory
-          ? api.listMemoryAssets(activeMemory, PAGE_SIZE, offset)
+          ? api.listMemoryAssets(activeMemory, MEMORY_PAGE_SIZE, offset)
           : [];
       }
       if (view === "tags") {
@@ -197,13 +200,20 @@ export function useLibraryAssets({
       }
       const rows = await fetchAssetPage(0);
       setAssets(rows);
-      setHasMore(rows.length === PAGE_SIZE);
-      await refreshStats();
+      const pageSize = view === "memories" ? MEMORY_PAGE_SIZE : PAGE_SIZE;
+      setHasMore(rows.length === pageSize);
+      // Don't block memory detail paint on stats refresh.
+      if (view === "memories" && activeMemory) {
+        void refreshStats();
+      } else {
+        await refreshStats();
+      }
     } catch (e) {
       setError(String(e));
     }
   }, [
     view,
+    activeMemory,
     fetchAssetPage,
     refreshStats,
     refreshHistory,
@@ -222,13 +232,14 @@ export function useLibraryAssets({
         const seen = new Set(prev.map((a) => a.id));
         return [...prev, ...next.filter((a) => !seen.has(a.id))];
       });
-      setHasMore(next.length === PAGE_SIZE);
+      const pageSize = view === "memories" ? MEMORY_PAGE_SIZE : PAGE_SIZE;
+      setHasMore(next.length === pageSize);
     } catch (e) {
       setError(String(e));
     } finally {
       loadingMoreRef.current = false;
     }
-  }, [hasMore, fetchAssetPage, assets.length, setError]);
+  }, [hasMore, fetchAssetPage, assets.length, setError, view]);
 
   useEffect(() => {
     void loadAssets();

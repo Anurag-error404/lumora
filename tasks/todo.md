@@ -1,7 +1,7 @@
-# Memories v1.5 — Tasks
+# Memories — optional prose
 
-- [x] Rank helper + wire into asset lists / covers
-- [x] Caption quote picker + MemorySummary.quote
-- [x] UI: show quote on cards + detail + Home
-- [x] Tests with synthetic CLIP vectors + captions
-- [x] SPEC checklist v1.5 shipped
+- [x] Catalog + SHA-256 pin (LaMini-Flan-T5-248M)
+- [x] ONNX encoder/decoder + sanitize + cache (`memory_prose`)
+- [x] Commands + prefs + Settings install/toggle
+- [x] UI: show prose on Home / cards / detail (prefer over quote)
+- [x] Tests + SPEC

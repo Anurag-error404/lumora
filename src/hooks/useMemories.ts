@@ -28,6 +28,24 @@ export function useMemories({
     return idleDefer(() => void refreshMemories());
   }, [view, refreshMemories]);
 
+  /**
+   * Open immediately. Prose enrichment is fully fire-and-forget so ONNX
+   * never sits on the navigation path.
+   */
+  const openMemoryDetail = useCallback((memoryId: string) => {
+    setActiveMemory(memoryId);
+    void (async () => {
+      try {
+        const summary = await api.enrichMemoryProse(memoryId);
+        setMemories((prev) =>
+          prev.map((m) => (m.id === memoryId ? summary : m)),
+        );
+      } catch (e) {
+        console.warn("memory prose enrich failed", e);
+      }
+    })();
+  }, []);
+
   const saveAsAlbum = useCallback(
     async (memoryId: string, name?: string) => {
       setSaving(true);
@@ -48,6 +66,7 @@ export function useMemories({
     memories,
     activeMemory,
     setActiveMemory,
+    openMemoryDetail,
     refreshMemories,
     saveAsAlbum,
     saving,

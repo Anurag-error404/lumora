@@ -18,6 +18,7 @@ const OCR_BUNDLE = "rapidocr-ppv4";
 const FACES_BUNDLE = "insightface-buffalo-l";
 const TAGS_BUNDLE = "mobilenetv4-in1k";
 const CAPTIONS_BUNDLE = "florence-2-base-ft";
+const PROSE_BUNDLE = "lamini-flan-t5-248m";
 
 type PipelineKind = "embed" | "ocr" | "faces" | "tags" | "captions";
 
@@ -96,6 +97,7 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
   const [installingFaces, setInstallingFaces] = useState(false);
   const [installingTags, setInstallingTags] = useState(false);
   const [installingCaptions, setInstallingCaptions] = useState(false);
+  const [installingProse, setInstallingProse] = useState(false);
   const [download, setDownload] = useState<ModelProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -222,6 +224,25 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
     }
   }
 
+  async function installProse() {
+    setInstallingProse(true);
+    setError(null);
+    setDownload(null);
+    try {
+      setStatus(await api.installProseModels());
+      await updatePrefs((prefs) => {
+        prefs.ai.memoryProse = true;
+        return prefs;
+      });
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setInstallingProse(false);
+      setDownload(null);
+    }
+  }
+
   async function clearEmbeddings() {
     if (
       !window.confirm(
@@ -303,6 +324,25 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
     setBusy(true);
     try {
       await api.clearCaptions();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearMemoryProse() {
+    if (
+      !window.confirm(
+        "Delete cached memory prose?\n\nOpening a memory will regenerate lines when memory prose is enabled.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.clearMemoryProse();
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -450,13 +490,20 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
   const facesReady = status?.facesReady ?? false;
   const tagsReady = status?.tagsReady ?? false;
   const captionsReady = status?.captionsReady ?? false;
+  const proseReady = status?.proseReady ?? false;
   const installing =
-    installingSemantic || installingOcr || installingFaces || installingTags || installingCaptions;
+    installingSemantic ||
+    installingOcr ||
+    installingFaces ||
+    installingTags ||
+    installingCaptions ||
+    installingProse;
   const downloadPct =
     download && download.total > 0
       ? Math.min(100, Math.round((100 * download.downloaded) / download.total))
       : null;
-  const anyReady = semanticReady || ocrReady || facesReady || tagsReady || captionsReady;
+  const anyReady =
+    semanticReady || ocrReady || facesReady || tagsReady || captionsReady || proseReady;
 
   const installedBytes = (bundle: string) =>
     formatBytes(
@@ -608,6 +655,41 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
         />
 
         <AiPipelineRow
+          modelLabel="Memory prose (LaMini-Flan-T5)"
+          modelName={
+            proseReady
+              ? "LaMini-Flan-T5 248M"
+              : formatBytes(status?.proseDownloadBytes ?? 0)
+          }
+          license="CC-BY-NC-4.0"
+          installed={installedBytes(PROSE_BUNDLE)}
+          ready={proseReady}
+          installing={installingProse}
+          downloadPct={installingProse ? downloadPct : null}
+          download={installingProse ? download : null}
+          installLabel="Download prose model"
+          onInstall={() => void installProse()}
+          onRemove={() => void removeBundle(PROSE_BUNDLE, "memory prose")}
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Memory prose"
+          done={0}
+          total={0}
+          pending={0}
+          failed={0}
+          running={false}
+          paused={false}
+          lastPath={null}
+          lastError={null}
+          onPause={() => undefined}
+          onResume={() => undefined}
+          onClear={() => void clearMemoryProse()}
+          clearLabel="Clear cached prose"
+          busy={busy}
+          onDemandNote="Runs when you open a memory — no library-wide queue."
+        />
+
+        <AiPipelineRow
           modelLabel="Text recognition (OCR)"
           modelName={
             ocrReady
@@ -744,6 +826,7 @@ function AiPipelineRow({
   onClear,
   clearLabel,
   busy,
+  onDemandNote,
 }: {
   modelLabel: string;
   modelName: string;
@@ -773,6 +856,8 @@ function AiPipelineRow({
   onClear: () => void;
   clearLabel: string;
   busy: boolean;
+  /** When set, hide library progress and show this note instead. */
+  onDemandNote?: string;
 }) {
   const status = pipelineStatus({ ready, running, paused, pending, failed });
   const pct = progressPct(done, total);
@@ -834,51 +919,57 @@ function AiPipelineRow({
         <div className="ai-pipeline-progress-head">
           <span className="developer-card-label">{progressLabel}</span>
           <span className={`ai-pipeline-badge is-${status}`} aria-live="polite">
-            {statusLabel(status, pending, failed)}
+            {onDemandNote
+              ? ready
+                ? "On demand"
+                : "Waiting"
+              : statusLabel(status, pending, failed)}
           </span>
         </div>
 
-        <div className="ai-pipeline-count">
-          <strong>
-            {ready ? `${done} / ${total}` : "—"}
-          </strong>
-          {ready && total > 0 && (
-            <span className="muted">{pct}%</span>
-          )}
-        </div>
+        {onDemandNote ? (
+          <p className="muted">{onDemandNote}</p>
+        ) : (
+          <>
+            <div className="ai-pipeline-count">
+              <strong>{ready ? `${done} / ${total}` : "—"}</strong>
+              {ready && total > 0 && <span className="muted">{pct}%</span>}
+            </div>
 
-        <div
-          className={`ai-pipeline-track ${status === "running" ? "is-active" : ""}`}
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={ready ? pct : 0}
-          aria-label={progressLabel}
-        >
-          <div
-            className="ai-pipeline-fill"
-            style={{ width: ready ? `${pct}%` : "0%" }}
-          />
-        </div>
+            <div
+              className={`ai-pipeline-track ${status === "running" ? "is-active" : ""}`}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={ready ? pct : 0}
+              aria-label={progressLabel}
+            >
+              <div
+                className="ai-pipeline-fill"
+                style={{ width: ready ? `${pct}%` : "0%" }}
+              />
+            </div>
 
-        {status === "running" && currentFile && (
-          <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
-            {currentFile}
-          </p>
-        )}
-        {status === "paused" && currentFile && (
-          <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
-            Last: {currentFile}
-          </p>
-        )}
-        {lastError && (status === "failed" || status === "pending" || failed > 0) && (
-          <p className="ai-pipeline-error" title={lastError} role="status">
-            {lastError}
-          </p>
+            {status === "running" && currentFile && (
+              <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
+                {currentFile}
+              </p>
+            )}
+            {status === "paused" && currentFile && (
+              <p className="ai-pipeline-file muted" title={lastPath ?? undefined}>
+                Last: {currentFile}
+              </p>
+            )}
+            {lastError && (status === "failed" || status === "pending" || failed > 0) && (
+              <p className="ai-pipeline-error" title={lastError} role="status">
+                {lastError}
+              </p>
+            )}
+          </>
         )}
 
         <div className="ai-pipeline-actions">
-          {showPause && (
+          {!onDemandNote && showPause && (
             <button
               type="button"
               className="primary"
@@ -888,7 +979,7 @@ function AiPipelineRow({
               Pause
             </button>
           )}
-          {showResume && (
+          {!onDemandNote && showResume && (
             <button
               type="button"
               className="primary"

@@ -568,6 +568,17 @@ function AiSection({
             })
           }
         />
+        <ToggleRow
+          label="Memory prose"
+          description="Polish memory cards with a short offline sentence (LaMini-Flan-T5). Runs when you open a memory."
+          checked={prefs.ai.memoryProse ?? false}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.memoryProse = v;
+              return p;
+            })
+          }
+        />
         <ChoiceRow
           label="Background processing"
           description="Choose whether on-device AI and Places jobs run continuously or only after inactivity."

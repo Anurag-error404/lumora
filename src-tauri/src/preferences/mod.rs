@@ -157,6 +157,12 @@ pub struct AiPrefs {
     /// Active library option id for image captions.
     #[serde(default = "default_captions_model")]
     pub captions_model: String,
+    /// Active library option id for memory prose.
+    #[serde(default = "default_prose_model")]
+    pub prose_model: String,
+    /// When true and the prose model is installed, memories get a polished sentence.
+    #[serde(default)]
+    pub memory_prose: bool,
 }
 
 fn default_semantic_model() -> String {
@@ -173,6 +179,9 @@ fn default_tags_model() -> String {
 }
 fn default_captions_model() -> String {
     "florence-2-base-ft".into()
+}
+fn default_prose_model() -> String {
+    "lamini-flan-t5-248m".into()
 }
 
 impl Default for AiPrefs {
@@ -191,6 +200,8 @@ impl Default for AiPrefs {
             faces_model: default_faces_model(),
             tags_model: default_tags_model(),
             captions_model: default_captions_model(),
+            prose_model: default_prose_model(),
+            memory_prose: false,
         }
     }
 }

@@ -209,14 +209,21 @@ export type MlStatus = {
   facesReady: boolean;
   tagsReady: boolean;
   captionsReady: boolean;
+  proseReady: boolean;
   models: ModelInfo[];
   semanticDownloadBytes: number;
   ocrDownloadBytes: number;
   facesDownloadBytes: number;
   tagsDownloadBytes: number;
   captionsDownloadBytes: number;
+  proseDownloadBytes: number;
   installedBytes: number;
   modelsDir: string;
+};
+
+export type ProseStatus = {
+  modelReady: boolean;
+  enabled: boolean;
 };
 
 export type EmbedProgress = {
@@ -390,9 +397,14 @@ export type MemorySummary = {
   id: string;
   kind: MemoryKind;
   title: string;
+  /** Compact meta (dates / counts). Prefer `insight` for display. */
   subtitle: string;
+  /** Narrative line: prose → caption insight → warm template. */
+  insight: string;
   /** Florence caption quote when available (v1.5). */
   quote: string | null;
+  /** Optional on-device seq2seq one-liner when memory prose is enabled. */
+  prose: string | null;
   assetCount: number;
   coverAssetId: string | null;
   coverThumbnailPath: string | null;
@@ -565,6 +577,8 @@ export type Preferences = {
     tagsModel?: string;
     captions: boolean;
     captionsModel?: string;
+    memoryProse?: boolean;
+    proseModel?: string;
   };
   privacy: {
     autoLockMinutes: number;
@@ -795,6 +809,9 @@ export const api = {
   clearFaceData: () => invoke<number>("clear_face_data"),
   installTagsModels: () => invoke<MlStatus>("install_tags_models"),
   installCaptionsModels: () => invoke<MlStatus>("install_captions_models"),
+  installProseModels: () => invoke<MlStatus>("install_prose_models"),
+  proseStatus: () => invoke<ProseStatus>("prose_status"),
+  clearMemoryProse: () => invoke<number>("clear_memory_prose"),
   tagsStatus: () => invoke<TagsStatus>("tags_status"),
   tagsProgress: () => invoke<TagsProgress>("tags_progress"),
   kickTags: () => invoke<void>("kick_tags"),
@@ -880,6 +897,11 @@ export const api = {
     invoke<MemorySummary[]>("list_memories", { limit }),
   getMemory: (memoryId: string) =>
     invoke<MemoryDetail>("get_memory", {
+      memoryId,
+      memory_id: memoryId,
+    }),
+  enrichMemoryProse: (memoryId: string) =>
+    invoke<MemorySummary>("enrich_memory_prose", {
       memoryId,
       memory_id: memoryId,
     }),

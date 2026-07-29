@@ -96,15 +96,28 @@ pub fn load_embeddings(
     if asset_ids.is_empty() {
         return Ok(out);
     }
-    let mut stmt = conn.prepare(
-        "SELECT asset_id, vector FROM asset_embeddings
-         WHERE model_id = ?1 AND asset_id = ?2",
-    )?;
-    for id in asset_ids {
-        let row = stmt.query_row(params![IMAGE_MODEL_ID, id], |r| {
+    // Batch in chunks — one query per chunk instead of one per asset.
+    const CHUNK: usize = 200;
+    for chunk in asset_ids.chunks(CHUNK) {
+        let placeholders = std::iter::repeat("?")
+        .take(chunk.len())
+        .collect::<Vec<_>>()
+        .join(",");
+        let sql = format!(
+            "SELECT asset_id, vector FROM asset_embeddings
+             WHERE model_id = ?1 AND asset_id IN ({placeholders})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<rusqlite::types::Value> = Vec::with_capacity(1 + chunk.len());
+        params.push(IMAGE_MODEL_ID.to_string().into());
+        for id in chunk {
+            params.push(id.clone().into());
+        }
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-        });
-        if let Ok((aid, blob)) = row {
+        })?;
+        for row in rows {
+            let (aid, blob) = row?;
             if let Ok(v) = vector::decode(&blob) {
                 out.insert(aid, v);
             }
