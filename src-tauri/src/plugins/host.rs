@@ -54,8 +54,6 @@ pub struct ActionResult {
 struct RunContext {
     log_lines: Vec<PluginLogLine>,
     start: Instant,
-    assets_affected: u32,
-    assets_skipped: u32,
 }
 
 impl RunContext {
@@ -63,8 +61,6 @@ impl RunContext {
         Self {
             log_lines: Vec::new(),
             start: Instant::now(),
-            assets_affected: 0,
-            assets_skipped: 0,
         }
     }
 

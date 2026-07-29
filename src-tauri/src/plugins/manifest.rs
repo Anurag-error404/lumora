@@ -156,11 +156,6 @@ impl PluginManifest {
 
         Ok(())
     }
-
-    /// Returns true if the plugin requires a JS entry point.
-    pub fn has_script(&self) -> bool {
-        self.main.is_some()
-    }
 }
 
 #[cfg(test)]

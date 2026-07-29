@@ -1,16 +1,13 @@
-//! Lumora plugin subsystem (Phase 3 / Milestone 1 — Registry).
+//! Lumora plugin subsystem (Phase 3 / Milestone 1 - Registry).
 //!
 //! # Module layout
 //!
-//! ```
-//! src-tauri/src/plugins/
-//!   mod.rs        — public re-exports and top-level scan helper
-//!   manifest.rs   — parse + validate lumora.plugin.json
-//!   registry.rs   — scan dir, install, remove
-//!   permissions.rs — permission token checks
-//!   history.rs    — read/write/trim history.jsonl per plugin
-//!   host.rs       — JS runtime + lumora.* bindings (stub until M2)
-//! ```
+//! - `mod.rs` - public re-exports and top-level scan helper
+//! - `manifest.rs` - parse + validate lumora.plugin.json
+//! - `registry.rs` - scan dir, install, remove
+//! - `permissions.rs` - permission token checks
+//! - `history.rs` - read/write/trim history.jsonl per plugin
+//! - `host.rs` - JS runtime + lumora.* bindings
 
 pub mod analyze;
 pub mod editor;

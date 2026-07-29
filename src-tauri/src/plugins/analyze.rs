@@ -21,17 +21,6 @@ pub struct PluginAnalysis {
     pub has_export: bool,
 }
 
-const KNOWN_PERMISSIONS: &[&str] = &[
-    "read:assets",
-    "read:metadata",
-    "write:metadata",
-    "rename:filesystem",
-    "move:filesystem",
-    "copy:filesystem",
-    "delete:filesystem",
-    "export:assets",
-];
-
 pub fn analyze_main_js(source: &str) -> PluginAnalysis {
     let mut permissions = std::collections::BTreeSet::new();
     let mut issues = Vec::new();
@@ -149,10 +138,6 @@ pub fn validate_manifest_fields(
         ));
     }
     issues
-}
-
-pub fn known_permissions() -> &'static [&'static str] {
-    KNOWN_PERMISSIONS
 }
 
 fn issue(severity: &str, code: &str, message: &str, line: Option<u32>) -> PluginValidationIssue {
