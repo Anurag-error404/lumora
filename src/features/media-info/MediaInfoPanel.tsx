@@ -12,6 +12,7 @@ import {
   type AssetOrganisation,
   type AssetSummary,
   type AssetText,
+  type AssetCaption,
   type FaceBox,
 } from "../../lib/tauri";
 
@@ -29,6 +30,8 @@ export function MediaInfoPanel({
   const [orgError, setOrgError] = useState<string | null>(null);
   const [assetText, setAssetText] = useState<AssetText | null>(null);
   const [loadingText, setLoadingText] = useState(true);
+  const [assetCaption, setAssetCaption] = useState<AssetCaption | null>(null);
+  const [loadingCaption, setLoadingCaption] = useState(true);
   const [faces, setFaces] = useState<FaceBox[]>([]);
   const [loadingFaces, setLoadingFaces] = useState(true);
   const [autoTags, setAutoTags] = useState<AssetLabel[]>([]);
@@ -60,6 +63,25 @@ export function MediaInfoPanel({
       })
       .finally(() => {
         if (!cancelled) setLoadingOrg(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingCaption(true);
+    void api
+      .getAssetCaption(asset.id)
+      .then((data) => {
+        if (!cancelled) setAssetCaption(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetCaption(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCaption(false);
       });
     return () => {
       cancelled = true;
@@ -471,6 +493,24 @@ export function MediaInfoPanel({
               <p className="muted media-info-empty">
                 No text extracted yet. Install OCR models in Settings to enable
                 on-device recognition.
+              </p>
+            )}
+          </section>
+
+          <section className="media-info-section">
+            <h3>Image caption</h3>
+            {loadingCaption ? (
+              <p className="muted media-info-empty">Checking captions…</p>
+            ) : assetCaption?.caption?.trim() ? (
+              <div className="media-info-kv">
+                <div className="media-info-row stacked">
+                  <span>Florence-2</span>
+                  <strong className="media-info-ocr-text">{assetCaption.caption}</strong>
+                </div>
+              </div>
+            ) : (
+              <p className="muted media-info-empty">
+                No caption yet. Install Florence-2 and enable image captions in Settings → AI.
               </p>
             )}
           </section>

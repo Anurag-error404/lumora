@@ -204,11 +204,11 @@ fn search_assets_impl(
         // Subquery keeps MATCH on the FTS table name (required by SQLite) while
         // still exposing bm25 rank. OCR text is weighted highest so a keyword
         // printed in a photo outranks a weak filename coincidence.
-        // Weights: filename, tags, camera, lens, ocr_text, people, auto_tags
+        // Weights: filename, tags, camera, lens, ocr_text, people, auto_tags, caption.
         joins.push_str(
             " JOIN (
                 SELECT rowid, asset_id,
-                       bm25(assets_fts, 5.0, 4.0, 1.0, 1.0, 12.0, 6.0, 3.0) AS rank
+                       bm25(assets_fts, 5.0, 4.0, 1.0, 1.0, 12.0, 6.0, 3.0, 8.0) AS rank
                 FROM assets_fts
                 WHERE assets_fts MATCH ?
               ) f ON f.asset_id = a.id",

@@ -9,6 +9,7 @@ use zeroize::Zeroize;
 
 use crate::error::AppResult;
 use crate::faces::worker::FaceWorker;
+use crate::captions::worker::CaptionsWorker;
 use crate::history::HistoryStacks;
 use crate::indexer::queue::IndexerQueue;
 use crate::ocr::worker::OcrWorker;
@@ -79,6 +80,7 @@ pub struct AppState {
     pub faces: Arc<FaceWorker>,
     pub places: Arc<PlacesWorker>,
     pub tags: Arc<TagsWorker>,
+    pub captions: Arc<CaptionsWorker>,
     pub history: Mutex<HistoryStacks>,
     /// Set to true by `cancel_import` to abort an in-flight import.
     pub import_cancel: Arc<AtomicBool>,
@@ -97,6 +99,7 @@ impl AppState {
         faces: Arc<FaceWorker>,
         places: Arc<PlacesWorker>,
         tags: Arc<TagsWorker>,
+        captions: Arc<CaptionsWorker>,
     ) -> Self {
         Self {
             paths,
@@ -107,6 +110,7 @@ impl AppState {
             faces,
             places,
             tags,
+            captions,
             history: Mutex::new(HistoryStacks::default()),
             import_cancel: Arc::new(AtomicBool::new(false)),
             vault: Mutex::new(None),

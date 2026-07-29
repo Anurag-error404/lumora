@@ -11,6 +11,7 @@ library. Typical terms:
 | Semantic search | CLIP ViT-B/32 (OpenAI / community ONNX) | MIT |
 | OCR | RapidOCR / PaddleOCR PP-OCR | Apache-2.0 |
 | Auto-tags | MobileNetV4 (timm / ImageNet) | Apache-2.0 |
+| Image captions | onnx-community Florence-2-base-ft | MIT |
 | Faces | InsightFace buffalo_l / buffalo_s | InsightFace **non-commercial research** terms |
 
 InsightFace face models are opt-in. Do **not** use them in commercial products

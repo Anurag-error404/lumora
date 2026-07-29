@@ -137,6 +137,8 @@ pub struct AiPrefs {
     pub face_recognition: bool,
     pub object_detection: bool,
     pub ocr: bool,
+    #[serde(default)]
+    pub captions: bool,
     pub auto_albums: bool,
     pub processing_device: String,
     pub background_processing: String,
@@ -152,6 +154,9 @@ pub struct AiPrefs {
     /// Active library option id for auto-tags.
     #[serde(default = "default_tags_model")]
     pub tags_model: String,
+    /// Active library option id for image captions.
+    #[serde(default = "default_captions_model")]
+    pub captions_model: String,
 }
 
 fn default_semantic_model() -> String {
@@ -166,6 +171,9 @@ fn default_faces_model() -> String {
 fn default_tags_model() -> String {
     "mobilenetv4-small".into()
 }
+fn default_captions_model() -> String {
+    "florence-2-base-ft".into()
+}
 
 impl Default for AiPrefs {
     fn default() -> Self {
@@ -174,6 +182,7 @@ impl Default for AiPrefs {
             face_recognition: false,
             object_detection: false,
             ocr: false,
+            captions: false,
             auto_albums: false,
             processing_device: "automatic".into(),
             background_processing: "always".into(),
@@ -181,6 +190,7 @@ impl Default for AiPrefs {
             ocr_model: default_ocr_model(),
             faces_model: default_faces_model(),
             tags_model: default_tags_model(),
+            captions_model: default_captions_model(),
         }
     }
 }

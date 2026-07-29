@@ -62,6 +62,8 @@ pub struct MlStatus {
     pub faces_ready: bool,
     /// Every file of the auto-tags bundle is installed and verified.
     pub tags_ready: bool,
+    /// Every file of the captions bundle is installed and verified.
+    pub captions_ready: bool,
     pub models: Vec<ModelInfo>,
     /// Bytes the semantic bundle would download if not yet installed.
     pub semantic_download_bytes: u64,
@@ -71,6 +73,8 @@ pub struct MlStatus {
     pub faces_download_bytes: u64,
     /// Bytes the auto-tags bundle would download if not yet installed.
     pub tags_download_bytes: u64,
+    /// Bytes the captions bundle would download if not yet installed.
+    pub captions_download_bytes: u64,
     pub installed_bytes: u64,
     pub models_dir: String,
 }
@@ -102,10 +106,12 @@ pub fn status(conn: &Connection, models_dir: &Path) -> AppResult<MlStatus> {
         ocr_ready: ocr_ready(conn)?,
         faces_ready: faces_ready(conn)?,
         tags_ready: tags_ready(conn)?,
+        captions_ready: captions_ready(conn)?,
         semantic_download_bytes: catalog::bundle_size(catalog::SEMANTIC_BUNDLE),
         ocr_download_bytes: catalog::bundle_size(catalog::OCR_BUNDLE),
         faces_download_bytes: catalog::bundle_size(catalog::FACES_BUNDLE),
         tags_download_bytes: catalog::bundle_size(catalog::TAGS_BUNDLE),
+        captions_download_bytes: catalog::bundle_size(catalog::CAPTIONS_BUNDLE),
         installed_bytes,
         models_dir: models_dir.display().to_string(),
         models,
@@ -146,6 +152,7 @@ pub fn library_status(
             library::Capability::Ocr => prefs.ocr_model.as_str(),
             library::Capability::Faces => prefs.faces_model.as_str(),
             library::Capability::AutoTags => prefs.tags_model.as_str(),
+            library::Capability::Captions => prefs.captions_model.as_str(),
             library::Capability::Duplicates | library::Capability::BlurDetection => {
                 library::default_option(opt.capability).id
             }
@@ -221,6 +228,10 @@ pub fn tags_ready(conn: &Connection) -> AppResult<bool> {
         }
     }
     Ok(true)
+}
+
+pub fn captions_ready(conn: &Connection) -> AppResult<bool> {
+    bundle_ready(conn, catalog::CAPTIONS_BUNDLE)
 }
 
 #[derive(Debug, Clone)]
@@ -513,6 +524,21 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
                 let _ = crate::indexer::refresh_fts(conn, &asset_id);
             }
         }
+        if entry.bundle == catalog::CAPTIONS_BUNDLE {
+            let ids: Vec<String> = {
+                let mut stmt = conn.prepare("SELECT asset_id FROM asset_captions")?;
+                let rows = stmt.query_map([], |r| r.get(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            conn.execute("DELETE FROM asset_captions", [])?;
+            conn.execute(
+                "DELETE FROM ml_jobs WHERE kind = ?1",
+                params![ModelKind::Captions.as_str()],
+            )?;
+            for asset_id in ids {
+                let _ = crate::indexer::refresh_fts(conn, &asset_id);
+            }
+        }
     }
     tracing::info!(model = id, "model removed");
     Ok(())
@@ -594,6 +620,7 @@ mod tests {
         assert!(!st.semantic_ready);
         assert!(!st.ocr_ready);
         assert!(!st.faces_ready);
+        assert!(!st.captions_ready);
         assert!(st.models.iter().all(|m| !m.installed));
         assert_eq!(st.installed_bytes, 0);
         assert!(st.semantic_download_bytes > 0);

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::albums;
 use crate::blur;
+use crate::captions;
 use crate::diagnostics;
 use crate::duplicates;
 use crate::edit::{self, EditOps, EditResult, EditRevisionSummary, SaveMode, SavedEditOps};
@@ -1732,6 +1733,72 @@ pub fn list_asset_labels(
     state.with_db(|conn| tags::list_for_asset(conn, &asset_id))
 }
 
+/// Download Florence-2 for on-device image captions.
+#[tauri::command]
+pub async fn install_captions_models(app: AppHandle) -> AppResult<ml::MlStatus> {
+    let status = install_model_option(app.clone(), "florence-2-base-ft".into()).await?;
+    let state = app.state::<AppState>();
+    state.captions.invalidate();
+    state.captions.kick();
+    Ok(status)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptionsStatusDto {
+    pub model_ready: bool,
+    pub enabled: bool,
+    pub done: i64,
+    pub total: i64,
+}
+
+#[tauri::command]
+pub fn captions_status(state: State<'_, AppState>) -> AppResult<CaptionsStatusDto> {
+    let prefs = preferences::load(&state.paths.app_data)?;
+    state.with_db(|conn| {
+        let cov = captions::coverage(conn)?;
+        Ok(CaptionsStatusDto {
+            model_ready: captions::captions_ready(conn)?,
+            enabled: prefs.ai.captions,
+            done: cov.done,
+            total: cov.total,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn captions_progress(state: State<'_, AppState>) -> AppResult<captions::worker::CaptionsProgress> {
+    state.captions.progress()
+}
+
+#[tauri::command]
+pub fn kick_captions(state: State<'_, AppState>) -> AppResult<()> {
+    state.captions.kick();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn pause_captions(state: State<'_, AppState>) -> AppResult<()> {
+    state.captions.pause();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_captions(state: State<'_, AppState>) -> AppResult<usize> {
+    let n = state.with_db(captions::clear_all)?;
+    state.captions.invalidate();
+    state.captions.kick();
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn get_asset_caption(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<Option<captions::AssetCaption>> {
+    state.with_db(|conn| captions::get_for_asset(conn, &asset_id))
+}
+
 #[tauri::command]
 pub fn list_import_runs(
     state: State<'_, AppState>,
@@ -1830,6 +1897,10 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
                 prefs.ai.tags_model = opt.id.to_string();
                 prefs.ai.object_detection = true;
             }
+            ml::library::Capability::Captions => {
+                prefs.ai.captions_model = opt.id.to_string();
+                prefs.ai.captions = true;
+            }
             _ => {}
         }
         let _ = preferences::save(&app_data, &prefs);
@@ -1840,10 +1911,12 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
     state.ocr.invalidate();
     state.faces.invalidate();
     state.tags.invalidate();
+    state.captions.invalidate();
     state.embedder.kick();
     state.ocr.kick();
     state.faces.kick();
     state.tags.kick();
+    state.captions.kick();
     state.with_db(|conn| ml::status(conn, &models_dir))
 }
 
@@ -1893,6 +1966,10 @@ pub async fn set_active_model(
         ml::library::Capability::AutoTags => {
             prefs.ai.tags_model = opt.id.to_string();
         }
+        ml::library::Capability::Captions => {
+            prefs.ai.captions_model = opt.id.to_string();
+            prefs.ai.captions = true;
+        }
         _ => {}
     }
     preferences::save(&app_data, &prefs)?;
@@ -1902,6 +1979,7 @@ pub async fn set_active_model(
     state.ocr.invalidate();
     state.faces.invalidate();
     state.tags.invalidate();
+    state.captions.invalidate();
 
     if reprocess {
         let faces_dir = state.paths.faces_dir.clone();
@@ -1922,6 +2000,10 @@ pub async fn set_active_model(
                 let _ = state.with_db(tags::clear_all);
                 state.tags.kick();
             }
+            ml::library::Capability::Captions => {
+                let _ = state.with_db(captions::clear_all);
+                state.captions.kick();
+            }
             _ => {}
         }
     } else {
@@ -1929,6 +2011,7 @@ pub async fn set_active_model(
         state.ocr.kick();
         state.faces.kick();
         state.tags.kick();
+        state.captions.kick();
     }
 
     state.with_db(|conn| ml::library_status(conn, &prefs.ai))
@@ -1936,19 +2019,21 @@ pub async fn set_active_model(
 
 /// Wipe derived AI data for the chosen capabilities and re-queue background work.
 ///
-/// `kinds` accepts any of: `"semantic"`, `"ocr"`, `"faces"`, `"tags"`, `"all"`.
+/// `kinds` accepts any of: `"semantic"`, `"ocr"`, `"faces"`, `"tags"`, `"captions"`, `"all"`.
 #[tauri::command]
 pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult<ReprocessResult> {
     let mut want_semantic = false;
     let mut want_ocr = false;
     let mut want_faces = false;
     let mut want_tags = false;
+    let mut want_captions = false;
     for kind in &kinds {
         if kind == "all" {
             want_semantic = true;
             want_ocr = true;
             want_faces = true;
             want_tags = true;
+            want_captions = true;
             continue;
         }
         match ml::library::Capability::from_str(kind) {
@@ -1956,17 +2041,18 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
             Some(ml::library::Capability::Ocr) => want_ocr = true,
             Some(ml::library::Capability::Faces) => want_faces = true,
             Some(ml::library::Capability::AutoTags) => want_tags = true,
+            Some(ml::library::Capability::Captions) => want_captions = true,
             Some(ml::library::Capability::Duplicates | ml::library::Capability::BlurDetection) => {
                 // Native capabilities — nothing to reprocess in AI queues.
             }
             None => {
                 return Err(AppError::msg(format!(
-                    "unknown reprocess kind: {kind} (use semantic, ocr, faces, tags, or all)"
+                    "unknown reprocess kind: {kind} (use semantic, ocr, faces, tags, captions, or all)"
                 )));
             }
         }
     }
-    if !want_semantic && !want_ocr && !want_faces && !want_tags {
+    if !want_semantic && !want_ocr && !want_faces && !want_tags && !want_captions {
         return Err(AppError::msg(
             "select at least one AI capability to reprocess",
         ));
@@ -1979,6 +2065,7 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
             ocr_cleared: 0,
             faces_cleared: 0,
             tags_cleared: 0,
+            captions_cleared: 0,
         };
         if want_semantic {
             out.embeddings_cleared = ml::clear_embeddings(conn)?;
@@ -1991,6 +2078,9 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
         }
         if want_tags {
             out.tags_cleared = tags::clear_all(conn)?;
+        }
+        if want_captions {
+            out.captions_cleared = captions::clear_all(conn)?;
         }
         Ok(out)
     })?;
@@ -2011,6 +2101,10 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
         state.tags.invalidate();
         state.tags.kick();
     }
+    if want_captions {
+        state.captions.invalidate();
+        state.captions.kick();
+    }
     Ok(result)
 }
 
@@ -2021,6 +2115,7 @@ pub struct ReprocessResult {
     pub ocr_cleared: usize,
     pub faces_cleared: usize,
     pub tags_cleared: usize,
+    pub captions_cleared: usize,
 }
 
 #[tauri::command]

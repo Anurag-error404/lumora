@@ -208,11 +208,13 @@ export type MlStatus = {
   ocrReady: boolean;
   facesReady: boolean;
   tagsReady: boolean;
+  captionsReady: boolean;
   models: ModelInfo[];
   semanticDownloadBytes: number;
   ocrDownloadBytes: number;
   facesDownloadBytes: number;
   tagsDownloadBytes: number;
+  captionsDownloadBytes: number;
   installedBytes: number;
   modelsDir: string;
 };
@@ -300,6 +302,32 @@ export type AssetLabel = {
   label: string;
   score: number;
   rank: number;
+  modelId: string;
+  createdAt: string;
+};
+
+export type CaptionsProgress = {
+  pending: number;
+  done: number;
+  total: number;
+  failed: number;
+  running: boolean;
+  paused: boolean;
+  lastPath: string | null;
+  lastError: string | null;
+  modelReady: boolean;
+};
+
+export type CaptionsStatus = {
+  modelReady: boolean;
+  enabled: boolean;
+  done: number;
+  total: number;
+};
+
+export type AssetCaption = {
+  assetId: string;
+  caption: string;
   modelId: string;
   createdAt: string;
 };
@@ -511,6 +539,8 @@ export type Preferences = {
     ocrModel?: string;
     facesModel?: string;
     tagsModel?: string;
+    captions: boolean;
+    captionsModel?: string;
   };
   privacy: {
     autoLockMinutes: number;
@@ -740,6 +770,7 @@ export const api = {
   pauseFaces: () => invoke<void>("pause_faces"),
   clearFaceData: () => invoke<number>("clear_face_data"),
   installTagsModels: () => invoke<MlStatus>("install_tags_models"),
+  installCaptionsModels: () => invoke<MlStatus>("install_captions_models"),
   tagsStatus: () => invoke<TagsStatus>("tags_status"),
   tagsProgress: () => invoke<TagsProgress>("tags_progress"),
   kickTags: () => invoke<void>("kick_tags"),
@@ -747,6 +778,16 @@ export const api = {
   clearAutoTags: () => invoke<number>("clear_auto_tags"),
   listAssetLabels: (assetId: string) =>
     invoke<AssetLabel[]>("list_asset_labels", {
+      assetId,
+      asset_id: assetId,
+    }),
+  captionsStatus: () => invoke<CaptionsStatus>("captions_status"),
+  captionsProgress: () => invoke<CaptionsProgress>("captions_progress"),
+  kickCaptions: () => invoke<void>("kick_captions"),
+  pauseCaptions: () => invoke<void>("pause_captions"),
+  clearCaptions: () => invoke<number>("clear_captions"),
+  getAssetCaption: (assetId: string) =>
+    invoke<AssetCaption | null>("get_asset_caption", {
       assetId,
       asset_id: assetId,
     }),
@@ -800,12 +841,13 @@ export const api = {
       asset_id: assetId,
     }),
   reclusterFaces: () => invoke<number>("recluster_faces"),
-  reprocessAi: (kinds: Array<"semantic" | "ocr" | "faces" | "tags" | "all">) =>
+  reprocessAi: (kinds: Array<"semantic" | "ocr" | "faces" | "tags" | "captions" | "all">) =>
     invoke<{
       embeddingsCleared: number;
       ocrCleared: number;
       facesCleared: number;
       tagsCleared: number;
+      captionsCleared: number;
     }>("reprocess_ai", { kinds }),
   listPlaces: () => invoke<PlaceGroup[]>("list_places"),
   listPlaceAssets: (label: string, limit: number, offset: number) =>

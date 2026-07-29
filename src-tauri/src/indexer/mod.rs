@@ -614,8 +614,8 @@ pub fn refresh_fts_basic(
         params![asset_id],
     )?;
     conn.execute(
-        "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags)
-         VALUES (?1,?2,'',?3,?4,'','','')",
+        "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags, caption)
+         VALUES (?1,?2,'',?3,?4,'','','','')",
         params![
             asset_id,
             filename,
@@ -626,10 +626,11 @@ pub fn refresh_fts_basic(
     Ok(())
 }
 
-/// `(path, camera, lens, tag names, ocr, people, auto_tags)` — kept for call-site docs.
+/// `(path, camera, lens, tag names, ocr, people, auto_tags, caption)` — kept for call-site docs.
 pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
     let row: Option<(
         String,
+        Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
@@ -650,7 +651,8 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                     CASE WHEN instr(l.label, ',') > 0
                          THEN trim(substr(l.label, 1, instr(l.label, ',') - 1))
                          ELSE l.label END, ' ')
-                 FROM asset_labels l WHERE l.asset_id = assets.id)
+                 FROM asset_labels l WHERE l.asset_id = assets.id),
+                (SELECT caption FROM asset_captions WHERE asset_id = assets.id)
              FROM assets WHERE id = ?1",
             params![asset_id],
             |r| {
@@ -662,6 +664,7 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                     r.get(4)?,
                     r.get(5)?,
                     r.get(6)?,
+                    r.get(7)?,
                 ))
             },
         )
@@ -672,14 +675,14 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
         params![asset_id],
     )?;
 
-    if let Some((path, camera, lens, tags, ocr_text, people, auto_tags)) = row {
+    if let Some((path, camera, lens, tags, ocr_text, people, auto_tags, caption)) = row {
         let filename = Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         conn.execute(
-            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO assets_fts (asset_id, filename, tags, camera, lens, ocr_text, people, auto_tags, caption)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 asset_id,
                 filename,
@@ -688,7 +691,8 @@ pub fn refresh_fts(conn: &Connection, asset_id: &str) -> AppResult<()> {
                 lens.unwrap_or_default(),
                 ocr_text.unwrap_or_default(),
                 people.unwrap_or_default(),
-                auto_tags.unwrap_or_default()
+                auto_tags.unwrap_or_default(),
+                caption.unwrap_or_default()
             ],
         )?;
     }

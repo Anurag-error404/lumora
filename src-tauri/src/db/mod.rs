@@ -19,6 +19,7 @@ const MIGRATION_013: &str = include_str!("../../migrations/013_places.sql");
 const MIGRATION_014: &str = include_str!("../../migrations/014_auto_tags.sql");
 const MIGRATION_015: &str = include_str!("../../migrations/015_blur_score.sql");
 const MIGRATION_016: &str = include_str!("../../migrations/016_edit_history.sql");
+const MIGRATION_017: &str = include_str!("../../migrations/017_captions.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -287,6 +288,28 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         tracing::info!("applied migration 016_edit_history");
     }
 
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 17 {
+        conn.execute_batch(MIGRATION_017)?;
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM assets WHERE deleted_at IS NULL")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        for id in ids {
+            crate::indexer::refresh_fts(conn, &id)?;
+        }
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (17)", [])?;
+        tracing::info!("applied migration 017_captions");
+    }
+
     Ok(())
 }
 
@@ -439,13 +462,14 @@ mod tests {
         assert!(tables.iter().any(|t| t == "asset_labels"));
         assert!(tables.iter().any(|t| t == "import_runs"));
         assert!(tables.iter().any(|t| t == "asset_edits"));
+        assert!(tables.iter().any(|t| t == "asset_captions"));
 
         let version: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -476,6 +500,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 16);
+        assert_eq!(version2, 17);
     }
 }

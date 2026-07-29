@@ -127,7 +127,7 @@ bun run tauri build    # release bundle</code></pre>
               (path contains “screenshot”), Selfies, Panoramas, Documents,
               Receipts.
             </li>
-            <li>Open the <strong>info</strong> panel on any item for EXIF, tags, auto-tags, faces, and OCR text.</li>
+            <li>Open the <strong>info</strong> panel on any item for EXIF, tags, auto-tags, captions, faces, and OCR text.</li>
           </ul>
         </section>
 
@@ -138,7 +138,7 @@ bun run tauri build    # release bundle</code></pre>
             semantic results.
           </p>
           <ul>
-            <li>Plain text matches filename, tags, camera, OCR, people, auto-tags.</li>
+            <li>Plain text matches filename, tags, camera, OCR, people, auto-tags, captions.</li>
             <li>
               Filters such as <code>camera:iphone</code>,
               <code>rating&gt;3</code>, <code>before:2024-01-01</code>.
@@ -183,6 +183,14 @@ bun run tauri build    # release bundle</code></pre>
               </dd>
             </div>
             <div>
+              <dt>Image captions</dt>
+              <dd>
+                Florence-2 Base — short on-device descriptions. Shown in the info
+                panel and searchable. Enable <strong>Image captions</strong>
+                (~277&nbsp;MB download).
+              </dd>
+            </div>
+            <div>
               <dt>Model library</dt>
               <dd>
                 Switch backends per capability, install the active option, and
@@ -191,7 +199,7 @@ bun run tauri build    # release bundle</code></pre>
             </div>
           </dl>
           <p>
-            You can clear embeddings, OCR, faces, or auto-tags anytime without
+            You can clear embeddings, OCR, faces, auto-tags, or captions anytime without
             deleting original files.
           </p>
         </section>

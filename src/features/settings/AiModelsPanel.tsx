@@ -9,6 +9,7 @@ import {
   type ModelProgressEvent,
   type OcrProgress,
   type TagsProgress,
+  type CaptionsProgress,
 } from "../../lib/tauri";
 import type { PrefsUpdater } from "./settingsUi";
 
@@ -16,8 +17,9 @@ const SEMANTIC_BUNDLE = "clip-vit-b32";
 const OCR_BUNDLE = "rapidocr-ppv4";
 const FACES_BUNDLE = "insightface-buffalo-l";
 const TAGS_BUNDLE = "mobilenetv4-in1k";
+const CAPTIONS_BUNDLE = "florence-2-base-ft";
 
-type PipelineKind = "embed" | "ocr" | "faces" | "tags";
+type PipelineKind = "embed" | "ocr" | "faces" | "tags" | "captions";
 
 type PipelineStatus =
   | "waiting"
@@ -88,28 +90,32 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
   const [facesProgress, setFacesProgress] = useState<FacesProgress | null>(null);
   const [tagsProgress, setTagsProgress] = useState<TagsProgress | null>(null);
+  const [captionsProgress, setCaptionsProgress] = useState<CaptionsProgress | null>(null);
   const [installingSemantic, setInstallingSemantic] = useState(false);
   const [installingOcr, setInstallingOcr] = useState(false);
   const [installingFaces, setInstallingFaces] = useState(false);
   const [installingTags, setInstallingTags] = useState(false);
+  const [installingCaptions, setInstallingCaptions] = useState(false);
   const [download, setDownload] = useState<ModelProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [ml, embed, ocr, faces, tags] = await Promise.all([
+      const [ml, embed, ocr, faces, tags, captions] = await Promise.all([
         api.mlStatus(),
         api.embedProgress(),
         api.ocrProgress(),
         api.facesProgress(),
         api.tagsProgress(),
+        api.captionsProgress(),
       ]);
       setStatus(ml);
       setProgress(embed);
       setOcrProgress(ocr);
       setFacesProgress(faces);
       setTagsProgress(tags);
+      setCaptionsProgress(captions);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -200,6 +206,22 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
     }
   }
 
+  async function installCaptions() {
+    setInstallingCaptions(true);
+    setError(null);
+    setDownload(null);
+    try {
+      setStatus(await api.installCaptionsModels());
+      await api.kickCaptions();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setInstallingCaptions(false);
+      setDownload(null);
+    }
+  }
+
   async function clearEmbeddings() {
     if (
       !window.confirm(
@@ -276,7 +298,20 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
     }
   }
 
-  async function reprocess(kinds: Array<"semantic" | "ocr" | "faces" | "tags" | "all">) {
+  async function clearCaptions() {
+    if (!window.confirm("Delete all image captions?\n\nPhotos stay in your library. Captions will be regenerated once enabled.")) return;
+    setBusy(true);
+    try {
+      await api.clearCaptions();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reprocess(kinds: Array<"semantic" | "ocr" | "faces" | "tags" | "captions" | "all">) {
     const label =
       kinds[0] === "all"
         ? "semantic search, OCR, faces, and auto-tags"
@@ -363,6 +398,9 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
           case "tags":
             await api.pauseTags();
             break;
+          case "captions":
+            await api.pauseCaptions();
+            break;
         }
       } else {
         // Workers no-op when their feature toggle is off or global AI is paused.
@@ -379,6 +417,9 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
             break;
           case "tags":
             await api.kickTags();
+            break;
+          case "captions":
+            await api.kickCaptions();
             break;
         }
       }
@@ -398,6 +439,7 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
       if (kind === "ocr") prefs.ai.ocr = true;
       if (kind === "faces") prefs.ai.faceRecognition = true;
       if (kind === "tags") prefs.ai.objectDetection = true;
+      if (kind === "captions") prefs.ai.captions = true;
       if (kind === "embed") prefs.ai.semanticSearch = true;
       return prefs;
     });
@@ -407,13 +449,14 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
   const ocrReady = status?.ocrReady ?? false;
   const facesReady = status?.facesReady ?? false;
   const tagsReady = status?.tagsReady ?? false;
+  const captionsReady = status?.captionsReady ?? false;
   const installing =
-    installingSemantic || installingOcr || installingFaces || installingTags;
+    installingSemantic || installingOcr || installingFaces || installingTags || installingCaptions;
   const downloadPct =
     download && download.total > 0
       ? Math.min(100, Math.round((100 * download.downloaded) / download.total))
       : null;
-  const anyReady = semanticReady || ocrReady || facesReady || tagsReady;
+  const anyReady = semanticReady || ocrReady || facesReady || tagsReady || captionsReady;
 
   const installedBytes = (bundle: string) =>
     formatBytes(
@@ -484,6 +527,13 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
           </button>
           <button
             type="button"
+            onClick={() => void reprocess(["captions"])}
+            disabled={!captionsReady || busy}
+          >
+            Captions
+          </button>
+          <button
+            type="button"
             onClick={() => void reclusterPeople()}
             disabled={!facesReady || busy}
           >
@@ -525,6 +575,35 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
           onResume={() => void setPipelinePaused("embed", false)}
           onClear={() => void clearEmbeddings()}
           clearLabel="Clear embeddings"
+          busy={busy}
+        />
+        <AiPipelineRow
+          modelLabel="Image captions (Florence-2)"
+          modelName={captionsReady ? "Florence-2 Base" : formatBytes(status?.captionsDownloadBytes ?? 0)}
+          license="MIT"
+          installed={installedBytes(CAPTIONS_BUNDLE)}
+          ready={captionsReady}
+          installing={installingCaptions}
+          downloadPct={installingCaptions ? downloadPct : null}
+          download={installingCaptions ? download : null}
+          installLabel="Download caption models"
+          onInstall={() => void installCaptions()}
+          onRemove={() => void removeBundle(CAPTIONS_BUNDLE, "image captions")}
+          installDisabled={installing || busy}
+          removeDisabled={busy || installing}
+          progressLabel="Image captions"
+          done={captionsProgress?.done ?? 0}
+          total={captionsProgress?.total ?? 0}
+          pending={captionsProgress?.pending ?? 0}
+          failed={captionsProgress?.failed ?? 0}
+          running={captionsProgress?.running ?? false}
+          paused={captionsProgress?.paused ?? false}
+          lastPath={captionsProgress?.lastPath ?? null}
+          lastError={captionsProgress?.lastError ?? null}
+          onPause={() => void setPipelinePaused("captions", true)}
+          onResume={() => void setPipelinePaused("captions", false)}
+          onClear={() => void clearCaptions()}
+          clearLabel="Clear captions"
           busy={busy}
         />
 

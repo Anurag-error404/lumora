@@ -555,6 +555,19 @@ function AiSection({
             })
           }
         />
+        <ToggleRow
+          label="Image captions"
+          description="Generate private, on-device descriptions with Florence-2 for search."
+          checked={prefs.ai.captions}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.captions = v;
+              return p;
+            }).then(() => {
+              if (v) void api.kickCaptions();
+            })
+          }
+        />
         <ChoiceRow
           label="Background processing"
           description="Choose whether on-device AI and Places jobs run continuously or only after inactivity."

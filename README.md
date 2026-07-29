@@ -20,7 +20,7 @@ Repository: [github.com/Anurag-error404/lumora](https://github.com/Anurag-error4
 
 - **Local by design** — browse, search, and organise offline; models download only when you ask
 - **Built for scale** — virtualised grid, incremental indexer, watched folders
-- **Optional intelligence** — CLIP, OCR, faces, and auto-tags run on-device via ONNX
+- **Optional intelligence** — CLIP, OCR, faces, auto-tags, and captions run on-device via ONNX
 - **Safe cleanup** — exact vs near duplicates, blurry review, soft trash with undo
 - **Private vault** — encrypt albums and folders with Argon2id + XChaCha20-Poly1305
 
@@ -39,7 +39,7 @@ Repository: [github.com/Anurag-error404/lumora](https://github.com/Anurag-error4
 
 ### Search
 
-- Full-text search (filename, tags, camera, OCR, people, auto-tags)
+- Full-text search (filename, tags, camera, OCR, people, auto-tags, captions)
 - Filters such as `camera:iphone`, `rating>3`, `before:2024-01-01`
 - Natural-language semantic search when CLIP is installed
 - Recent search history in the toolbar and Discover
@@ -54,6 +54,7 @@ Install from **Settings → AI**. The app works fully with zero models.
 | OCR | RapidOCR PP-OCRv4 | Apache-2.0 · powers Documents / Receipts |
 | Faces / People | InsightFace buffalo_l | Non-commercial research · ≥80% front-facing faces kept |
 | Auto-tags | MobileNetV4 | Apache-2.0 · shown in info panel + searchable |
+| Image captions | Florence-2 Base | MIT · optional on-device captions + searchable |
 
 Switch backends in the **model library**, then re-run processing if needed. Derived data (embeddings, faces, OCR, labels) is clearable without touching originals.
 

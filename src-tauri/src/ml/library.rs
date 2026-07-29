@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::catalog::{
-    FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, SEMANTIC_BUNDLE, TAGS_BUNDLE,
-    TAGS_BUNDLE_MEDIUM,
+    CAPTIONS_BUNDLE, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, SEMANTIC_BUNDLE,
+    TAGS_BUNDLE, TAGS_BUNDLE_MEDIUM,
 };
 
 /// User-facing AI capability that can pick a backend.
@@ -19,6 +19,7 @@ pub enum Capability {
     Ocr,
     Faces,
     AutoTags,
+    Captions,
     Duplicates,
     BlurDetection,
 }
@@ -30,6 +31,7 @@ impl Capability {
             Self::Ocr => "ocr",
             Self::Faces => "faces",
             Self::AutoTags => "autoTags",
+            Self::Captions => "captions",
             Self::Duplicates => "duplicates",
             Self::BlurDetection => "blurDetection",
         }
@@ -43,6 +45,7 @@ impl Capability {
             "autoTags" | "tags" | "objectDetection" | "auto_tags" | "object_detection" => {
                 Some(Self::AutoTags)
             }
+            "captions" | "caption" => Some(Self::Captions),
             "duplicates" => Some(Self::Duplicates),
             "blurDetection" | "blur" => Some(Self::BlurDetection),
             _ => None,
@@ -55,6 +58,7 @@ impl Capability {
             Self::Ocr => "Text recognition (OCR)",
             Self::Faces => "Face detection & recognition",
             Self::AutoTags => "Image classification / auto-tags",
+            Self::Captions => "Image captions",
             Self::Duplicates => "Duplicate detection",
             Self::BlurDetection => "Blur detection",
         }
@@ -164,6 +168,17 @@ pub const LIBRARY: &[ModelOption] = &[
         default: false,
     },
     ModelOption {
+        id: "florence-2-base-ft",
+        capability: Capability::Captions,
+        bundle: Some(CAPTIONS_BUNDLE),
+        name: "Florence-2 Base",
+        summary: "On-device image captions via Florence-2. Optional; runs only when enabled.",
+        runtime: RuntimeKind::Onnx,
+        license: "MIT",
+        input_size: Some(768),
+        default: true,
+    },
+    ModelOption {
         id: "sha256-phash",
         capability: Capability::Duplicates,
         bundle: None,
@@ -219,6 +234,7 @@ mod tests {
             Capability::Ocr,
             Capability::Faces,
             Capability::AutoTags,
+            Capability::Captions,
             Capability::Duplicates,
             Capability::BlurDetection,
         ] {

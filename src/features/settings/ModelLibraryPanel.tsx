@@ -12,6 +12,7 @@ const CAPABILITY_ORDER = [
   "ocr",
   "faces",
   "autoTags",
+  "captions",
   "duplicates",
   "blurDetection",
 ];

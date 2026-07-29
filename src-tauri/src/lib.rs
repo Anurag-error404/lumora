@@ -1,5 +1,6 @@
 mod albums;
 mod blur;
+mod captions;
 mod commands;
 mod db;
 mod diagnostics;
@@ -164,6 +165,8 @@ pub fn run() {
             let places =
                 places::worker::PlacesWorker::new(paths.db_path.clone(), paths.app_data.clone());
             let tags = tags::worker::TagsWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let captions =
+                captions::worker::CaptionsWorker::new(paths.db_path.clone(), paths.app_data.clone());
             let state = AppState::new(
                 paths,
                 conn,
@@ -173,6 +176,7 @@ pub fn run() {
                 Arc::clone(&faces),
                 Arc::clone(&places),
                 Arc::clone(&tags),
+                Arc::clone(&captions),
             );
 
             spawn_auto_scan(
@@ -270,12 +274,19 @@ pub fn run() {
             pause_faces,
             clear_face_data,
             install_tags_models,
+            install_captions_models,
             tags_status,
             tags_progress,
             kick_tags,
             pause_tags,
             clear_auto_tags,
             list_asset_labels,
+            captions_status,
+            captions_progress,
+            kick_captions,
+            pause_captions,
+            clear_captions,
+            get_asset_caption,
             list_import_runs,
             model_library,
             install_model_option,

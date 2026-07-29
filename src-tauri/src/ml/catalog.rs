@@ -27,6 +27,18 @@ pub enum ModelKind {
     AutoTag,
     /// Combined auto-tags job kind in `ml_jobs`.
     Tags,
+    /// Florence-2 vision encoder.
+    CaptionVision,
+    /// Florence-2 prompt token embedding model.
+    CaptionEmbed,
+    /// Florence-2 encoder.
+    CaptionEncoder,
+    /// Florence-2 decoder.
+    CaptionDecoder,
+    /// Florence-2 tokenizer JSON.
+    CaptionTokenizer,
+    /// Combined image-captioning job kind in `ml_jobs`.
+    Captions,
 }
 
 impl ModelKind {
@@ -42,6 +54,12 @@ impl ModelKind {
             Self::Faces => "faces",
             Self::AutoTag => "auto_tag",
             Self::Tags => "tags",
+            Self::CaptionVision => "caption_vision",
+            Self::CaptionEmbed => "caption_embed",
+            Self::CaptionEncoder => "caption_encoder",
+            Self::CaptionDecoder => "caption_decoder",
+            Self::CaptionTokenizer => "caption_tokenizer",
+            Self::Captions => "captions",
         }
     }
 }
@@ -77,6 +95,9 @@ pub const FACES_BUNDLE: &str = "insightface-buffalo-l";
 
 /// ImageNet auto-tags: MobileNetV4-Conv-Small (timm) + class labels.
 pub const TAGS_BUNDLE: &str = "mobilenetv4-in1k";
+
+/// On-device image captions: Florence-2-base-ft (quantized ONNX).
+pub const CAPTIONS_BUNDLE: &str = "florence-2-base-ft";
 
 /// Lighter InsightFace buffalo_s (SCRFD + ArcFace).
 pub const FACES_BUNDLE_S: &str = "insightface-buffalo-s";
@@ -296,6 +317,67 @@ pub const CATALOG: &[CatalogEntry] = &[
         dim: None,
         license: "Apache-2.0",
     },
+    // —— Florence-2 captions ——
+    CatalogEntry {
+        id: "florence2-vision",
+        bundle: CAPTIONS_BUNDLE,
+        kind: ModelKind::CaptionVision,
+        version: "1",
+        file_name: "florence2-vision.onnx",
+        url: "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/onnx/vision_encoder_quantized.onnx",
+        sha256: "3b79d54f23f666f731549db23cb070c35a979ce19cbd9720e90e67a78dc9768c",
+        size_bytes: 93_746_540,
+        dim: None,
+        license: "MIT",
+    },
+    CatalogEntry {
+        id: "florence2-embed",
+        bundle: CAPTIONS_BUNDLE,
+        kind: ModelKind::CaptionEmbed,
+        version: "1",
+        file_name: "florence2-embed.onnx",
+        url: "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/onnx/embed_tokens_quantized.onnx",
+        sha256: "6b2258db1c8ee9b160576ccde3cd3814d83a2edaed0dd1c6ca9ff3c38fa62214",
+        size_bytes: 39_390_433,
+        dim: None,
+        license: "MIT",
+    },
+    CatalogEntry {
+        id: "florence2-encoder",
+        bundle: CAPTIONS_BUNDLE,
+        kind: ModelKind::CaptionEncoder,
+        version: "1",
+        file_name: "florence2-encoder.onnx",
+        url: "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/onnx/encoder_model_quantized.onnx",
+        sha256: "f4ad7a68f1fb875d3bcf735ea14a7021b7ba7e83baf7cf10289881b4ed6d9b85",
+        size_bytes: 43_651_493,
+        dim: None,
+        license: "MIT",
+    },
+    CatalogEntry {
+        id: "florence2-decoder",
+        bundle: CAPTIONS_BUNDLE,
+        kind: ModelKind::CaptionDecoder,
+        version: "1",
+        file_name: "florence2-decoder.onnx",
+        url: "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/onnx/decoder_model_quantized.onnx",
+        sha256: "c529b26bafce2ee76f886f3a0e374bb646b07a6d8b7640fd8a50d7a48843dd67",
+        size_bytes: 97_760_937,
+        dim: None,
+        license: "MIT",
+    },
+    CatalogEntry {
+        id: "florence2-tokenizer",
+        bundle: CAPTIONS_BUNDLE,
+        kind: ModelKind::CaptionTokenizer,
+        version: "1",
+        file_name: "florence2-tokenizer.json",
+        url: "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/tokenizer.json",
+        sha256: "d69dcdb2323e124ac4f800cb9863ddccea0d7bb11e16125e8df3bd60f2f8aeac",
+        size_bytes: 2_297_961,
+        dim: None,
+        license: "MIT",
+    },
 ];
 
 pub fn entry(id: &str) -> Option<&'static CatalogEntry> {
@@ -413,5 +495,13 @@ mod tests {
         assert_eq!(bundle(TAGS_BUNDLE_MEDIUM).count(), 2);
         assert!(bundle_size(FACES_BUNDLE_S) < 20_000_000);
         assert!(bundle_size(TAGS_BUNDLE_MEDIUM) > 30_000_000);
+    }
+
+    #[test]
+    fn captions_bundle_has_five_files_at_expected_size() {
+        assert_eq!(bundle(CAPTIONS_BUNDLE).count(), 5);
+        let bytes = bundle_size(CAPTIONS_BUNDLE);
+        assert!(bytes > 200_000_000);
+        assert!(bytes < 350_000_000);
     }
 }

@@ -294,6 +294,7 @@ pub fn apply_edit(
         let _ = crate::faces::invalidate_asset(conn, &faces_dir, &id);
     }
     let _ = crate::tags::invalidate_asset(conn, &id);
+    let _ = crate::captions::invalidate_asset(conn, &id);
     let asset = load_asset(conn, &id)?;
     Ok(EditResult {
         asset,
