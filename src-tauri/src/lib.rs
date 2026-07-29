@@ -16,6 +16,7 @@ mod glibc_compat;
 mod history;
 mod indexer;
 mod logging;
+mod memories;
 mod ml;
 mod models;
 mod ocr;
@@ -303,6 +304,10 @@ pub fn run() {
             recluster_faces,
             list_places,
             list_place_assets,
+            list_memories,
+            get_memory,
+            list_memory_assets,
+            save_memory_as_album,
             places_progress,
             kick_places,
             clear_places,

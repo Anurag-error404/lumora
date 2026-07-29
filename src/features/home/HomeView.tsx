@@ -2,7 +2,14 @@ import { useEffect } from "react";
 import { Icon, type IconName } from "../../components/icons";
 import { SafeImage } from "../../components/SafeImage";
 import { MediaFallback } from "../../components/MediaFallback";
-import { api, fileSrc, type AssetSummary, type LibraryStats, type SmartCounts } from "../../lib/tauri";
+import {
+  api,
+  fileSrc,
+  type AssetSummary,
+  type LibraryStats,
+  type MemorySummary,
+  type SmartCounts,
+} from "../../lib/tauri";
 import type { View } from "../../types/app";
 
 type QuickAction = {
@@ -16,8 +23,8 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: "library", label: "Library", hint: "Browse everything", icon: "library" },
   { id: "timeline", label: "Timeline", hint: "By date", icon: "calendar" },
   { id: "favorites", label: "Favorites", hint: "Your best shots", icon: "star" },
+  { id: "memories", label: "Memories", hint: "On this day & trips", icon: "sparkle" },
   { id: "recentViewed", label: "Recently viewed", hint: "Pick up where you left", icon: "eye" },
-  { id: "locked", label: "Locked folder", hint: "Encrypted privacy", icon: "lock" },
   { id: "albums", label: "Albums", hint: "Organise collections", icon: "album" },
 ];
 
@@ -66,18 +73,22 @@ export function HomeView({
   stats,
   smartCounts,
   recent,
+  memories,
   onRecentLoaded,
   onNavigate,
   onImport,
   onOpenAsset,
+  onOpenMemory,
 }: {
   stats: LibraryStats | null;
   smartCounts: SmartCounts | null;
   recent: AssetSummary[];
+  memories: MemorySummary[];
   onRecentLoaded: (rows: AssetSummary[]) => void;
   onNavigate: (view: View) => void;
   onImport: () => void;
   onOpenAsset: (id: string) => void;
+  onOpenMemory: (memoryId: string) => void;
 }) {
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +164,47 @@ export function HomeView({
           ))}
         </div>
       </section>
+
+      {!empty && memories.length > 0 && (
+        <section className="home-section">
+          <header className="home-section-head">
+            <div>
+              <h2>Memories</h2>
+              <p className="muted">On this day, weekend trips, and people in places.</p>
+            </div>
+            <button className="secondary" onClick={() => onNavigate("memories")}>
+              See all
+            </button>
+          </header>
+          <div className="home-memory-strip">
+            {memories.slice(0, 6).map((memory) => {
+              const src = memory.coverThumbnailPath
+                ? fileSrc(memory.coverThumbnailPath)
+                : null;
+              return (
+                <button
+                  key={memory.id}
+                  type="button"
+                  className="home-memory-card"
+                  onClick={() => onOpenMemory(memory.id)}
+                  title={memory.subtitle}
+                >
+                  <div className="home-memory-cover">
+                    <SafeImage
+                      src={src}
+                      alt=""
+                      loading="lazy"
+                      fallback={<MediaFallback type="album" compact />}
+                    />
+                  </div>
+                  <span className="home-memory-title">{memory.title}</span>
+                  <span className="home-memory-sub muted">{memory.subtitle}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {!empty && recent.length > 0 && (
         <section className="home-section">

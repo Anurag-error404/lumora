@@ -74,4 +74,9 @@ export const LIBRARY_PAGE_META: Partial<
     description:
       "Photos grouped by where they were taken — offline reverse geocode plus an offline geometry map. No tile network.",
   },
+  memories: {
+    title: "Memories",
+    description:
+      "On this day, weekend trips, and people in places — curated on-device from your library.",
+  },
 };

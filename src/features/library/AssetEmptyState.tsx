@@ -208,6 +208,16 @@ export function AssetEmptyState({
       />
     );
   }
+  if (view === "memories") {
+    return (
+      <EmptyState
+        icon="sparkle"
+        title="This memory has no photos"
+        description="It may have been cleaned up since it was curated. Refresh Memories to rebuild from your library."
+        action={{ label: "Browse library", onClick: onBrowseLibrary }}
+      />
+    );
+  }
   return (
     <EmptyState
       icon="camera"

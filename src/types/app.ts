@@ -19,6 +19,7 @@ export type View =
   | "receipts"
   | "people"
   | "places"
+  | "memories"
   | "trash"
   | "favorites"
   | "locked"

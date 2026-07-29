@@ -383,6 +383,28 @@ export type PlaceGroup = {
   lon: number;
 };
 
+export type MemoryKind = "onThisDay" | "weekendTrip" | "personPlace";
+
+/** Curated memory card — computed on demand from dates / people / places. */
+export type MemorySummary = {
+  id: string;
+  kind: MemoryKind;
+  title: string;
+  subtitle: string;
+  assetCount: number;
+  coverAssetId: string | null;
+  coverThumbnailPath: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  placeLabel: string | null;
+  personName: string | null;
+};
+
+export type MemoryDetail = {
+  summary: MemorySummary;
+  assets: AssetSummary[];
+};
+
 export type PlacesProgress = {
   pending: number;
   done: number;
@@ -852,6 +874,26 @@ export const api = {
   listPlaces: () => invoke<PlaceGroup[]>("list_places"),
   listPlaceAssets: (label: string, limit: number, offset: number) =>
     invoke<AssetSummary[]>("list_place_assets", { label, limit, offset }),
+  listMemories: (limit = 30) =>
+    invoke<MemorySummary[]>("list_memories", { limit }),
+  getMemory: (memoryId: string) =>
+    invoke<MemoryDetail>("get_memory", {
+      memoryId,
+      memory_id: memoryId,
+    }),
+  listMemoryAssets: (memoryId: string, limit: number, offset: number) =>
+    invoke<AssetSummary[]>("list_memory_assets", {
+      memoryId,
+      memory_id: memoryId,
+      limit,
+      offset,
+    }),
+  saveMemoryAsAlbum: (memoryId: string, name?: string | null) =>
+    invoke<Album>("save_memory_as_album", {
+      memoryId,
+      memory_id: memoryId,
+      name: name ?? null,
+    }),
   placesProgress: () => invoke<PlacesProgress>("places_progress"),
   kickPlaces: () => invoke<void>("kick_places"),
   clearPlaces: () => invoke<number>("clear_places"),

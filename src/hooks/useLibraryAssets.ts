@@ -33,6 +33,7 @@ export function useLibraryAssets({
   activeAlbum,
   activePerson,
   activePlace,
+  activeMemory,
   tagBrowse,
   refreshHistory,
   refreshExports,
@@ -46,6 +47,7 @@ export function useLibraryAssets({
   activeAlbum: string | null;
   activePerson?: string | null;
   activePlace?: string | null;
+  activeMemory?: string | null;
   tagBrowse: TagBrowseFilter;
   refreshHistory: () => Promise<void>;
   refreshExports: () => Promise<void>;
@@ -101,6 +103,11 @@ export function useLibraryAssets({
           ? api.listPlaceAssets(activePlace, PAGE_SIZE, offset)
           : [];
       }
+      if (view === "memories") {
+        return activeMemory
+          ? api.listMemoryAssets(activeMemory, PAGE_SIZE, offset)
+          : [];
+      }
       if (view === "tags") {
         const hasFilter =
           tagBrowse.tagIds.length > 0 ||
@@ -141,6 +148,7 @@ export function useLibraryAssets({
       activeAlbum,
       activePerson,
       activePlace,
+      activeMemory,
       tagBrowse,
       semanticSearchEnabled,
     ],

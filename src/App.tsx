@@ -27,6 +27,7 @@ import { LibraryGrid } from "./features/library/LibraryGrid";
 import { MediaInfoPanel } from "./features/media-info/MediaInfoPanel";
 import { PeopleView } from "./features/people/PeopleView";
 import { PlacesView } from "./features/places/PlacesView";
+import { MemoriesView } from "./features/memories/MemoriesView";
 import { TagFilterBoard } from "./features/tags/TagFilterBoard";
 import { TimelineView } from "./features/timeline/TimelineView";
 import { HomeView } from "./features/home/HomeView";
@@ -46,6 +47,7 @@ import { useIndexProgress } from "./hooks/useIndexProgress";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibraryAssets } from "./hooks/useLibraryAssets";
 import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
+import { useMemories } from "./hooks/useMemories";
 import { usePeople } from "./hooks/usePeople";
 import { usePlaces } from "./hooks/usePlaces";
 import { usePreferences } from "./hooks/usePreferences";
@@ -123,6 +125,18 @@ export default function App() {
   });
 
   const {
+    memories,
+    activeMemory,
+    setActiveMemory,
+    refreshMemories,
+    saveAsAlbum,
+    saving: savingMemoryAlbum,
+  } = useMemories({
+    view,
+    setError,
+  });
+
+  const {
     tags,
     tagBrowse,
     tagBrowseActive,
@@ -188,6 +202,7 @@ export default function App() {
     activeAlbum,
     activePerson,
     activePlace,
+    activeMemory,
     tagBrowse,
     refreshHistory,
     refreshExports,
@@ -554,6 +569,7 @@ export default function App() {
         "receipts",
         "people",
         "places",
+        "memories",
         "trash",
         "favorites",
         "watched",
@@ -622,12 +638,21 @@ export default function App() {
     if (id === "places") {
       setActivePlace(null);
     }
+    if (id === "memories") {
+      setActiveMemory(null);
+    }
     if (id !== "library" || !pickingForAlbum) {
       setSelected(new Set());
     }
     if (id !== "library" && id !== "albums") {
       setPickingForAlbum(null);
     }
+  }
+
+  function openMemory(memoryId: string) {
+    setView("memories");
+    setActiveMemory(memoryId);
+    setSelected(new Set());
   }
 
   return (
@@ -639,6 +664,7 @@ export default function App() {
         tagCount={tags.length}
         peopleCount={people.length}
         placeCount={places.length}
+        memoryCount={memories.length}
         savedSearchCount={recentSearches.length}
         exportCount={exports.length}
         lockedCount={vault.status?.totalLockedCount ?? 0}
@@ -785,10 +811,12 @@ export default function App() {
               stats={stats}
               smartCounts={smartCounts}
               recent={homeRecent}
+              memories={memories}
               onRecentLoaded={setHomeRecent}
               onNavigate={handleNavigate}
               onImport={() => setImportModal(true)}
               onOpenAsset={setLightboxId}
+              onOpenMemory={openMemory}
             />
           ) : view === "locked" ? (
             <LockedFolderView
@@ -920,6 +948,15 @@ export default function App() {
                 setSelected(new Set());
               }}
             />
+          ) : view === "memories" && !activeMemory ? (
+            <MemoriesView
+              memories={memories}
+              onRefresh={() => void refreshMemories()}
+              onOpenMemory={(memoryId) => {
+                setActiveMemory(memoryId);
+                setSelected(new Set());
+              }}
+            />
           ) : view === "duplicates" ? (
             <DuplicatesView
               dupes={dupes}
@@ -940,7 +977,8 @@ export default function App() {
               {LIBRARY_PAGE_META[view] &&
                 !(view === "albums" && activeAlbum) &&
                 !(view === "people" && activePerson) &&
-                !(view === "places" && activePlace) && (
+                !(view === "places" && activePlace) &&
+                !(view === "memories" && activeMemory) && (
                 <PageHeader
                   title={LIBRARY_PAGE_META[view]!.title}
                   description={LIBRARY_PAGE_META[view]!.description}
@@ -960,6 +998,49 @@ export default function App() {
                     >
                       Back to places
                     </button>
+                  }
+                />
+              )}
+              {view === "memories" && activeMemory && (
+                <PageHeader
+                  title={
+                    memories.find((m) => m.id === activeMemory)?.title ?? "Memory"
+                  }
+                  description={
+                    memories.find((m) => m.id === activeMemory)?.subtitle ??
+                    "Photos in this memory."
+                  }
+                  actions={
+                    <>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={savingMemoryAlbum || assets.length === 0}
+                        onClick={() => {
+                          void (async () => {
+                            const album = await saveAsAlbum(activeMemory);
+                            if (!album) return;
+                            await refreshAlbums();
+                            await refreshHistory();
+                            setActiveAlbum(album.id);
+                            setView("albums");
+                            setActiveMemory(null);
+                            setSelected(new Set());
+                          })();
+                        }}
+                      >
+                        {savingMemoryAlbum ? "Saving…" : "Save as album"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveMemory(null);
+                          setSelected(new Set());
+                        }}
+                      >
+                        Back to memories
+                      </button>
+                    </>
                   }
                 />
               )}

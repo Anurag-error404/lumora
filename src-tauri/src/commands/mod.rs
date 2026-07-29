@@ -18,6 +18,7 @@ use crate::faces;
 use crate::history::{self, HistoryAction};
 use crate::indexer;
 use crate::indexer::queue::IndexerQueue;
+use crate::memories;
 use crate::ml;
 use crate::models::*;
 use crate::ocr;
@@ -2194,6 +2195,70 @@ pub fn list_place_assets(
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
     state.with_db(|conn| places::list_place_assets(conn, &label, limit, offset))
+}
+
+/// Curated Memories v1 cards (On this day / weekend trips / person + place).
+#[tauri::command]
+pub fn list_memories(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> AppResult<Vec<memories::MemorySummary>> {
+    let limit = limit.unwrap_or(30);
+    state.with_db(|conn| memories::list_memories(conn, limit))
+}
+
+#[tauri::command]
+pub fn get_memory(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> AppResult<memories::MemoryDetail> {
+    state.with_db(|conn| memories::get_memory(conn, &memory_id))
+}
+
+#[tauri::command]
+pub fn list_memory_assets(
+    state: State<'_, AppState>,
+    memory_id: String,
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    state.with_db(|conn| memories::list_memory_assets(conn, &memory_id, limit, offset))
+}
+
+/// Persist a memory as a normal album (user-initiated only).
+#[tauri::command]
+pub fn save_memory_as_album(
+    state: State<'_, AppState>,
+    memory_id: String,
+    name: Option<String>,
+) -> AppResult<Album> {
+    let (album, asset_ids) = state.with_db(|conn| {
+        let detail = memories::get_memory(conn, &memory_id)?;
+        let asset_ids: Vec<String> = detail.assets.iter().map(|a| a.id.clone()).collect();
+        let album = memories::save_memory_as_album(conn, &memory_id, name)?;
+        Ok((album, asset_ids))
+    })?;
+    if !asset_ids.is_empty() {
+        let count = asset_ids.len();
+        push_history(
+            &state,
+            "album",
+            format!(
+                "Saved memory as album “{}” with {count} photo(s)",
+                album.name
+            ),
+            Some(&album.id),
+            HistoryAction::RemoveFromAlbum {
+                album_id: album.id.clone(),
+                asset_ids: asset_ids.clone(),
+            },
+            HistoryAction::AddToAlbum {
+                album_id: album.id.clone(),
+                asset_ids,
+            },
+        )?;
+    }
+    Ok(album)
 }
 
 /// Live progress of the background GPS / reverse-geocode pass.
