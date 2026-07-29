@@ -119,11 +119,7 @@ pub fn backfill_missing(conn: &Connection, limit: u32) -> AppResult<usize> {
 }
 
 /// Live images whose blur score is at or below the blurry threshold.
-pub fn list_blurry(
-    conn: &Connection,
-    limit: u32,
-    offset: u32,
-) -> AppResult<Vec<BlurryAsset>> {
+pub fn list_blurry(conn: &Connection, limit: u32, offset: u32) -> AppResult<Vec<BlurryAsset>> {
     // Opportunistically score a batch of unscored images before listing.
     let _ = backfill_missing(conn, 200);
 

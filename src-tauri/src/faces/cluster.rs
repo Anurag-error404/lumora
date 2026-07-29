@@ -106,9 +106,8 @@ pub fn merge(conn: &Connection, into_id: &str, from_id: &str) -> AppResult<()> {
         return Ok(());
     }
     let asset_ids: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT asset_id FROM faces WHERE person_id IN (?1, ?2)",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT DISTINCT asset_id FROM faces WHERE person_id IN (?1, ?2)")?;
         let rows = stmt.query_map(params![into_id, from_id], |r| r.get(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -334,8 +333,7 @@ pub fn rename(conn: &Connection, person_id: &str, name: &str) -> AppResult<()> {
         params![name_val, chrono::Utc::now().to_rfc3339(), person_id],
     )?;
     let asset_ids: Vec<String> = {
-        let mut stmt =
-            conn.prepare("SELECT DISTINCT asset_id FROM faces WHERE person_id = ?1")?;
+        let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM faces WHERE person_id = ?1")?;
         let rows = stmt.query_map(params![person_id], |r| r.get(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -404,9 +402,8 @@ pub fn refresh_person_stats(conn: &Connection, person_id: &str) -> AppResult<()>
     )?;
     // Prefer a cover whose crop JPEG still exists; fall back to highest score.
     let cover: Option<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, crop_path FROM faces WHERE person_id = ?1 ORDER BY score DESC",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT id, crop_path FROM faces WHERE person_id = ?1 ORDER BY score DESC")?;
         let rows = stmt.query_map(params![person_id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
         })?;
@@ -426,12 +423,7 @@ pub fn refresh_person_stats(conn: &Connection, person_id: &str) -> AppResult<()>
     };
     conn.execute(
         "UPDATE people SET face_count = ?1, cover_face_id = ?2, updated_at = ?3 WHERE id = ?4",
-        params![
-            count,
-            cover,
-            chrono::Utc::now().to_rfc3339(),
-            person_id
-        ],
+        params![count, cover, chrono::Utc::now().to_rfc3339(), person_id],
     )?;
     Ok(())
 }

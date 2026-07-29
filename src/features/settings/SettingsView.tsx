@@ -197,6 +197,8 @@ export function SettingsView({
                 }
               }}
             />
+          ) : section === "performance" ? (
+            <PerformanceSection prefs={prefs} update={update} />
           ) : section === "shortcuts" ? (
             <ShortcutsSection />
           ) : section === "importExport" ? (
@@ -446,6 +448,44 @@ function LibrarySection({
             })
           }
         />
+        <SelectRow
+          label="Auto-scan watched folders"
+          description="Re-index watched folders on launch, hourly, or daily."
+          value={prefs.library.autoScan}
+          options={[
+            { value: "manual", label: "Manual" },
+            { value: "on_launch", label: "On launch" },
+            { value: "hourly", label: "Hourly" },
+            { value: "daily", label: "Daily" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.library.autoScan = v;
+              return p;
+            })
+          }
+        />
+      </SettingsBlock>
+      <SettingsBlock title="Ignored paths">
+        <label className="settings-row">
+          <span className="settings-row-copy">
+            <span className="settings-row-label">Ignore patterns</span>
+            <span className="muted">One pattern per line, such as *.tmp or /cache/.</span>
+          </span>
+          <textarea
+            rows={5}
+            value={prefs.library.ignorePatterns.join("\n")}
+            onChange={(event) =>
+              void update((p) => {
+                p.library.ignorePatterns = event.target.value
+                  .split("\n")
+                  .map((pattern) => pattern.trim())
+                  .filter(Boolean);
+                return p;
+              })
+            }
+          />
+        </label>
       </SettingsBlock>
     </>
   );
@@ -513,15 +553,43 @@ function AiSection({
         />
         <ChoiceRow
           label="Background processing"
-          description="Pause stops all on-device AI / Places background jobs until you resume."
-          value={prefs.ai.backgroundProcessing === "paused" ? "paused" : "always"}
+          description="Choose whether on-device AI and Places jobs run continuously or only after inactivity."
+          value={prefs.ai.backgroundProcessing}
           options={[
             { value: "always", label: "Always" },
+            { value: "idle", label: "When idle" },
             { value: "paused", label: "Paused" },
           ]}
           onChange={(v) =>
             void update((p) => {
               p.ai.backgroundProcessing = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Create place albums automatically"
+          description="Add geotagged photos to a named album after offline reverse geocoding."
+          checked={prefs.ai.autoAlbums}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.autoAlbums = v;
+              return p;
+            })
+          }
+        />
+        <ChoiceRow
+          label="Processing device"
+          description="Controls the worker's runtime preference."
+          value={prefs.ai.processingDevice}
+          options={[
+            { value: "automatic", label: "Automatic" },
+            { value: "cpu", label: "CPU" },
+            { value: "gpu", label: "GPU" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.ai.processingDevice = v;
               return p;
             })
           }
@@ -591,6 +659,28 @@ function PrivacySection({
       </SettingsBlock>
       <SettingsBlock title="Metadata">
         <ToggleRow
+          label="Preserve GPS location data"
+          description="When off, location extraction skips GPS data and does not store Places records."
+          checked={p.preserveGps}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.preserveGps = v;
+              return cur;
+            })
+          }
+        />
+        <ToggleRow
+          label="Preserve EXIF metadata"
+          description="Read camera, lens, and capture-date metadata when importing."
+          checked={p.preserveExif}
+          onChange={(v) =>
+            void update((cur) => {
+              cur.privacy.preserveExif = v;
+              return cur;
+            })
+          }
+        />
+        <ToggleRow
           label="Strip metadata on export"
           description="Re-encode still images without EXIF/GPS when exporting a ZIP. Videos are copied as-is."
           checked={p.stripMetadataOnExport}
@@ -609,6 +699,61 @@ function PrivacySection({
         </p>
       </SettingsBlock>
     </>
+  );
+}
+
+function PerformanceSection({
+  prefs,
+  update,
+}: {
+  prefs: Preferences;
+  update: PrefsUpdater;
+}) {
+  const performance = prefs.performance;
+  return (
+    <SettingsBlock title="Background work">
+      <ChoiceRow
+        label="CPU profile"
+        description="Balances worker throughput against foreground responsiveness."
+        value={performance.cpuProfile}
+        options={[
+          { value: "eco", label: "Eco" },
+          { value: "balanced", label: "Balanced" },
+          { value: "aggressive", label: "Aggressive" },
+        ]}
+        onChange={(v) =>
+          void update((p) => {
+            p.performance.cpuProfile = v;
+            return p;
+          })
+        }
+      />
+      <ToggleRow
+        label="Pause background work on battery"
+        checked={performance.pauseOnBattery}
+        onChange={(v) =>
+          void update((p) => {
+            p.performance.pauseOnBattery = v;
+            return p;
+          })
+        }
+      />
+      <SliderRow
+        label="Thumbnail cache budget"
+        description="Used while generating new thumbnail previews."
+        value={performance.thumbnailCacheMb}
+        min={128}
+        max={4096}
+        step={128}
+        format={(n) => `${n} MB`}
+        onChange={(v) =>
+          void update((p) => {
+            p.performance.thumbnailCacheMb = v;
+            return p;
+          })
+        }
+      />
+    </SettingsBlock>
   );
 }
 
@@ -746,6 +891,17 @@ function ImportExportSection({
         />
       </SettingsBlock>
       <SettingsBlock title="Export">
+        <ToggleRow
+          label="Preserve folder structure"
+          description="Keep relative folders inside exported ZIP files."
+          checked={ie.preserveFolderStructure}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.preserveFolderStructure = v;
+              return p;
+            })
+          }
+        />
         <SliderRow
           label="JPEG quality"
           description="Used when stripping metadata re-encodes JPEGs on export."
@@ -756,6 +912,47 @@ function ImportExportSection({
           onChange={(v) =>
             void update((p) => {
               p.importExport.jpegQuality = v;
+              return p;
+            })
+          }
+        />
+        <SliderRow
+          label="Maximum image edge"
+          description="Resize exported still images; 0 keeps original dimensions."
+          value={ie.exportMaxEdge}
+          min={0}
+          max={8192}
+          step={256}
+          format={(n) => (n === 0 ? "Original" : `${n}px`)}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.exportMaxEdge = v;
+              return p;
+            })
+          }
+        />
+        <SelectRow
+          label="File naming"
+          value={ie.exportNaming}
+          options={[
+            { value: "original", label: "Original filename" },
+            { value: "date_filename", label: "Date + filename" },
+            { value: "sequential", label: "Sequential" },
+          ]}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.exportNaming = v;
+              return p;
+            })
+          }
+        />
+        <ToggleRow
+          label="Strip metadata"
+          description="Re-encode still images without EXIF/GPS. Videos are copied as-is."
+          checked={ie.stripMetadata}
+          onChange={(v) =>
+            void update((p) => {
+              p.importExport.stripMetadata = v;
               return p;
             })
           }

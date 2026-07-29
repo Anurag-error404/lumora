@@ -230,11 +230,7 @@ pub fn invalidate_asset(conn: &Connection, asset_id: &str) -> AppResult<()> {
 }
 
 pub fn display_label(raw: &str) -> String {
-    raw.split(',')
-        .next()
-        .unwrap_or(raw)
-        .trim()
-        .to_string()
+    raw.split(',').next().unwrap_or(raw).trim().to_string()
 }
 
 #[cfg(test)]

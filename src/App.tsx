@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Icon } from "./components/icons";
 import { PageHeader } from "./components/PageHeader";
 import { AlbumPickBar } from "./components/layout/AlbumPickBar";
@@ -81,6 +81,24 @@ export default function App() {
   const [deleteAlbumTarget, setDeleteAlbumTarget] = useState<Album | null>(null);
   const [personModal, setPersonModal] = useState<Person | null>(null);
   const [personName, setPersonName] = useState("");
+  const lastActivityPing = useRef(0);
+
+  useEffect(() => {
+    const ping = () => {
+      const now = Date.now();
+      if (now - lastActivityPing.current < 15_000) return;
+      lastActivityPing.current = now;
+      void api.pingUserActivity().catch(() => undefined);
+    };
+    window.addEventListener("pointerdown", ping);
+    window.addEventListener("keydown", ping);
+    window.addEventListener("mousemove", ping);
+    return () => {
+      window.removeEventListener("pointerdown", ping);
+      window.removeEventListener("keydown", ping);
+      window.removeEventListener("mousemove", ping);
+    };
+  }, []);
 
   const { albums, activeAlbum, setActiveAlbum, refreshAlbums } = useAlbums({
     view,

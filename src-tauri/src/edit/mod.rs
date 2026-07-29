@@ -110,11 +110,7 @@ fn validate_ops(ops: &EditOps) -> AppResult<()> {
 }
 
 /// Append a revision of edit ops without touching the original file.
-pub fn save_edit_ops(
-    conn: &Connection,
-    asset_id: &str,
-    ops: &EditOps,
-) -> AppResult<SavedEditOps> {
+pub fn save_edit_ops(conn: &Connection, asset_id: &str, ops: &EditOps) -> AppResult<SavedEditOps> {
     ensure_image_asset(conn, asset_id)?;
     validate_ops(ops)?;
     let ops_json =
@@ -200,8 +196,8 @@ pub fn revert_edit_revision(
             |r| r.get(0),
         )
         .map_err(|_| AppError::msg("edit revision not found"))?;
-    let ops: EditOps = serde_json::from_str(&ops_json)
-        .map_err(|e| AppError::msg(format!("ops json: {e}")))?;
+    let ops: EditOps =
+        serde_json::from_str(&ops_json).map_err(|e| AppError::msg(format!("ops json: {e}")))?;
     save_edit_ops(conn, asset_id, &ops)
 }
 
@@ -422,10 +418,7 @@ fn unique_copy_path(source: &Path) -> PathBuf {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("edited");
-    let ext = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg");
+    let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
     let candidate = parent.join(format!("{stem}_edited.{ext}"));
     if !candidate.exists() {
         return candidate;
@@ -436,11 +429,7 @@ fn unique_copy_path(source: &Path) -> PathBuf {
             return candidate;
         }
     }
-    parent.join(format!(
-        "{stem}_edited_{}.{}",
-        uuid::Uuid::new_v4(),
-        ext
-    ))
+    parent.join(format!("{stem}_edited_{}.{}", uuid::Uuid::new_v4(), ext))
 }
 
 /// Drop the CLIP vector so `pending_assets` picks the asset up again.
@@ -663,9 +652,11 @@ mod tests {
         assert!(Path::new(&result.asset.path).is_file());
         assert!(path.is_file(), "original must remain");
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
     }

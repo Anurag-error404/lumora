@@ -4,8 +4,8 @@ mod commands;
 mod db;
 mod diagnostics;
 mod duplicates;
-pub mod error;
 mod edit;
+pub mod error;
 mod export;
 mod faces;
 /// ONNX Runtime glibc < 2.38 link shim (Linux gnu only).
@@ -20,6 +20,7 @@ mod models;
 mod ocr;
 mod places;
 mod preferences;
+mod prefs_runtime;
 mod saved_searches;
 mod search;
 mod semantic;
@@ -40,11 +41,75 @@ mod perf_smoke;
 pub use vault::portable;
 
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::Manager;
 
 use crate::commands::*;
 use crate::state::{AppPaths, AppState};
+
+fn enqueue_auto_scan(
+    db_path: &std::path::Path,
+    app_data: &std::path::Path,
+    indexer: &Arc<indexer::queue::IndexerQueue>,
+    force_launch: bool,
+) {
+    let prefs = preferences::load(app_data).unwrap_or_default();
+    let interval_secs = match prefs.library.auto_scan.as_str() {
+        "on_launch" if force_launch => Some(0),
+        "hourly" => Some(60 * 60),
+        "daily" => Some(24 * 60 * 60),
+        _ => None,
+    };
+    let Some(interval_secs) = interval_secs else {
+        return;
+    };
+    let stamp = app_data.join(".last_auto_scan");
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let previous = std::fs::read_to_string(&stamp)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    if interval_secs > 0 && now.saturating_sub(previous) < interval_secs {
+        return;
+    }
+    let Ok(conn) = state::open_db(db_path) else {
+        return;
+    };
+    let Ok(roots) = watcher::load_watched_paths(&conn) else {
+        return;
+    };
+    for root in roots {
+        for entry in walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && indexer::is_indexable_media(path, &prefs.library.ignore_patterns) {
+                indexer.enqueue(indexer::queue::IndexJob::Upsert {
+                    path: path.to_path_buf(),
+                    generate_thumb: true,
+                });
+            }
+        }
+    }
+    let _ = std::fs::write(stamp, now.to_string());
+}
+
+fn spawn_auto_scan(
+    db_path: std::path::PathBuf,
+    app_data: std::path::PathBuf,
+    indexer: Arc<indexer::queue::IndexerQueue>,
+) {
+    enqueue_auto_scan(&db_path, &app_data, &indexer, true);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(60));
+        enqueue_auto_scan(&db_path, &app_data, &indexer, false);
+    });
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -60,6 +125,7 @@ pub fn run() {
                 .app_data_dir()
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
             let paths = AppPaths::from_app_data(app_data)?;
+            preferences::set_app_data_dir(paths.app_data.clone());
             logging::init_logging(&paths.logs_dir)?;
             tracing::info!(app_data = %paths.app_data.display(), "app data directory");
 
@@ -90,26 +156,14 @@ pub fn run() {
             let indexer =
                 commands::bootstrap_indexer(paths.db_path.clone(), paths.thumbs_dir.clone());
             let prefs_boot = preferences::load(&paths.app_data).unwrap_or_default();
-            let embedder = semantic::worker::EmbedWorker::new(
-                paths.db_path.clone(),
-                paths.app_data.clone(),
-            );
-            let ocr = ocr::worker::OcrWorker::new(
-                paths.db_path.clone(),
-                paths.app_data.clone(),
-            );
-            let faces = faces::worker::FaceWorker::new(
-                paths.db_path.clone(),
-                paths.app_data.clone(),
-            );
-            let places = places::worker::PlacesWorker::new(
-                paths.db_path.clone(),
-                paths.app_data.clone(),
-            );
-            let tags = tags::worker::TagsWorker::new(
-                paths.db_path.clone(),
-                paths.app_data.clone(),
-            );
+            let embedder =
+                semantic::worker::EmbedWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let ocr = ocr::worker::OcrWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let faces =
+                faces::worker::FaceWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let places =
+                places::worker::PlacesWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let tags = tags::worker::TagsWorker::new(paths.db_path.clone(), paths.app_data.clone());
             let state = AppState::new(
                 paths,
                 conn,
@@ -121,7 +175,14 @@ pub fn run() {
                 Arc::clone(&tags),
             );
 
-            let watch_service = Arc::new(watcher::WatcherService::new());
+            spawn_auto_scan(
+                state.paths.db_path.clone(),
+                state.paths.app_data.clone(),
+                Arc::clone(&indexer),
+            );
+
+            let watch_service =
+                Arc::new(watcher::WatcherService::new(state.paths.app_data.clone()));
             let watch_enabled = prefs_boot.library.watch_folders_enabled;
             watch_service.set_enabled(watch_enabled);
             let roots = if watch_enabled {
@@ -254,6 +315,7 @@ pub fn run() {
             get_developer_info,
             get_preferences,
             set_preferences,
+            ping_user_activity,
             get_storage_summary,
             clear_thumbnail_cache,
             rebuild_thumbnail_cache,

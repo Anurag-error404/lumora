@@ -115,10 +115,7 @@ impl OcrEngine {
             .map(|(t, _, _)| t)
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(OcrResult {
-            text,
-            confidence,
-        })
+        Ok(OcrResult { text, confidence })
     }
 
     fn detect(&self, rgba: &RgbaImage) -> AppResult<Vec<TextBox>> {
@@ -213,15 +210,7 @@ impl OcrEngine {
 }
 
 fn load_session(path: &Path, label: &str) -> AppResult<Session> {
-    Session::builder()
-        .map_err(|e| AppError::msg(format!("ort session builder ({label}): {e}")))?
-        .commit_from_file(path)
-        .map_err(|e| {
-            AppError::msg(format!(
-                "failed to load {label} from {}: {e}",
-                path.display()
-            ))
-        })
+    crate::ml::session::load_session(path, label)
 }
 
 fn io_names(session: &Session) -> AppResult<(String, String)> {
@@ -393,11 +382,7 @@ pub fn ctc_greedy_decode(
                 (a, b, "tc") // [1, T, C]
             }
         }
-        _ => {
-            return Err(AppError::msg(format!(
-                "unexpected rec shape {shape:?}"
-            )))
-        }
+        _ => return Err(AppError::msg(format!("unexpected rec shape {shape:?}"))),
     };
     if classes == 0 || time == 0 || data.len() < time * classes {
         return Err(AppError::msg("rec output too small for CTC"));

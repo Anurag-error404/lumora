@@ -47,7 +47,10 @@ pub fn pixel_values(img: &DynamicImage) -> Vec<f32> {
 
 pub fn pixel_values_from_path(path: &std::path::Path) -> AppResult<Vec<f32>> {
     let img = crate::thumbnails::open_oriented(path).map_err(|e| {
-        AppError::msg(format!("failed to open image for embedding ({}): {e}", path.display()))
+        AppError::msg(format!(
+            "failed to open image for embedding ({}): {e}",
+            path.display()
+        ))
     })?;
     Ok(pixel_values(&img))
 }

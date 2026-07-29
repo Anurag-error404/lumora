@@ -45,7 +45,12 @@ pub fn model_paths(conn: &Connection) -> AppResult<SemanticModelPaths> {
 
 /// Store an embedding for an asset, normalising it first so later comparisons
 /// are a plain dot product.
-pub fn store(conn: &Connection, asset_id: &str, model_id: &str, embedding: &[f32]) -> AppResult<()> {
+pub fn store(
+    conn: &Connection,
+    asset_id: &str,
+    model_id: &str,
+    embedding: &[f32],
+) -> AppResult<()> {
     let mut v = embedding.to_vec();
     vector::normalize(&mut v);
     conn.execute(
@@ -330,7 +335,14 @@ mod tests {
 
         for _ in 0..3 {
             assert_eq!(pending_assets(&conn, 50).unwrap().len(), 1);
-            mark_job(&conn, "broken", ModelKind::ClipImage, "failed", Some("boom")).unwrap();
+            mark_job(
+                &conn,
+                "broken",
+                ModelKind::ClipImage,
+                "failed",
+                Some("boom"),
+            )
+            .unwrap();
         }
 
         assert!(

@@ -12,11 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppResult;
 use crate::faces::{self, engine::FaceEngine};
 use crate::preferences;
+use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 2;
-const IDLE_MS: u64 = 750;
-const BETWEEN_MS: u64 = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,10 +72,8 @@ impl FaceWorker {
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
         if let Ok(conn) = open_db(&self.db_path) {
-            match crate::ml::reset_failed_jobs(
-                &conn,
-                crate::ml::catalog::ModelKind::Faces.as_str(),
-            ) {
+            match crate::ml::reset_failed_jobs(&conn, crate::ml::catalog::ModelKind::Faces.as_str())
+            {
                 Ok(n) if n > 0 => {
                     tracing::info!(reset = n, "re-queued failed face jobs");
                     *self.last_error.lock() = None;
@@ -120,7 +117,10 @@ impl FaceWorker {
     fn run_loop(self: Arc<Self>) {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 if !self.paused.load(Ordering::Relaxed) {
                     self.wake.store(true, Ordering::Relaxed);
                 }
@@ -129,7 +129,10 @@ impl FaceWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -137,9 +140,11 @@ impl FaceWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !prefs.ai.face_recognition || prefs.ai.background_processing == "paused" {
+            if !prefs.ai.face_recognition || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -157,7 +162,7 @@ impl FaceWorker {
                 }
             };
 
-            let worked = match self.drain_batch(&engine) {
+            let worked = match self.drain_batch(&engine, &prefs) {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "faces batch failed");
@@ -168,7 +173,9 @@ impl FaceWorker {
 
             if worked > 0 {
                 self.wake.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(BETWEEN_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).between_ms,
+                ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
             }
@@ -195,7 +202,11 @@ impl FaceWorker {
         Ok(Some(engine))
     }
 
-    fn drain_batch(&self, engine: &FaceEngine) -> AppResult<usize> {
+    fn drain_batch(
+        &self,
+        engine: &FaceEngine,
+        prefs: &preferences::Preferences,
+    ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
         let pending = faces::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
@@ -231,7 +242,9 @@ impl FaceWorker {
                     let _ = faces::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }
-            thread::sleep(Duration::from_millis(BETWEEN_MS));
+            thread::sleep(Duration::from_millis(
+                prefs_runtime::throttle(&prefs.performance).between_ms,
+            ));
         }
         if done > 0 {
             if let Err(e) = faces::cluster::consolidate_similar_people(&conn) {

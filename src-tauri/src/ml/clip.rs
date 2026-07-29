@@ -51,8 +51,11 @@ impl ClipEngine {
                 pixels.len()
             )));
         }
-        let input = Tensor::from_array(([1usize, 3, IMAGE_SIZE as usize, IMAGE_SIZE as usize], pixels.to_vec()))
-            .map_err(|e| AppError::msg(format!("image tensor: {e}")))?;
+        let input = Tensor::from_array((
+            [1usize, 3, IMAGE_SIZE as usize, IMAGE_SIZE as usize],
+            pixels.to_vec(),
+        ))
+        .map_err(|e| AppError::msg(format!("image tensor: {e}")))?;
         let mut session = self.image.lock();
         let outputs = session
             .run(ort::inputs!["pixel_values" => input])
@@ -79,20 +82,15 @@ impl ClipEngine {
 }
 
 fn load_session(path: &Path, label: &str) -> AppResult<Session> {
-    Session::builder()
-        .map_err(|e| AppError::msg(format!("ort session builder ({label}): {e}")))?
-        .commit_from_file(path)
-        .map_err(|e| {
-            AppError::msg(format!(
-                "failed to load {label} model from {}: {e}",
-                path.display()
-            ))
-        })
+    crate::ml::session::load_session(path, label)
 }
 
 fn load_tokenizer(path: &Path) -> AppResult<Tokenizer> {
     let mut tok = Tokenizer::from_file(path).map_err(|e| {
-        AppError::msg(format!("failed to load tokenizer from {}: {e}", path.display()))
+        AppError::msg(format!(
+            "failed to load tokenizer from {}: {e}",
+            path.display()
+        ))
     })?;
     tok.with_truncation(Some(TruncationParams {
         max_length: MAX_TOKENS,
@@ -197,11 +195,8 @@ mod tests {
         };
         let engine = ClipEngine::load(&paths).unwrap();
 
-        let img = image::DynamicImage::ImageRgb8(RgbImage::from_pixel(
-            320,
-            240,
-            Rgb([40, 120, 200]),
-        ));
+        let img =
+            image::DynamicImage::ImageRgb8(RgbImage::from_pixel(320, 240, Rgb([40, 120, 200])));
         let pixels = preprocess::pixel_values(&img);
         let mut image_vec = engine.embed_image_pixels(&pixels).unwrap();
         let mut text_vec = engine.embed_text("a blue rectangle").unwrap();

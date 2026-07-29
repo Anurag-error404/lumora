@@ -14,8 +14,8 @@ use crate::error::AppResult;
 use crate::faces::engine::DetectedFace;
 use crate::indexer;
 use crate::ml::{self, catalog::ModelKind, vector};
-use crate::search::map_asset;
 use crate::models::AssetSummary;
+use crate::search::map_asset;
 
 #[derive(Debug, Clone)]
 pub struct FaceModelPaths {
@@ -63,9 +63,7 @@ pub fn active_bundle(app_data: &Path) -> String {
         .map(|p| p.ai.faces_model)
         .unwrap_or_else(|_| "insightface-buffalo-l".into());
     let opt = ml::library::resolve_active(ml::library::Capability::Faces, &preferred);
-    opt.bundle
-        .unwrap_or(ml::catalog::FACES_BUNDLE)
-        .to_string()
+    opt.bundle.unwrap_or(ml::catalog::FACES_BUNDLE).to_string()
 }
 
 pub fn faces_ready(conn: &Connection) -> AppResult<bool> {
@@ -321,8 +319,7 @@ pub fn set_ignored(conn: &Connection, person_id: &str, ignored: bool) -> AppResu
         return Ok(());
     }
     let asset_ids: Vec<String> = {
-        let mut stmt =
-            conn.prepare("SELECT DISTINCT asset_id FROM faces WHERE person_id = ?1")?;
+        let mut stmt = conn.prepare("SELECT DISTINCT asset_id FROM faces WHERE person_id = ?1")?;
         let rows = stmt.query_map(params![person_id], |r| r.get(0))?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -574,11 +571,15 @@ mod tests {
         let person = list_people(&conn).unwrap().remove(0);
         cluster::rename(&conn, &person.id, "Priya").unwrap();
         indexer::refresh_fts(&conn, "a1").unwrap();
-        assert!(!crate::search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty());
+        assert!(!crate::search::search_assets(&conn, "Priya", 10, 0)
+            .unwrap()
+            .is_empty());
 
         set_ignored(&conn, &person.id, true).unwrap();
         assert!(
-            crate::search::search_assets(&conn, "Priya", 10, 0).unwrap().is_empty(),
+            crate::search::search_assets(&conn, "Priya", 10, 0)
+                .unwrap()
+                .is_empty(),
             "ignored people should drop out of FTS"
         );
     }
@@ -595,7 +596,11 @@ mod tests {
 
         invalidate_asset(&conn, &faces_dir, "a1").unwrap();
         let ignored = list_ignored_people(&conn).unwrap();
-        assert_eq!(ignored.len(), 1, "ignore must outlive the faces that created it");
+        assert_eq!(
+            ignored.len(),
+            1,
+            "ignore must outlive the faces that created it"
+        );
         let centroid: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT centroid FROM people WHERE id = ?1",
@@ -603,7 +608,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(centroid.is_some(), "centroid is what keeps the face ignored");
+        assert!(
+            centroid.is_some(),
+            "centroid is what keeps the face ignored"
+        );
 
         store_detections(&conn, &faces_dir, "a1", &[face(5, 0.9)]).unwrap();
         assert!(list_people(&conn).unwrap().is_empty());
@@ -634,7 +642,8 @@ mod tests {
             }],
         )
         .unwrap();
-        conn.execute("DELETE FROM assets WHERE id = 'a1'", []).unwrap();
+        conn.execute("DELETE FROM assets WHERE id = 'a1'", [])
+            .unwrap();
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM faces", [], |r| r.get(0))
             .unwrap();

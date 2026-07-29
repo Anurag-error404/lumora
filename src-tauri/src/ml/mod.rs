@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod clip;
 pub mod library;
 pub mod preprocess;
+pub mod session;
 pub mod vector;
 
 use std::io::Read;
@@ -363,12 +364,8 @@ pub fn download_and_install(
         // Write via a temp file so Windows antivirus locks on the live path
         // cannot block the install after a large ONNX download.
         let part_path = models_dir.join(format!("{}.part", entry.file_name));
-        std::fs::write(&part_path, bytes).map_err(|e| {
-            AppError::msg(format!(
-                "failed to write embedded '{}': {e}",
-                entry.id
-            ))
-        })?;
+        std::fs::write(&part_path, bytes)
+            .map_err(|e| AppError::msg(format!("failed to write embedded '{}': {e}", entry.id)))?;
         replace_file(&part_path, &final_path)?;
         on_progress(entry.size_bytes, entry.size_bytes);
         return register_verified(conn, entry, &final_path);
@@ -421,12 +418,8 @@ pub fn download_and_install(
 
 fn replace_file(from: &Path, to: &Path) -> AppResult<()> {
     if to.exists() {
-        std::fs::remove_file(to).map_err(|e| {
-            AppError::msg(format!(
-                "could not replace '{}': {e}",
-                to.display()
-            ))
-        })?;
+        std::fs::remove_file(to)
+            .map_err(|e| AppError::msg(format!("could not replace '{}': {e}", to.display())))?;
     }
     match std::fs::rename(from, to) {
         Ok(()) => Ok(()),
@@ -461,7 +454,10 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
             std::fs::remove_file(&path)?;
         }
     }
-    conn.execute("DELETE FROM asset_embeddings WHERE model_id = ?1", params![id])?;
+    conn.execute(
+        "DELETE FROM asset_embeddings WHERE model_id = ?1",
+        params![id],
+    )?;
     conn.execute("DELETE FROM ml_models WHERE id = ?1", params![id])?;
     if let Some(entry) = catalog::entry(id) {
         conn.execute(
@@ -527,10 +523,7 @@ pub fn clear_embeddings(conn: &Connection) -> AppResult<usize> {
     let n = conn.execute("DELETE FROM asset_embeddings", [])?;
     conn.execute(
         "DELETE FROM ml_jobs WHERE kind IN (?1, ?2)",
-        params![
-            ModelKind::ClipImage.as_str(),
-            ModelKind::ClipText.as_str()
-        ],
+        params![ModelKind::ClipImage.as_str(), ModelKind::ClipText.as_str()],
     )?;
     Ok(n)
 }
@@ -773,7 +766,8 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute("DELETE FROM assets WHERE id = 'a1'", []).unwrap();
+        conn.execute("DELETE FROM assets WHERE id = 'a1'", [])
+            .unwrap();
 
         let embeddings: i64 = conn
             .query_row("SELECT COUNT(*) FROM asset_embeddings", [], |r| r.get(0))

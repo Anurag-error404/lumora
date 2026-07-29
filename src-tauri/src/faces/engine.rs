@@ -250,9 +250,8 @@ impl FaceEngine {
 
     fn recognize(&self, aligned: &RgbaImage) -> AppResult<Vec<f32>> {
         let pixels = arcface_pixels(aligned);
-        let input =
-            Tensor::from_array(([1usize, 3, REC_SIZE as usize, REC_SIZE as usize], pixels))
-                .map_err(|e| AppError::msg(format!("face rec tensor: {e}")))?;
+        let input = Tensor::from_array(([1usize, 3, REC_SIZE as usize, REC_SIZE as usize], pixels))
+            .map_err(|e| AppError::msg(format!("face rec tensor: {e}")))?;
         let mut session = self.rec.lock();
         let outputs = session
             .run(ort::inputs![self.rec_input.as_str() => input])
@@ -274,15 +273,7 @@ impl FaceEngine {
 }
 
 fn load_session(path: &Path, label: &str) -> AppResult<Session> {
-    Session::builder()
-        .map_err(|e| AppError::msg(format!("ort session builder ({label}): {e}")))?
-        .commit_from_file(path)
-        .map_err(|e| {
-            AppError::msg(format!(
-                "failed to load {label} from {}: {e}",
-                path.display()
-            ))
-        })
+    crate::ml::session::load_session(path, label)
 }
 
 fn letterbox(rgba: &RgbaImage, size: u32) -> (Vec<f32>, f32) {
@@ -545,7 +536,12 @@ pub fn umeyama(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> AppResult<(f32, f32,
         imag += sx * dy - sy * dx;
     }
     if src_var < 1e-8 {
-        return Ok((1.0, 0.0, dst_mean[0] - src_mean[0], dst_mean[1] - src_mean[1]));
+        return Ok((
+            1.0,
+            0.0,
+            dst_mean[0] - src_mean[0],
+            dst_mean[1] - src_mean[1],
+        ));
     }
     let a = real / src_var;
     let b = imag / src_var;
@@ -618,11 +614,11 @@ mod tests {
     fn frontal_landmarks_score_high() {
         // Synthetic frontal 5-point set inside a ~100px-wide face.
         let kps = [
-            [40.0, 40.0],  // left eye
-            [80.0, 40.0],  // right eye
-            [60.0, 60.0],  // nose
-            [45.0, 80.0],  // left mouth
-            [75.0, 80.0],  // right mouth
+            [40.0, 40.0], // left eye
+            [80.0, 40.0], // right eye
+            [60.0, 60.0], // nose
+            [45.0, 80.0], // left mouth
+            [75.0, 80.0], // right mouth
         ];
         let score = frontal_score(&kps, 100.0);
         assert!(

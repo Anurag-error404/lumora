@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,22 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 
 const FILE_NAME: &str = "preferences.json";
+
+static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Remember the app-data directory so ONNX session builders can read prefs
+/// without every caller threading the path through.
+pub fn set_app_data_dir(path: PathBuf) {
+    let _ = APP_DATA_DIR.set(path);
+}
+
+/// Load preferences for the running app, or defaults when unset / unreadable.
+pub fn load_current() -> Preferences {
+    APP_DATA_DIR
+        .get()
+        .and_then(|p| load(p).ok())
+        .unwrap_or_default()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -96,7 +113,11 @@ impl Default for AppearancePrefs {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryPrefs {
     pub watch_folders_enabled: bool,
+    /// `manual` | `on_launch` | `hourly` | `daily`
     pub auto_scan: String,
+    /// Path/name patterns to skip during import and folder watching.
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
 }
 
 impl Default for LibraryPrefs {
@@ -104,6 +125,7 @@ impl Default for LibraryPrefs {
         Self {
             watch_folders_enabled: true,
             auto_scan: "manual".into(),
+            ignore_patterns: Vec::new(),
         }
     }
 }
@@ -208,6 +230,16 @@ pub struct ImportExportPrefs {
     pub preserve_folder_structure: bool,
     pub jpeg_quality: u8,
     pub strip_metadata: bool,
+    /// Max long edge for exported stills; `0` keeps original size.
+    #[serde(default)]
+    pub export_max_edge: u32,
+    /// `original` | `date_filename` | `sequential`
+    #[serde(default = "default_export_naming")]
+    pub export_naming: String,
+}
+
+fn default_export_naming() -> String {
+    "original".into()
 }
 
 impl Default for ImportExportPrefs {
@@ -217,6 +249,8 @@ impl Default for ImportExportPrefs {
             preserve_folder_structure: true,
             jpeg_quality: 95,
             strip_metadata: false,
+            export_max_edge: 0,
+            export_naming: default_export_naming(),
         }
     }
 }

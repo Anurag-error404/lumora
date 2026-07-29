@@ -374,8 +374,7 @@ pub fn record_import_run(
 ) -> AppResult<String> {
     let id = Uuid::new_v4().to_string();
     let finished_at = Utc::now();
-    let started_at = finished_at
-        - chrono::Duration::milliseconds(result.duration_ms as i64);
+    let started_at = finished_at - chrono::Duration::milliseconds(result.duration_ms as i64);
     let roots_json = serde_json::to_string(
         &roots
             .iter()

@@ -93,9 +93,7 @@ pub fn clear(conn: &Connection) -> AppResult<usize> {
 }
 
 fn prune(conn: &Connection) -> AppResult<()> {
-    let mut stmt = conn.prepare(
-        "SELECT id FROM saved_searches ORDER BY updated_at DESC",
-    )?;
+    let mut stmt = conn.prepare("SELECT id FROM saved_searches ORDER BY updated_at DESC")?;
     let ids: Vec<String> = stmt
         .query_map([], |r| r.get(0))?
         .filter_map(|r| r.ok())
@@ -147,7 +145,10 @@ mod tests {
             record(&conn, &format!("query-{i}")).unwrap();
         }
         assert_eq!(list(&conn).unwrap().len(), MAX_RECENT);
-        assert_eq!(list(&conn).unwrap()[0].query, format!("query-{}", MAX_RECENT + 4));
+        assert_eq!(
+            list(&conn).unwrap()[0].query,
+            format!("query-{}", MAX_RECENT + 4)
+        );
     }
 
     #[test]

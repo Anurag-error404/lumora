@@ -15,14 +15,14 @@ use parking_lot::Mutex;
 use reverse_geocoder::ReverseGeocoder;
 use serde::{Deserialize, Serialize};
 
+use crate::albums;
 use crate::error::AppResult;
 use crate::places;
 use crate::preferences;
+use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 32;
-const IDLE_MS: u64 = 750;
-const BETWEEN_MS: u64 = 5;
 
 /// Process-wide reverse geocoder. Built once on first use (loads the bundled
 /// GeoNames data and a k-d tree), then shared read-only.
@@ -84,7 +84,10 @@ impl PlacesWorker {
     fn run_loop(self: Arc<Self>) {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 self.wake.store(true, Ordering::Relaxed);
                 continue;
             }
@@ -93,12 +96,15 @@ impl PlacesWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if prefs.ai.background_processing == "paused" {
+            if !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
-            let worked = match self.drain_batch() {
+            let worked = match self.drain_batch(&prefs) {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "places batch failed");
@@ -108,14 +114,16 @@ impl PlacesWorker {
 
             if worked > 0 {
                 self.wake.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(BETWEEN_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).between_ms,
+                ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
             }
         }
     }
 
-    fn drain_batch(&self) -> AppResult<usize> {
+    fn drain_batch(&self, prefs: &preferences::Preferences) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
         let pending = places::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
@@ -126,6 +134,11 @@ impl PlacesWorker {
         let mut done = 0usize;
         for (id, path) in pending {
             *self.last_path.lock() = Some(path.clone());
+            if !prefs.privacy.preserve_gps {
+                let _ = places::mark_job(&conn, &id, "done", None);
+                done += 1;
+                continue;
+            }
             match places::extract_gps(Path::new(&path)) {
                 Some((lat, lon)) => {
                     let (label, country) = places::reverse_geocode(lat, lon);
@@ -144,6 +157,11 @@ impl PlacesWorker {
                             let _ = places::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                         }
                     } else {
+                        if prefs.ai.auto_albums {
+                            if let Some(label) = label.as_deref() {
+                                albums::ensure_named_album_with_asset(&conn, label, &id)?;
+                            }
+                        }
                         done += 1;
                     }
                 }
@@ -153,6 +171,9 @@ impl PlacesWorker {
                     done += 1;
                 }
             }
+            thread::sleep(Duration::from_millis(
+                prefs_runtime::throttle(&prefs.performance).between_ms,
+            ));
         }
         Ok(done)
     }

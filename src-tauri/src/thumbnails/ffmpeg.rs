@@ -126,11 +126,7 @@ pub fn probe_video(path: &Path) -> VideoProbe {
 }
 
 /// Extract one JPEG frame (~1s in, or start) scaled to max edge [`THUMB_MAX_EDGE`].
-pub fn extract_frame_thumbnail(
-    source: &Path,
-    thumbs_dir: &Path,
-    hash: &str,
-) -> AppResult<PathBuf> {
+pub fn extract_frame_thumbnail(source: &Path, thumbs_dir: &Path, hash: &str) -> AppResult<PathBuf> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| {
         AppError::msg(
             "ffmpeg not found on PATH — install it (e.g. brew install ffmpeg) for video thumbnails",

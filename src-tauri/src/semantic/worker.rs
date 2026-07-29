@@ -16,12 +16,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::ml::{self, catalog::ModelKind, clip::ClipEngine};
 use crate::preferences;
+use crate::prefs_runtime;
 use crate::semantic::{self, IMAGE_MODEL_ID};
 use crate::state::open_db;
 
 const BATCH: u32 = 8;
-const IDLE_MS: u64 = 500;
-const BETWEEN_MS: u64 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,7 +132,10 @@ impl EmbedWorker {
     fn run_loop(self: Arc<Self>) {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 // Periodically re-check for newly indexed photos even without a kick.
                 if !self.paused.load(Ordering::Relaxed) {
                     self.wake.store(true, Ordering::Relaxed);
@@ -143,7 +145,10 @@ impl EmbedWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -151,9 +156,11 @@ impl EmbedWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if prefs.ai.background_processing == "paused" {
+            if !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -171,7 +178,7 @@ impl EmbedWorker {
                 }
             };
 
-            let worked = match self.drain_batch(&engine) {
+            let worked = match self.drain_batch(&engine, &prefs) {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "embedding batch failed");
@@ -183,7 +190,9 @@ impl EmbedWorker {
             if worked > 0 {
                 // More work likely remains — stay awake.
                 self.wake.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(BETWEEN_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).between_ms,
+                ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
             }
@@ -209,7 +218,11 @@ impl EmbedWorker {
         Ok(Some(engine))
     }
 
-    fn drain_batch(&self, engine: &ClipEngine) -> AppResult<usize> {
+    fn drain_batch(
+        &self,
+        engine: &ClipEngine,
+        prefs: &preferences::Preferences,
+    ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
         let pending = semantic::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
@@ -256,7 +269,9 @@ impl EmbedWorker {
                     );
                 }
             }
-            thread::sleep(Duration::from_millis(BETWEEN_MS));
+            thread::sleep(Duration::from_millis(
+                prefs_runtime::throttle(&prefs.performance).between_ms,
+            ));
         }
         Ok(done)
     }

@@ -15,11 +15,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppResult;
 use crate::ocr::{self, engine::OcrEngine};
 use crate::preferences;
+use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 4;
-const IDLE_MS: u64 = 750;
-const BETWEEN_MS: u64 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,7 +115,10 @@ impl OcrWorker {
     fn run_loop(self: Arc<Self>) {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 if !self.paused.load(Ordering::Relaxed) {
                     self.wake.store(true, Ordering::Relaxed);
                 }
@@ -125,7 +127,10 @@ impl OcrWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -133,9 +138,11 @@ impl OcrWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !prefs.ai.ocr || prefs.ai.background_processing == "paused" {
+            if !prefs.ai.ocr || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -153,7 +160,7 @@ impl OcrWorker {
                 }
             };
 
-            let worked = match self.drain_batch(&engine) {
+            let worked = match self.drain_batch(&engine, &prefs) {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "OCR batch failed");
@@ -164,7 +171,9 @@ impl OcrWorker {
 
             if worked > 0 {
                 self.wake.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(BETWEEN_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).between_ms,
+                ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
             }
@@ -191,7 +200,11 @@ impl OcrWorker {
         Ok(Some(engine))
     }
 
-    fn drain_batch(&self, engine: &OcrEngine) -> AppResult<usize> {
+    fn drain_batch(
+        &self,
+        engine: &OcrEngine,
+        prefs: &preferences::Preferences,
+    ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
         let pending = ocr::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
@@ -227,7 +240,9 @@ impl OcrWorker {
                     let _ = ocr::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }
-            thread::sleep(Duration::from_millis(BETWEEN_MS));
+            thread::sleep(Duration::from_millis(
+                prefs_runtime::throttle(&prefs.performance).between_ms,
+            ));
         }
         Ok(done)
     }

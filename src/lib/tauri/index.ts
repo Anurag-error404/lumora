@@ -497,6 +497,7 @@ export type Preferences = {
   library: {
     watchFoldersEnabled: boolean;
     autoScan: string;
+    ignorePatterns: string[];
   };
   ai: {
     semanticSearch: boolean;
@@ -527,6 +528,8 @@ export type Preferences = {
     preserveFolderStructure: boolean;
     jpegQuality: number;
     stripMetadata: boolean;
+    exportMaxEdge: number;
+    exportNaming: string;
   };
   updates: {
     checkAutomatically: boolean;
@@ -616,6 +619,7 @@ export const api = {
   getPreferences: () => invoke<Preferences>("get_preferences"),
   setPreferences: (prefs: Preferences) =>
     invoke<Preferences>("set_preferences", { prefs }),
+  pingUserActivity: () => invoke<void>("ping_user_activity"),
   getStorageSummary: () => invoke<StorageSummary>("get_storage_summary"),
   clearThumbnailCache: () => invoke<number>("clear_thumbnail_cache"),
   rebuildThumbnailCache: () => invoke<number>("rebuild_thumbnail_cache"),

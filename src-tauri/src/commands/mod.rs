@@ -10,7 +10,7 @@ use crate::albums;
 use crate::blur;
 use crate::diagnostics;
 use crate::duplicates;
-use crate::edit::{self, EditOps, EditResult, EditRevisionSummary, SavedEditOps, SaveMode};
+use crate::edit::{self, EditOps, EditResult, EditRevisionSummary, SaveMode, SavedEditOps};
 use crate::error::{AppError, AppResult};
 use crate::export;
 use crate::faces;
@@ -22,6 +22,7 @@ use crate::models::*;
 use crate::ocr;
 use crate::places;
 use crate::preferences::{self, Preferences, StorageSummary};
+use crate::prefs_runtime;
 use crate::saved_searches;
 use crate::search;
 use crate::semantic;
@@ -123,7 +124,9 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     // Extract owned paths so we don't hold `State<'_>` across threads.
     let (db_path, thumbs, cancel, app_data) = {
         let state = app.state::<AppState>();
-        state.import_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        state
+            .import_cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         (
             state.paths.db_path.clone(),
             state.paths.thumbs_dir.clone(),
@@ -135,6 +138,9 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     let skip_content_dupes = preferences::load(&app_data)
         .map(|p| p.import_export.skip_duplicates)
         .unwrap_or(true);
+    let import_options = preferences::load(&app_data)
+        .map(|p| indexer::ImportOptions::from_prefs(&p))
+        .unwrap_or_default();
 
     let label = if roots.len() == 1 {
         roots[0].display().to_string()
@@ -164,6 +170,7 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
             &thumbs,
             cancel,
             skip_content_dupes,
+            &import_options,
             |current, total, file| {
                 let _ = app_for_job.emit(
                     "import-progress",
@@ -194,9 +201,8 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     if let Some(state) = app.try_state::<AppState>() {
         let roots_for_log = roots.clone();
         let result_for_log = result.clone();
-        let _ = state.with_db(|conn| {
-            history::record_import_run(conn, &result_for_log, &roots_for_log)
-        });
+        let _ =
+            state.with_db(|conn| history::record_import_run(conn, &result_for_log, &roots_for_log));
     }
 
     if !result.cancelled {
@@ -336,6 +342,7 @@ pub fn set_preferences(
     prefs: Preferences,
 ) -> AppResult<Preferences> {
     preferences::save(&state.paths.app_data, &prefs)?;
+    prefs_runtime::touch_user_activity();
 
     if let Some(ws) = app.try_state::<Arc<watcher::WatcherService>>() {
         ws.set_enabled(prefs.library.watch_folders_enabled);
@@ -347,8 +354,8 @@ pub fn set_preferences(
         }
     }
 
-    // Resume background workers immediately when the user un-pauses.
-    if prefs.ai.background_processing != "paused" {
+    // Resume background workers immediately when preferences allow background work.
+    if prefs_runtime::should_run_background(&prefs) {
         state.embedder.kick();
         state.ocr.kick();
         state.faces.kick();
@@ -357,6 +364,12 @@ pub fn set_preferences(
     }
 
     Ok(prefs)
+}
+
+/// Record foreground UI activity for idle-only background processing.
+#[tauri::command]
+pub fn ping_user_activity() {
+    prefs_runtime::touch_user_activity();
 }
 
 #[tauri::command]
@@ -741,10 +754,7 @@ pub fn list_saved_searches(state: State<'_, AppState>) -> AppResult<Vec<SavedSea
 }
 
 #[tauri::command]
-pub fn record_recent_search(
-    state: State<'_, AppState>,
-    query: String,
-) -> AppResult<SavedSearch> {
+pub fn record_recent_search(state: State<'_, AppState>, query: String) -> AppResult<SavedSearch> {
     state.with_db(|conn| saved_searches::record(conn, &query))
 }
 
@@ -883,11 +893,9 @@ pub fn delete_album(
 ) -> AppResult<usize> {
     let (album_name, asset_ids): (String, Vec<String>) = state.with_db(|conn| {
         let name: String = conn
-            .query_row(
-                "SELECT name FROM albums WHERE id=?1",
-                params![id],
-                |r| r.get(0),
-            )
+            .query_row("SELECT name FROM albums WHERE id=?1", params![id], |r| {
+                r.get(0)
+            })
             .map_err(|_| AppError::msg("album not found"))?;
         let mut stmt = conn.prepare(
             "SELECT aa.asset_id
@@ -1742,9 +1750,8 @@ pub fn model_library(state: State<'_, AppState>) -> AppResult<Vec<ml::LibraryOpt
 /// Download every file for a library option's bundle (user-initiated only).
 #[tauri::command]
 pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResult<ml::MlStatus> {
-    let opt = ml::library::option(&option_id).ok_or_else(|| {
-        AppError::msg(format!("unknown model option '{option_id}'"))
-    })?;
+    let opt = ml::library::option(&option_id)
+        .ok_or_else(|| AppError::msg(format!("unknown model option '{option_id}'")))?;
     let bundle = opt.bundle.ok_or_else(|| {
         AppError::msg(format!(
             "'{}' is a {} backend and does not download",
@@ -1795,7 +1802,10 @@ pub async fn install_model_option(app: AppHandle, option_id: String) -> AppResul
                 );
             })?;
         }
-        tracing::info!(option = option_id.as_str(), "model library install finished");
+        tracing::info!(
+            option = option_id.as_str(),
+            "model library install finished"
+        );
         Ok(())
     })
     .await
@@ -1844,9 +1854,8 @@ pub async fn set_active_model(
     option_id: String,
     reprocess: bool,
 ) -> AppResult<Vec<ml::LibraryOptionStatus>> {
-    let opt = ml::library::option(&option_id).ok_or_else(|| {
-        AppError::msg(format!("unknown model option '{option_id}'"))
-    })?;
+    let opt = ml::library::option(&option_id)
+        .ok_or_else(|| AppError::msg(format!("unknown model option '{option_id}'")))?;
 
     // Install first when the option needs files that aren't present.
     if let Some(bundle) = opt.bundle {
@@ -1958,7 +1967,9 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
         }
     }
     if !want_semantic && !want_ocr && !want_faces && !want_tags {
-        return Err(AppError::msg("select at least one AI capability to reprocess"));
+        return Err(AppError::msg(
+            "select at least one AI capability to reprocess",
+        ));
     }
 
     let faces_dir = state.paths.faces_dir.clone();
@@ -2044,20 +2055,12 @@ pub fn list_person_assets(
 }
 
 #[tauri::command]
-pub fn rename_person(
-    state: State<'_, AppState>,
-    person_id: String,
-    name: String,
-) -> AppResult<()> {
+pub fn rename_person(state: State<'_, AppState>, person_id: String, name: String) -> AppResult<()> {
     state.with_db(|conn| faces::cluster::rename(conn, &person_id, &name))
 }
 
 #[tauri::command]
-pub fn merge_people(
-    state: State<'_, AppState>,
-    into_id: String,
-    from_id: String,
-) -> AppResult<()> {
+pub fn merge_people(state: State<'_, AppState>, into_id: String, from_id: String) -> AppResult<()> {
     state.with_db(|conn| faces::cluster::merge(conn, &into_id, &from_id))
 }
 
@@ -2155,10 +2158,7 @@ pub async fn semantic_search(
 }
 
 /// Fetch assets by id, preserving the caller's order (search ranking).
-fn list_assets_preserving_order(
-    conn: &Connection,
-    ids: &[String],
-) -> AppResult<Vec<AssetSummary>> {
+fn list_assets_preserving_order(conn: &Connection, ids: &[String]) -> AppResult<Vec<AssetSummary>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -2178,7 +2178,8 @@ fn list_assets_preserving_order(
              WHERE deleted_at IS NULL AND id IN ({placeholders})"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(params.as_slice(), search::map_asset)?;
         for row in rows.flatten() {
             by_id.insert(row.id.clone(), row);
@@ -2199,9 +2200,7 @@ pub fn list_blurry_assets(
     limit: Option<u32>,
     offset: Option<u32>,
 ) -> AppResult<Vec<BlurryAsset>> {
-    state.with_db(|conn| {
-        blur::list_blurry(conn, limit.unwrap_or(200), offset.unwrap_or(0))
-    })
+    state.with_db(|conn| blur::list_blurry(conn, limit.unwrap_or(200), offset.unwrap_or(0)))
 }
 
 /// Score images that still lack a blur_score (uses thumbnails when present).
@@ -2393,6 +2392,9 @@ pub fn export_assets_zip(
         strip_metadata: prefs.privacy.strip_metadata_on_export
             || prefs.import_export.strip_metadata,
         jpeg_quality: prefs.import_export.jpeg_quality,
+        preserve_folder_structure: prefs.import_export.preserve_folder_structure,
+        max_edge: prefs.import_export.export_max_edge,
+        naming: prefs.import_export.export_naming,
     };
     let result =
         state.with_db(|conn| export::export_assets_to_zip(conn, &ids, &dest_path, options))?;
@@ -2445,14 +2447,10 @@ pub fn apply_image_edit(
     let result = state.with_db(|conn| edit::apply_edit(conn, &thumbs, &asset_id, &ops, mode))?;
     let label = match result.mode {
         SaveMode::Replace => format!("Edited “{}”", edit_file_name(&result.asset.path)),
-        SaveMode::Copy => format!(
-            "Saved edited copy “{}”",
-            edit_file_name(&result.asset.path)
-        ),
+        SaveMode::Copy => format!("Saved edited copy “{}”", edit_file_name(&result.asset.path)),
     };
-    let _ = state.with_db(|conn| {
-        history::record_activity(conn, "edit", &label, Some(&result.asset.id))
-    });
+    let _ = state
+        .with_db(|conn| history::record_activity(conn, "edit", &label, Some(&result.asset.id)));
     state.embedder.kick();
     state.ocr.kick();
     state.faces.kick();

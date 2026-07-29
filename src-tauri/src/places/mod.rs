@@ -278,9 +278,33 @@ mod tests {
         seed_asset(&conn, "a2");
         seed_asset(&conn, "a3");
 
-        store_place(&conn, "a1", 40.0, -73.0, Some("New York, New York"), Some("US")).unwrap();
-        store_place(&conn, "a2", 40.1, -73.1, Some("New York, New York"), Some("US")).unwrap();
-        store_place(&conn, "a3", 48.85, 2.35, Some("Paris, Île-de-France"), Some("FR")).unwrap();
+        store_place(
+            &conn,
+            "a1",
+            40.0,
+            -73.0,
+            Some("New York, New York"),
+            Some("US"),
+        )
+        .unwrap();
+        store_place(
+            &conn,
+            "a2",
+            40.1,
+            -73.1,
+            Some("New York, New York"),
+            Some("US"),
+        )
+        .unwrap();
+        store_place(
+            &conn,
+            "a3",
+            48.85,
+            2.35,
+            Some("Paris, Île-de-France"),
+            Some("FR"),
+        )
+        .unwrap();
 
         let groups = list_places(&conn).unwrap();
         assert_eq!(groups.len(), 2);
@@ -314,7 +338,15 @@ mod tests {
         seed_asset(&conn, "a1");
         assert_eq!(pending_assets(&conn, 10).unwrap().len(), 1);
 
-        store_place(&conn, "a1", 40.0, -73.0, Some("New York, New York"), Some("US")).unwrap();
+        store_place(
+            &conn,
+            "a1",
+            40.0,
+            -73.0,
+            Some("New York, New York"),
+            Some("US"),
+        )
+        .unwrap();
         assert!(pending_assets(&conn, 10).unwrap().is_empty());
 
         let removed = clear_all(&conn).unwrap();
@@ -329,8 +361,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
         seed_asset(&conn, "a1");
-        store_place(&conn, "a1", 40.0, -73.0, Some("New York, New York"), Some("US")).unwrap();
-        conn.execute("DELETE FROM assets WHERE id = 'a1'", []).unwrap();
+        store_place(
+            &conn,
+            "a1",
+            40.0,
+            -73.0,
+            Some("New York, New York"),
+            Some("US"),
+        )
+        .unwrap();
+        conn.execute("DELETE FROM assets WHERE id = 'a1'", [])
+            .unwrap();
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM asset_places", [], |r| r.get(0))
             .unwrap();

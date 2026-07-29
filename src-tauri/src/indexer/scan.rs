@@ -49,6 +49,11 @@ pub fn is_supported_media(path: &Path) -> bool {
     media_type_for_path(path).is_some()
 }
 
+/// Supported media that also passes the user's ignore patterns.
+pub fn is_indexable_media(path: &Path, ignore_patterns: &[String]) -> bool {
+    is_supported_media(path) && !crate::prefs_runtime::path_is_ignored(path, ignore_patterns)
+}
+
 fn is_appledouble_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -79,7 +84,10 @@ mod tests {
             media_type_for_path(&PathBuf::from("._20250719_122527.jpg")),
             None
         );
-        assert_eq!(media_type_for_path(&PathBuf::from("folder/._clip.mp4")), None);
+        assert_eq!(
+            media_type_for_path(&PathBuf::from("folder/._clip.mp4")),
+            None
+        );
         assert_eq!(
             media_type_for_path(&PathBuf::from("20250719_122527.jpg")),
             Some(MediaKind::Image)

@@ -29,10 +29,7 @@ pub struct TagsEngine {
 
 impl TagsEngine {
     pub fn load(paths: &TagsModelPaths) -> AppResult<Self> {
-        let session = Session::builder()
-            .map_err(|e| AppError::msg(format!("ort session builder: {e}")))?
-            .commit_from_file(&paths.model)
-            .map_err(|e| AppError::msg(format!("failed to load MobileNetV4: {e}")))?;
+        let session = crate::ml::session::load_session(&paths.model, "MobileNetV4")?;
         let input_name = session
             .inputs()
             .first()
@@ -103,8 +100,8 @@ impl TagsEngine {
 }
 
 fn load_labels(path: &Path) -> AppResult<Vec<String>> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| AppError::msg(format!("read labels: {e}")))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| AppError::msg(format!("read labels: {e}")))?;
     Ok(text
         .lines()
         .map(|l| l.trim().to_string())
@@ -143,12 +140,7 @@ fn preprocess(img: &DynamicImage, input_size: u32, resize_short: u32) -> Vec<f32
     out
 }
 
-fn top_k(
-    logits: &[f32],
-    labels: &[String],
-    k: usize,
-    min_score: f32,
-) -> Vec<(String, f32)> {
+fn top_k(logits: &[f32], labels: &[String], k: usize, min_score: f32) -> Vec<(String, f32)> {
     let probs = softmax(logits);
     let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

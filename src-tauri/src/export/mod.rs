@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{copy, BufReader, Cursor, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-use image::ImageFormat;
+use image::{GenericImageView, ImageFormat};
 use rusqlite::{params, Connection};
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
@@ -12,10 +12,13 @@ use zip::ZipWriter;
 use crate::error::{AppError, AppResult};
 use crate::models::ExportResult;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ExportOptions {
     pub strip_metadata: bool,
     pub jpeg_quality: u8,
+    pub preserve_folder_structure: bool,
+    pub max_edge: u32,
+    pub naming: String,
 }
 
 impl Default for ExportOptions {
@@ -23,6 +26,9 @@ impl Default for ExportOptions {
         Self {
             strip_metadata: false,
             jpeg_quality: 95,
+            preserve_folder_structure: true,
+            max_edge: 0,
+            naming: "original".into(),
         }
     }
 }
@@ -42,17 +48,17 @@ pub fn export_assets_to_zip(
         return Err(AppError::msg("export path required"));
     }
 
-    let mut paths: Vec<(String, PathBuf)> = Vec::with_capacity(asset_ids.len());
+    let mut paths: Vec<(String, PathBuf, Option<String>)> = Vec::with_capacity(asset_ids.len());
     for id in asset_ids {
-        let path: Option<String> = conn
+        let path: Option<(String, Option<String>)> = conn
             .query_row(
-                "SELECT path FROM assets WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT path, captured_at FROM assets WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
-        if let Some(path) = path {
-            paths.push((id.clone(), PathBuf::from(path)));
+        if let Some((path, captured_at)) = path {
+            paths.push((id.clone(), PathBuf::from(path), captured_at));
         }
     }
 
@@ -74,25 +80,41 @@ pub fn export_assets_to_zip(
     let options_zip = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
 
     let mut used_names: HashMap<String, usize> = HashMap::new();
+    let common_parent = paths.iter().filter_map(|(_, path, _)| path.parent()).fold(
+        None::<PathBuf>,
+        |common, parent| {
+            Some(match common {
+                Some(existing) => common_path(&existing, parent),
+                None => parent.to_path_buf(),
+            })
+        },
+    );
     let mut exported = 0u32;
     let mut missing = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
-    for (_id, path) in &paths {
+    for (index, (_id, path, captured_at)) in paths.iter().enumerate() {
         if !path.is_file() {
             missing += 1;
             errors.push(format!("missing file: {}", path.display()));
             continue;
         }
 
-        let entry_name = unique_entry_name(path, &mut used_names);
+        let entry_name = unique_entry_name(
+            path,
+            captured_at.as_deref(),
+            index + 1,
+            common_parent.as_deref(),
+            &options,
+            &mut used_names,
+        );
         if let Err(e) = zip.start_file(&entry_name, options_zip) {
             errors.push(format!("{}: {e}", path.display()));
             continue;
         }
 
-        let write_result = if options.strip_metadata {
-            match stripped_image_bytes(path, options.jpeg_quality) {
+        let write_result = if options.strip_metadata || options.max_edge > 0 {
+            match processed_image_bytes(path, options.jpeg_quality, options.max_edge) {
                 Ok(Some(bytes)) => zip.write_all(&bytes).map_err(|e| e.to_string()),
                 Ok(None) => {
                     // Videos / unsupported: fall back to byte-copy (cannot strip).
@@ -133,11 +155,17 @@ pub fn export_assets_to_zip(
 fn copy_file_into_zip(path: &Path, zip: &mut ZipWriter<File>) -> Result<(), String> {
     let src = File::open(path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(src);
-    copy(&mut reader, zip).map(|_| ()).map_err(|e| e.to_string())
+    copy(&mut reader, zip)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Re-encode still images without EXIF/GPS. Returns `None` for non-image files.
-fn stripped_image_bytes(path: &Path, jpeg_quality: u8) -> AppResult<Option<Vec<u8>>> {
+fn processed_image_bytes(
+    path: &Path,
+    jpeg_quality: u8,
+    max_edge: u32,
+) -> AppResult<Option<Vec<u8>>> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -152,7 +180,13 @@ fn stripped_image_bytes(path: &Path, jpeg_quality: u8) -> AppResult<Option<Vec<u
         _ => return Ok(None),
     };
 
-    let img = image::open(path).map_err(|e| AppError::msg(format!("decode failed: {e}")))?;
+    let mut img = image::open(path).map_err(|e| AppError::msg(format!("decode failed: {e}")))?;
+    if max_edge > 0 {
+        let (width, height) = img.dimensions();
+        if width.max(height) > max_edge {
+            img = img.thumbnail(max_edge, max_edge);
+        }
+    }
     let mut buf = Cursor::new(Vec::new());
     match format {
         ImageFormat::Jpeg => {
@@ -170,27 +204,80 @@ fn stripped_image_bytes(path: &Path, jpeg_quality: u8) -> AppResult<Option<Vec<u
     Ok(Some(buf.into_inner()))
 }
 
-fn unique_entry_name(path: &Path, used_names: &mut HashMap<String, usize>) -> String {
-    let base = path
+fn unique_entry_name(
+    path: &Path,
+    captured_at: Option<&str>,
+    sequence: usize,
+    common_parent: Option<&Path>,
+    options: &ExportOptions,
+    used_names: &mut HashMap<String, usize>,
+) -> String {
+    let original = path
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".into());
+    let base = match options.naming.as_str() {
+        "date_filename" => format!(
+            "{}_{}",
+            captured_at
+                .and_then(|date| date.get(..10))
+                .unwrap_or("undated")
+                .replace(':', "-"),
+            original
+        ),
+        "sequential" => {
+            let ext = path
+                .extension()
+                .map(|s| format!(".{}", s.to_string_lossy()))
+                .unwrap_or_default();
+            format!("{sequence:04}{ext}")
+        }
+        _ => original,
+    };
+    let relative_dir = if options.preserve_folder_structure {
+        common_parent
+            .and_then(|parent| path.parent().and_then(|dir| dir.strip_prefix(parent).ok()))
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+    } else {
+        None
+    };
 
-    let count = used_names.entry(base.clone()).or_insert(0);
+    let key = relative_dir
+        .as_ref()
+        .map(|dir| format!("{dir}/{base}"))
+        .unwrap_or_else(|| base.clone());
+    let count = used_names.entry(key).or_insert(0);
     *count += 1;
-    if *count == 1 {
+    let unique_base = if *count == 1 {
         base
     } else {
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "file".into());
-        let ext = path
-            .extension()
-            .map(|s| format!(".{}", s.to_string_lossy()))
-            .unwrap_or_default();
+        let (stem, ext) = match base.rfind('.') {
+            Some(index) => (&base[..index], &base[index..]),
+            None => (base.as_str(), ""),
+        };
         format!("{stem}-{count}{ext}")
-    }
+    };
+    relative_dir
+        .map(|dir| format!("{dir}/{unique_base}"))
+        .unwrap_or(unique_base)
+}
+
+fn common_path(left: &Path, right: &Path) -> PathBuf {
+    let components: Vec<_> = left
+        .components()
+        .zip(right.components())
+        .take_while(|(a, b)| a == b)
+        .map(|(component, _)| component)
+        .collect();
+    components
+        .iter()
+        .fold(PathBuf::new(), |mut path, component| {
+            if !matches!(component, Component::CurDir) {
+                path.push(component.as_os_str());
+            }
+            path
+        })
 }
 
 #[cfg(test)]
@@ -235,9 +322,13 @@ mod tests {
         seed_asset(&conn, "3", &media.join("extra.png"));
 
         let dest = dir.path().join("share.zip");
-        let result =
-            export_assets_to_zip(&conn, &["1".into(), "2".into()], &dest, ExportOptions::default())
-                .unwrap();
+        let result = export_assets_to_zip(
+            &conn,
+            &["1".into(), "2".into()],
+            &dest,
+            ExportOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.exported, 2);
         assert_eq!(result.missing, 0);
@@ -251,12 +342,12 @@ mod tests {
         names.sort();
         assert_eq!(
             names,
-            vec!["photo-2.jpg".to_string(), "photo.jpg".to_string()]
+            vec!["a/photo.jpg".to_string(), "b/photo.jpg".to_string()]
         );
 
         let mut buf = Vec::new();
         archive
-            .by_name("photo.jpg")
+            .by_name("a/photo.jpg")
             .unwrap()
             .read_to_end(&mut buf)
             .unwrap();
@@ -275,5 +366,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("select at least one"));
+    }
+
+    #[test]
+    fn export_resizes_and_uses_sequential_names() {
+        let dir = tempdir().unwrap();
+        let photo = dir.path().join("wide.jpg");
+        RgbImage::from_pixel(100, 50, Rgb([1, 2, 3]))
+            .save(&photo)
+            .unwrap();
+        let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
+        seed_asset(&conn, "wide", &photo);
+        let dest = dir.path().join("share.zip");
+
+        export_assets_to_zip(
+            &conn,
+            &["wide".into()],
+            &dest,
+            ExportOptions {
+                max_edge: 20,
+                naming: "sequential".into(),
+                preserve_folder_structure: false,
+                ..ExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut archive = ZipArchive::new(File::open(&dest).unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        archive
+            .by_name("0001.jpg")
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+        let image = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(image.dimensions(), (20, 10));
     }
 }

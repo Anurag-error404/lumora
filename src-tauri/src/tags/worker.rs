@@ -11,12 +11,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::preferences;
+use crate::prefs_runtime;
 use crate::state::open_db;
 use crate::tags::{self, engine::TagsEngine};
 
 const BATCH: u32 = 8;
-const IDLE_MS: u64 = 750;
-const BETWEEN_MS: u64 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,7 +132,10 @@ impl TagsWorker {
     fn run_loop(self: Arc<Self>) {
         loop {
             if !self.wake.swap(false, Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 if !self.paused.load(Ordering::Relaxed) {
                     self.wake.store(true, Ordering::Relaxed);
                 }
@@ -142,7 +144,10 @@ impl TagsWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                let prefs = preferences::load(&self.app_data).unwrap_or_default();
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -150,17 +155,17 @@ impl TagsWorker {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            if !prefs.ai.object_detection || prefs.ai.background_processing == "paused" {
+            if !prefs.ai.object_detection || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
                 if !prefs.ai.object_detection {
-                    *self.last_error.lock() = Some(
-                        "Object detection is turned off in Settings → AI Features.".into(),
-                    );
-                } else {
                     *self.last_error.lock() =
-                        Some("Background AI processing is paused.".into());
+                        Some("Object detection is turned off in Settings → AI Features.".into());
+                } else {
+                    *self.last_error.lock() = Some("Background AI processing is paused.".into());
                 }
-                thread::sleep(Duration::from_millis(IDLE_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).idle_ms,
+                ));
                 continue;
             }
 
@@ -168,22 +173,25 @@ impl TagsWorker {
                 Ok(Some(e)) => e,
                 Ok(None) => {
                     self.running.store(false, Ordering::Relaxed);
-                    *self.last_error.lock() = Some(
-                        "Auto-tag models are not fully installed yet.".into(),
-                    );
-                    thread::sleep(Duration::from_millis(IDLE_MS));
+                    *self.last_error.lock() =
+                        Some("Auto-tag models are not fully installed yet.".into());
+                    thread::sleep(Duration::from_millis(
+                        prefs_runtime::throttle(&prefs.performance).idle_ms,
+                    ));
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "auto-tags engine unavailable");
                     *self.last_error.lock() = Some(e.to_string());
                     self.running.store(false, Ordering::Relaxed);
-                    thread::sleep(Duration::from_millis(IDLE_MS));
+                    thread::sleep(Duration::from_millis(
+                        prefs_runtime::throttle(&prefs.performance).idle_ms,
+                    ));
                     continue;
                 }
             };
 
-            let worked = match self.drain_batch(&engine) {
+            let worked = match self.drain_batch(&engine, &prefs) {
                 Ok(n) => n,
                 Err(e) => {
                     tracing::warn!(error = %e, "auto-tags batch failed");
@@ -194,7 +202,9 @@ impl TagsWorker {
 
             if worked > 0 {
                 self.wake.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(BETWEEN_MS));
+                thread::sleep(Duration::from_millis(
+                    prefs_runtime::throttle(&prefs.performance).between_ms,
+                ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
             }
@@ -223,7 +233,11 @@ impl TagsWorker {
         Ok(Some(engine))
     }
 
-    fn drain_batch(&self, engine: &TagsEngine) -> AppResult<usize> {
+    fn drain_batch(
+        &self,
+        engine: &TagsEngine,
+        prefs: &preferences::Preferences,
+    ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
         let pending = tags::pending_assets(&conn, BATCH)?;
         if pending.is_empty() {
@@ -258,7 +272,9 @@ impl TagsWorker {
                     let _ = tags::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }
-            thread::sleep(Duration::from_millis(BETWEEN_MS));
+            thread::sleep(Duration::from_millis(
+                prefs_runtime::throttle(&prefs.performance).between_ms,
+            ));
         }
         Ok(done)
     }

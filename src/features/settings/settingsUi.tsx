@@ -21,6 +21,7 @@ export const SETTINGS_NAV: { id: SettingsSectionId; label: string }[] = [
   { id: "ai", label: "AI Features" },
   { id: "privacy", label: "Privacy & Security" },
   { id: "storage", label: "Storage" },
+  { id: "performance", label: "Performance" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
   { id: "importExport", label: "Import & Export" },
   { id: "updates", label: "Updates" },

@@ -44,9 +44,7 @@ pub fn active_bundle(app_data: &std::path::Path) -> String {
         .map(|p| p.ai.ocr_model)
         .unwrap_or_else(|_| "rapidocr-ppv4".into());
     let opt = ml::library::resolve_active(ml::library::Capability::Ocr, &preferred);
-    opt.bundle
-        .unwrap_or(ml::catalog::OCR_BUNDLE)
-        .to_string()
+    opt.bundle.unwrap_or(ml::catalog::OCR_BUNDLE).to_string()
 }
 
 /// True when every OCR bundle file is registered.
@@ -268,7 +266,8 @@ mod tests {
         let (_dir, conn) = open();
         add_image(&conn, "a1");
         store(&conn, "a1", "hello", 0.5, None).unwrap();
-        conn.execute("DELETE FROM assets WHERE id = 'a1'", []).unwrap();
+        conn.execute("DELETE FROM assets WHERE id = 'a1'", [])
+            .unwrap();
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM asset_text", [], |r| r.get(0))
             .unwrap();

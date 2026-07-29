@@ -325,7 +325,10 @@ mod tests {
         let got = ids(&rows);
         assert_eq!(rows.len(), 2, "got {got:?}");
         assert!(got.contains(&"s1") && got.contains(&"s2"));
-        assert!(!got.contains(&"b1"), "back camera must not count as a selfie");
+        assert!(
+            !got.contains(&"b1"),
+            "back camera must not count as a selfie"
+        );
         assert_eq!(count(&conn, SmartCollection::Selfies).unwrap(), 2);
     }
 
@@ -405,10 +408,8 @@ mod tests {
     fn every_collection_produces_runnable_sql_on_an_empty_library() {
         let (_dir, conn) = open();
         for kind in SmartCollection::ALL {
-            list(&conn, kind, 10, 0)
-                .unwrap_or_else(|e| panic!("list failed for {kind:?}: {e}"));
-            let n = count(&conn, kind)
-                .unwrap_or_else(|e| panic!("count failed for {kind:?}: {e}"));
+            list(&conn, kind, 10, 0).unwrap_or_else(|e| panic!("list failed for {kind:?}: {e}"));
+            let n = count(&conn, kind).unwrap_or_else(|e| panic!("count failed for {kind:?}: {e}"));
             assert_eq!(n, 0);
         }
     }

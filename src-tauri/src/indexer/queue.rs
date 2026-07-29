@@ -9,6 +9,8 @@ use parking_lot::Mutex;
 use crate::error::AppResult;
 use crate::indexer;
 use crate::models::IndexProgress;
+use crate::preferences;
+use crate::prefs_runtime;
 use crate::state::open_db;
 
 #[derive(Debug, Clone)]
@@ -63,11 +65,17 @@ impl IndexerQueue {
                     let _ = self.process(job);
                     self.processed.fetch_add(1, Ordering::Relaxed);
                     // Mild throttle so UI stays responsive on large imports.
-                    thread::sleep(Duration::from_millis(2));
+                    let prefs = preferences::load_current();
+                    thread::sleep(Duration::from_millis(
+                        prefs_runtime::throttle(&prefs.performance).between_ms,
+                    ));
                 }
                 None => {
                     self.running.store(false, Ordering::Relaxed);
-                    thread::sleep(Duration::from_millis(50));
+                    let prefs = preferences::load_current();
+                    thread::sleep(Duration::from_millis(
+                        prefs_runtime::throttle(&prefs.performance).idle_ms,
+                    ));
                 }
             }
         }

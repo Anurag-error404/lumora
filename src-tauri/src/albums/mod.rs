@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use uuid::Uuid;
 
 use crate::error::AppResult;
 use crate::models::Album;
@@ -55,6 +56,42 @@ pub fn ensure_cover(conn: &Connection, album_id: &str, asset_id: &str) -> AppRes
         params![asset_id, album_id],
     )?;
     Ok(())
+}
+
+/// Add an asset to an existing case-insensitive named album, creating it first
+/// when needed. The first asset becomes its cover.
+pub fn ensure_named_album_with_asset(
+    conn: &Connection,
+    name: &str,
+    asset_id: &str,
+) -> AppResult<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Ok(());
+    }
+    let album_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM albums WHERE name = ?1 COLLATE NOCASE",
+            params![name],
+            |row| row.get(0),
+        )
+        .ok();
+    let album_id = match album_id {
+        Some(id) => id,
+        None => {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO albums (id, name, created_at) VALUES (?1, ?2, ?3)",
+                params![id, name, chrono::Utc::now().to_rfc3339()],
+            )?;
+            id
+        }
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO album_assets (album_id, asset_id) VALUES (?1, ?2)",
+        params![album_id, asset_id],
+    )?;
+    ensure_cover(conn, &album_id, asset_id)
 }
 
 #[cfg(test)]

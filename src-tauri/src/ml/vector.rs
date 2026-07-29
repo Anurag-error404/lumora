@@ -134,7 +134,10 @@ mod tests {
     fn top_k_returns_the_best_scores_in_descending_order() {
         let scored = vec![("a", 0.1), ("b", 0.9), ("c", 0.5), ("d", 0.7)];
         let top = top_k(scored, 2);
-        assert_eq!(top.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["b", "d"]);
+        assert_eq!(
+            top.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            ["b", "d"]
+        );
     }
 
     #[test]

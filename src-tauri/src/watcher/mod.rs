@@ -17,13 +17,15 @@ use crate::indexer::queue::{IndexJob, IndexerQueue};
 pub struct WatcherService {
     roots: Mutex<Vec<PathBuf>>,
     enabled: AtomicBool,
+    app_data: PathBuf,
 }
 
 impl WatcherService {
-    pub fn new() -> Self {
+    pub fn new(app_data: PathBuf) -> Self {
         Self {
             roots: Mutex::new(Vec::new()),
             enabled: AtomicBool::new(true),
+            app_data,
         }
     }
 
@@ -70,13 +72,12 @@ impl WatcherService {
                 match rx.recv_timeout(Duration::from_millis(500)) {
                     Ok(Ok(event)) => {
                         if service.enabled.load(Ordering::Relaxed) {
-                            handle_event(&queue, event);
+                            handle_event(&queue, event, &service.app_data);
                         }
                     }
                     Ok(Err(err)) => tracing::warn!(?err, "watch error"),
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        let desired: HashSet<PathBuf> = if service.enabled.load(Ordering::Relaxed)
-                        {
+                        let desired: HashSet<PathBuf> = if service.enabled.load(Ordering::Relaxed) {
                             service.roots.lock().iter().cloned().collect()
                         } else {
                             HashSet::new()
@@ -127,12 +128,15 @@ impl WatcherService {
     }
 }
 
-fn handle_event(queue: &IndexerQueue, event: notify::Event) {
+fn handle_event(queue: &IndexerQueue, event: notify::Event, app_data: &Path) {
+    let ignore = crate::preferences::load(app_data)
+        .map(|p| p.library.ignore_patterns)
+        .unwrap_or_default();
     let paths = event.paths;
     match event.kind {
         EventKind::Create(_) | EventKind::Modify(_) => {
             for path in paths {
-                if path.is_file() && indexer::is_supported_media(&path) {
+                if path.is_file() && indexer::is_indexable_media(&path, &ignore) {
                     queue.enqueue(IndexJob::Upsert {
                         path,
                         generate_thumb: true,

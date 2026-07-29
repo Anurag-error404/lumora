@@ -57,6 +57,39 @@ pub fn write_thumbnail_jpeg(img: &DynamicImage, dest: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Delete oldest thumbnail files until the cache is under `budget_mb` megabytes.
+/// A budget of `0` means unlimited.
+pub fn enforce_cache_budget(thumbs_dir: &Path, budget_mb: u32) {
+    if budget_mb == 0 || !thumbs_dir.is_dir() {
+        return;
+    }
+    let budget = (budget_mb as u64).saturating_mul(1024 * 1024);
+    let mut entries: Vec<(std::path::PathBuf, u64, std::time::SystemTime)> =
+        walkdir::WalkDir::new(thumbs_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .filter_map(|e| {
+                let meta = e.metadata().ok()?;
+                let modified = meta.modified().ok()?;
+                Some((e.into_path(), meta.len(), modified))
+            })
+            .collect();
+    let mut total: u64 = entries.iter().map(|(_, len, _)| *len).sum();
+    if total <= budget {
+        return;
+    }
+    entries.sort_by_key(|(_, _, modified)| *modified);
+    for (path, len, _) in entries {
+        if total <= budget {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
+        }
+    }
+}
+
 /// Encode a thumbnail entirely in memory. Used by the privacy vault, where
 /// writing a plaintext preview to the thumbnail cache would defeat the point.
 pub fn thumbnail_bytes(source: &Path) -> AppResult<Vec<u8>> {
@@ -133,9 +166,7 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
 
 /// aHash from an already-decoded image (avoids a second full decode on import).
 pub fn perceptual_hash_from_image(img: &DynamicImage) -> String {
-    let small = img
-        .resize_exact(8, 8, FilterType::Nearest)
-        .to_luma8();
+    let small = img.resize_exact(8, 8, FilterType::Nearest).to_luma8();
     let pixels: Vec<u8> = small.pixels().map(|p| p.0[0]).collect();
     let avg = (pixels.iter().map(|&p| p as u32).sum::<u32>() / pixels.len() as u32) as u8;
     let mut bits: u64 = 0;

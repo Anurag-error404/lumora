@@ -13,7 +13,35 @@ use crate::error::AppResult;
 use crate::models::ImportResult;
 use crate::thumbnails;
 
-pub use scan::{is_supported_media, media_type_for_path, MediaKind};
+pub use scan::{is_indexable_media, is_supported_media, media_type_for_path, MediaKind};
+
+/// Options applied while scanning / preparing assets for import.
+#[derive(Debug, Clone)]
+pub struct ImportOptions {
+    pub ignore_patterns: Vec<String>,
+    pub preserve_exif: bool,
+    pub thumbnail_cache_mb: u32,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        Self {
+            ignore_patterns: Vec::new(),
+            preserve_exif: true,
+            thumbnail_cache_mb: 1024,
+        }
+    }
+}
+
+impl ImportOptions {
+    pub fn from_prefs(prefs: &crate::preferences::Preferences) -> Self {
+        Self {
+            ignore_patterns: prefs.library.ignore_patterns.clone(),
+            preserve_exif: prefs.privacy.preserve_exif,
+            thumbnail_cache_mb: prefs.performance.thumbnail_cache_mb,
+        }
+    }
+}
 
 pub fn sha256_file(path: &Path) -> AppResult<String> {
     use std::io::Read;
@@ -36,7 +64,9 @@ pub fn upsert_asset(
     thumbs_dir: &Path,
     generate_thumb: bool,
 ) -> AppResult<UpsertOutcome> {
-    let Some(prepared) = prepare_asset(path, thumbs_dir, generate_thumb)? else {
+    let Some(prepared) =
+        prepare_asset(path, thumbs_dir, generate_thumb, &ImportOptions::default())?
+    else {
         return Ok(UpsertOutcome::Skipped);
     };
     commit_prepared(conn, &prepared, false)
@@ -48,8 +78,12 @@ pub fn prepare_asset(
     path: &Path,
     thumbs_dir: &Path,
     generate_thumb: bool,
+    options: &ImportOptions,
 ) -> AppResult<Option<PreparedAsset>> {
     if !path.is_file() {
+        return Ok(None);
+    }
+    if crate::prefs_runtime::path_is_ignored(path, &options.ignore_patterns) {
         return Ok(None);
     }
     let Some(kind) = media_type_for_path(path) else {
@@ -57,7 +91,7 @@ pub fn prepare_asset(
     };
 
     let hash = sha256_file(path)?;
-    let meta = read_media_meta(path, kind, thumbs_dir, generate_thumb, &hash)?;
+    let meta = read_media_meta(path, kind, thumbs_dir, generate_thumb, &hash, options)?;
     Ok(Some(PreparedAsset {
         path: path.to_path_buf(),
         hash,
@@ -159,7 +193,13 @@ pub fn commit_prepared(
         )?;
     }
 
-    refresh_fts_basic(conn, &id, &path_str, meta.camera.as_deref(), meta.lens.as_deref())?;
+    refresh_fts_basic(
+        conn,
+        &id,
+        &path_str,
+        meta.camera.as_deref(),
+        meta.lens.as_deref(),
+    )?;
     Ok(outcome)
 }
 
@@ -198,6 +238,7 @@ pub fn import_folder_with_progress(
         thumbs_dir,
         Arc::new(AtomicBool::new(false)),
         false,
+        &ImportOptions::default(),
         on_progress,
     )
 }
@@ -210,6 +251,7 @@ pub fn import_paths_with_progress(
     thumbs_dir: &Path,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     skip_content_dupes: bool,
+    options: &ImportOptions,
     mut on_progress: impl FnMut(u64, u64, &Path),
 ) -> AppResult<ImportResult> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -217,7 +259,7 @@ pub fn import_paths_with_progress(
     use std::sync::Arc;
     use std::thread;
 
-    let files = collect_media_files(roots)?;
+    let files = collect_media_files_filtered(roots, &options.ignore_patterns)?;
     let total = files.len() as u64;
     let mut scanned = 0u64;
     let mut inserted = 0u64;
@@ -246,6 +288,7 @@ pub fn import_paths_with_progress(
     let next = Arc::new(AtomicUsize::new(0));
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = mpsc::channel::<(usize, AppResult<Option<PreparedAsset>>)>();
+    let options = Arc::new(options.clone());
 
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
@@ -254,21 +297,20 @@ pub fn import_paths_with_progress(
         let stop = Arc::clone(&stop);
         let cancel = Arc::clone(&cancel);
         let thumbs_dir = thumbs_dir.clone();
+        let options = Arc::clone(&options);
         let tx = tx.clone();
-        handles.push(thread::spawn(move || {
-            loop {
-                if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
-                    stop.store(true, Ordering::Relaxed);
-                    break;
-                }
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= files.len() {
-                    break;
-                }
-                let prepared = prepare_asset(&files[i], &thumbs_dir, true);
-                if tx.send((i, prepared)).is_err() {
-                    break;
-                }
+        handles.push(thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+                stop.store(true, Ordering::Relaxed);
+                break;
+            }
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            if i >= files.len() {
+                break;
+            }
+            let prepared = prepare_asset(&files[i], &thumbs_dir, true, &options);
+            if tx.send((i, prepared)).is_err() {
+                break;
             }
         }));
     }
@@ -355,13 +397,26 @@ pub fn import_paths_with_progress(
 }
 
 /// Collect supported media files from directories (recursive) and individual file paths.
+#[allow(dead_code)]
 pub fn collect_media_files(roots: &[std::path::PathBuf]) -> AppResult<Vec<std::path::PathBuf>> {
+    collect_media_files_filtered(roots, &[])
+}
+
+/// Like [`collect_media_files`], but skips paths matching `ignore_patterns`.
+pub fn collect_media_files_filtered(
+    roots: &[std::path::PathBuf],
+    ignore_patterns: &[String],
+) -> AppResult<Vec<std::path::PathBuf>> {
     let mut files = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     for root in roots {
         if root.is_file() {
-            if !is_supported_media(root) {
+            if !is_indexable_media(root, ignore_patterns) {
+                if is_supported_media(root) {
+                    // Explicitly selected but ignored — skip quietly.
+                    continue;
+                }
                 return Err(crate::error::AppError::msg(format!(
                     "unsupported media file: {}",
                     root.display()
@@ -379,7 +434,7 @@ pub fn collect_media_files(roots: &[std::path::PathBuf]) -> AppResult<Vec<std::p
                 .filter_map(|e| e.ok())
             {
                 let path = entry.into_path();
-                if path.is_file() && is_supported_media(&path) {
+                if path.is_file() && is_indexable_media(&path, ignore_patterns) {
                     let key = path.display().to_string();
                     if seen.insert(key) {
                         files.push(path);
@@ -433,6 +488,7 @@ fn read_media_meta(
     thumbs_dir: &Path,
     generate_thumb: bool,
     hash: &str,
+    options: &ImportOptions,
 ) -> AppResult<MediaMeta> {
     let file_size = std::fs::metadata(path).ok().map(|m| m.len() as i64);
     let mut meta = MediaMeta {
@@ -450,19 +506,21 @@ fn read_media_meta(
     };
 
     if kind == MediaKind::Image {
-        if let Ok(file) = std::fs::File::open(path) {
-            let mut bufreader = std::io::BufReader::new(&file);
-            if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
-                meta.captured_at = exif
-                    .get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
-                    .or_else(|| exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY))
-                    .map(|f| f.display_value().to_string());
-                meta.camera = exif
-                    .get_field(exif::Tag::Model, exif::In::PRIMARY)
-                    .map(|f| f.display_value().to_string().trim_matches('"').to_string());
-                meta.lens = exif
-                    .get_field(exif::Tag::LensModel, exif::In::PRIMARY)
-                    .map(|f| f.display_value().to_string().trim_matches('"').to_string());
+        if options.preserve_exif {
+            if let Ok(file) = std::fs::File::open(path) {
+                let mut bufreader = std::io::BufReader::new(&file);
+                if let Ok(exif) = exif::Reader::new().read_from_container(&mut bufreader) {
+                    meta.captured_at = exif
+                        .get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
+                        .or_else(|| exif.get_field(exif::Tag::DateTime, exif::In::PRIMARY))
+                        .map(|f| f.display_value().to_string());
+                    meta.camera = exif
+                        .get_field(exif::Tag::Model, exif::In::PRIMARY)
+                        .map(|f| f.display_value().to_string().trim_matches('"').to_string());
+                    meta.lens = exif
+                        .get_field(exif::Tag::LensModel, exif::In::PRIMARY)
+                        .map(|f| f.display_value().to_string().trim_matches('"').to_string());
+                }
             }
         }
 
@@ -475,7 +533,8 @@ fn read_media_meta(
                 meta.height = Some(h as i64);
                 meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
 
-                let thumb_src = if w > thumbnails::THUMB_MAX_EDGE || h > thumbnails::THUMB_MAX_EDGE {
+                let thumb_src = if w > thumbnails::THUMB_MAX_EDGE || h > thumbnails::THUMB_MAX_EDGE
+                {
                     img.resize(
                         thumbnails::THUMB_MAX_EDGE,
                         thumbnails::THUMB_MAX_EDGE,
@@ -491,6 +550,7 @@ fn read_media_meta(
                         meta.thumbnail_path = Some(dest);
                     } else if thumbnails::write_thumbnail_jpeg(&thumb_src, &dest).is_ok() {
                         meta.thumbnail_path = Some(dest);
+                        thumbnails::enforce_cache_budget(thumbs_dir, options.thumbnail_cache_mb);
                     }
                 }
             }
@@ -686,6 +746,7 @@ mod import_tests {
             &thumbs,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             false,
+            &ImportOptions::default(),
             |_, _, _| {},
         )
         .unwrap();
@@ -710,6 +771,7 @@ mod import_tests {
             &dir.path().join("thumbs"),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             false,
+            &ImportOptions::default(),
             |_, _, _| {},
         )
         .unwrap_err();
