@@ -484,7 +484,7 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -500,6 +500,7 @@ mod tests {
         assert!(tables.iter().any(|t| t == "locked_assets"));
         assert!(tables.iter().any(|t| t == "locked_albums"));
         assert!(tables.iter().any(|t| t == "saved_searches"));
+        assert!(tables.iter().any(|t| t == "memory_prose"));
 
         let has_blur_score: i64 = conn
             .query_row(
@@ -515,6 +516,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 17);
+        assert_eq!(version2, 18);
     }
 }
