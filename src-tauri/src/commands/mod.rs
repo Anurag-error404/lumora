@@ -33,6 +33,7 @@ use crate::state::{open_db, AppState, VaultSession};
 use crate::tags;
 use crate::thumbnails;
 use crate::trash;
+use crate::plugins;
 use crate::vault;
 use crate::views;
 use crate::watcher;
@@ -3226,4 +3227,294 @@ pub fn convert_file_src(path: String) -> AppResult<String> {
 /// Bootstrap helper used from lib setup.
 pub fn bootstrap_indexer(db_path: PathBuf, thumbs: PathBuf) -> Arc<IndexerQueue> {
     IndexerQueue::new(db_path, thumbs)
+}
+
+// ─── Plugin commands ──────────────────────────────────────────────────────────
+
+/// List all installed plugins with their metadata and enabled state.
+#[tauri::command]
+pub fn list_plugins(state: State<'_, AppState>) -> AppResult<Vec<plugins::PluginEntry>> {
+    let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    let entries = plugins::scan(&state.paths.plugins_dir, &prefs.plugins.enabled);
+    Ok(entries)
+}
+
+/// Enable or disable a plugin without removing its files.
+#[tauri::command]
+pub fn set_plugin_enabled(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    enabled: bool,
+) -> AppResult<()> {
+    let mut prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    if enabled {
+        prefs.plugins.enabled.insert(plugin_id, true);
+    } else {
+        prefs.plugins.enabled.remove(&plugin_id);
+    }
+    preferences::save(&state.paths.app_data, &prefs)
+}
+
+/// Validate and copy a plugin folder (or a parent folder containing plugins)
+/// into the plugins directory.  Returns the list of installed plugin ids.
+/// If the chosen directory has no manifest but contains valid plugin sub-folders,
+/// all of them are installed as a batch.
+#[tauri::command]
+pub fn install_plugin_dir(
+    state: State<'_, AppState>,
+    source_dir: String,
+) -> AppResult<Vec<String>> {
+    let src = std::path::PathBuf::from(&source_dir);
+    plugins::install_plugin_dir(&src, &state.paths.plugins_dir)
+}
+
+/// Return the user's installed-plugins directory (`{app_data}/plugins/`).
+#[tauri::command]
+pub fn get_plugins_dir(state: State<'_, AppState>) -> AppResult<String> {
+    Ok(state.paths.plugins_dir.display().to_string())
+}
+
+/// Create a new plugin folder with manifest, main.js, and README.
+#[tauri::command]
+pub fn create_plugin(
+    state: State<'_, AppState>,
+    spec: plugins::CreatePluginSpec,
+) -> AppResult<plugins::CreatePluginResult> {
+    let result = plugins::create_plugin(&state.paths.plugins_dir, spec)?;
+    let mut prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    prefs.plugins.enabled.insert(result.id.clone(), true);
+    preferences::save(&state.paths.app_data, &prefs)?;
+    Ok(result)
+}
+
+/// Analyze plugin JavaScript for structure issues and inferred permissions.
+#[tauri::command]
+pub fn analyze_plugin_source(main_js: String) -> AppResult<plugins::PluginAnalysis> {
+    Ok(plugins::analyze_main_js(&main_js))
+}
+
+/// Read installed plugin source files for editing.
+#[tauri::command]
+pub fn read_plugin_sources(
+    state: State<'_, AppState>,
+    plugin_id: String,
+) -> AppResult<plugins::PluginSources> {
+    plugins::read_sources(&state.paths.plugins_dir, &plugin_id)
+}
+
+/// Read plugin sources from any folder (e.g. first-party examples before install).
+#[tauri::command]
+pub fn read_plugin_sources_from_dir(source_dir: String) -> AppResult<plugins::PluginSources> {
+    let path = std::path::PathBuf::from(source_dir);
+    plugins::read_sources_from_dir(&path, None)
+}
+
+/// Save edits to an installed plugin. Permissions are inferred from main.js.
+#[tauri::command]
+pub fn save_plugin_draft(
+    state: State<'_, AppState>,
+    draft: plugins::SavePluginDraft,
+) -> AppResult<plugins::SavePluginResult> {
+    plugins::save_draft(&state.paths.plugins_dir, draft)
+}
+
+/// Copy an installed or example plugin into a new personal fork.
+#[tauri::command]
+pub fn fork_plugin(
+    state: State<'_, AppState>,
+    spec: plugins::ForkPluginSpec,
+) -> AppResult<plugins::SavePluginResult> {
+    let result = plugins::fork_plugin(&state.paths.plugins_dir, spec)?;
+    let mut prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    prefs.plugins.enabled.insert(result.id.clone(), true);
+    preferences::save(&state.paths.app_data, &prefs)?;
+    Ok(result)
+}
+
+/// Return the absolute path to the bundled first-party example plugins directory.
+/// Used by the frontend to offer a "Browse examples" shortcut.
+#[tauri::command]
+pub fn get_plugin_examples_dir() -> AppResult<String> {
+    // Resolve relative to the app bundle / working directory at runtime.
+    // During `tauri dev` this resolves to the project root's plugins/examples/.
+    let candidates = [
+        // Tauri dev: cwd is src-tauri/
+        std::path::PathBuf::from("../plugins/examples"),
+        // Tauri dev from project root
+        std::path::PathBuf::from("plugins/examples"),
+        // Released app: next to the bundle
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("plugins/examples")))
+            .unwrap_or_default(),
+    ];
+    for path in &candidates {
+        if path.exists() {
+            return path
+                .canonicalize()
+                .map(|p| p.display().to_string())
+                .map_err(|e| AppError::msg(e.to_string()));
+        }
+    }
+    Err(AppError::msg(
+        "Examples directory not found. Clone the repository and look in plugins/examples/.",
+    ))
+}
+
+/// A plugin entry from the examples / discovery catalogue.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailablePlugin {
+    pub manifest: plugins::PluginManifest,
+    /// Absolute path to the source directory (inside examples/).
+    pub source_dir: String,
+    /// Whether this plugin is already installed in the user's plugins directory.
+    pub installed: bool,
+    /// Whether the installed copy is enabled.
+    pub enabled: bool,
+}
+
+/// Scan the first-party examples directory and return a catalogue of available
+/// plugins annotated with their installed / enabled state.
+#[tauri::command]
+pub fn list_available_plugins(state: State<'_, AppState>) -> AppResult<Vec<AvailablePlugin>> {
+    let examples_dir = match get_plugin_examples_dir() {
+        Ok(p) => std::path::PathBuf::from(p),
+        Err(_) => return Ok(Vec::new()), // examples not bundled — graceful empty
+    };
+    let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    let Ok(entries) = std::fs::read_dir(&examples_dir) else {
+        return Ok(Vec::new());
+    };
+    let mut result = Vec::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let dir = entry.path();
+        let Ok(manifest) = plugins::PluginManifest::load(&dir) else {
+            continue;
+        };
+        let installed = state.paths.plugins_dir.join(&manifest.id).exists();
+        let enabled = prefs.plugins.enabled.get(&manifest.id).copied().unwrap_or(false);
+        result.push(AvailablePlugin {
+            source_dir: dir.display().to_string(),
+            installed,
+            enabled,
+            manifest,
+        });
+    }
+    result.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
+    Ok(result)
+}
+
+/// Delete the plugin folder and remove its enabled-state entry from preferences.
+#[tauri::command]
+pub fn remove_plugin(state: State<'_, AppState>, plugin_id: String) -> AppResult<()> {
+    plugins::remove_plugin_dir(&plugin_id, &state.paths.plugins_dir)?;
+    let mut prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    prefs.plugins.enabled.remove(&plugin_id);
+    preferences::save(&state.paths.app_data, &prefs)
+}
+
+/// Run a plugin action against the selected asset ids (preview or apply).
+#[tauri::command]
+pub async fn run_plugin_action(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    plugin_id: String,
+    action_id: String,
+    asset_ids: Vec<String>,
+    mode: Option<String>,
+) -> AppResult<plugins::host::ActionResult> {
+    let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+    let enabled = prefs.plugins.enabled.get(&plugin_id).copied().unwrap_or(false);
+    if !enabled {
+        return Err(AppError::msg(format!(
+            "PLUGIN_NOT_FOUND: plugin '{plugin_id}' is not enabled"
+        )));
+    }
+    let dir = plugins::plugin_dir(&plugin_id, &state.paths.plugins_dir);
+    if !dir.exists() {
+        return Err(AppError::msg(format!(
+            "PLUGIN_NOT_FOUND: plugin '{plugin_id}' is not installed"
+        )));
+    }
+
+    let manifest = plugins::PluginManifest::load(&dir)?;
+    let run_mode = mode.as_deref().unwrap_or("apply").to_string();
+    let db_path = state.paths.db_path.clone();
+    let plugin_dir = dir.clone();
+    let action_id_job = action_id.clone();
+    let asset_ids_job = asset_ids.clone();
+    let app_for_job = app.clone();
+
+    let progress_cb: plugins::host::ProgressCallback = Arc::new(move |event| {
+        let _ = app_for_job.emit("plugin-run-progress", event);
+    });
+
+    let (action_result, record) = tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&db_path)?;
+        plugins::host::run_action(
+            &plugin_dir,
+            &action_id_job,
+            &asset_ids_job,
+            &run_mode,
+            &conn,
+            Some(progress_cb),
+        )
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("plugin task failed: {e}")))??;
+
+    // Always append the run record regardless of outcome.
+    if let Err(e) = plugins::append_record(&dir, &record) {
+        tracing::warn!(plugin = %plugin_id, error = %e, "failed to write plugin history");
+    }
+
+    let _ = app.emit(
+        "plugin-run-progress",
+        plugins::host::PluginRunProgressEvent {
+            run_id: record.run_id.clone(),
+            plugin_id: plugin_id.clone(),
+            plugin_name: manifest.name,
+            action_id,
+            phase: if action_result.ok {
+                "done".to_string()
+            } else {
+                "error".to_string()
+            },
+            current: record.assets_affected,
+            total: record.assets_requested,
+            message: Some(action_result.message.clone()),
+            logs: record.log_lines,
+        },
+    );
+
+    Ok(action_result)
+}
+
+/// Return the last N run records for a plugin (default 20, max 100), newest first.
+#[tauri::command]
+pub fn get_plugin_history(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    limit: Option<usize>,
+) -> AppResult<Vec<plugins::PluginRunRecord>> {
+    let limit = limit.unwrap_or(20).min(100);
+    let dir = plugins::plugin_dir(&plugin_id, &state.paths.plugins_dir);
+    plugins::read_records(&dir, limit)
+}
+
+/// Delete the history file for a single plugin.
+#[tauri::command]
+pub fn clear_plugin_history(state: State<'_, AppState>, plugin_id: String) -> AppResult<()> {
+    let dir = plugins::plugin_dir(&plugin_id, &state.paths.plugins_dir);
+    plugins::clear_history(&dir)
+}
+
+/// Delete history files for all installed plugins.
+#[tauri::command]
+pub fn clear_all_plugin_history(state: State<'_, AppState>) -> AppResult<()> {
+    plugins::clear_all_history(&state.paths.plugins_dir)
 }

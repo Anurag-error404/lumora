@@ -41,6 +41,8 @@ pub struct AppPaths {
     pub models_dir: PathBuf,
     /// Face crop chips (separate from thumbs so cache clears don't wipe them).
     pub faces_dir: PathBuf,
+    /// User-installed plugins. Filesystem-based install surface; safe to delete.
+    pub plugins_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -49,12 +51,14 @@ impl AppPaths {
         let logs_dir = app_data.join("logs");
         let models_dir = app_data.join("models");
         let faces_dir = app_data.join("faces");
+        let plugins_dir = app_data.join("plugins");
         let db_path = app_data.join("library.db");
         std::fs::create_dir_all(&app_data)?;
         std::fs::create_dir_all(&thumbs_dir)?;
         std::fs::create_dir_all(&logs_dir)?;
         std::fs::create_dir_all(&models_dir)?;
         std::fs::create_dir_all(&faces_dir)?;
+        std::fs::create_dir_all(&plugins_dir)?;
         Ok(Self {
             app_data,
             db_path,
@@ -62,6 +66,7 @@ impl AppPaths {
             logs_dir,
             models_dir,
             faces_dir,
+            plugins_dir,
         })
     }
 

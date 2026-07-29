@@ -35,6 +35,8 @@ export function MediaViewer({
   onShowInfo,
   onEdited,
   onRemoveFromLibrary,
+  onTrash,
+  isTrashView = false,
 }: {
   asset: AssetSummary;
   index: number;
@@ -51,6 +53,8 @@ export function MediaViewer({
   onShowInfo: () => void;
   onEdited: (result: EditResult) => void;
   onRemoveFromLibrary: (asset: AssetSummary) => void | Promise<void>;
+  onTrash?: (asset: AssetSummary) => void | Promise<void>;
+  isTrashView?: boolean;
 }) {
   const wheelLockRef = useRef(0);
   const [editing, setEditing] = useState(false);
@@ -147,6 +151,17 @@ export function MediaViewer({
               onClick={() => setEditing(true)}
             >
               Edit
+            </button>
+          )}
+          {!isTrashView && onTrash && (
+            <button
+              type="button"
+              className="viewer-icon-btn viewer-text-btn viewer-danger-btn"
+              title="Move to trash"
+              aria-label="Move to trash"
+              onClick={() => void onTrash(asset)}
+            >
+              Delete
             </button>
           )}
           <button

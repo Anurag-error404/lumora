@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../docs/plugin.schema.json",
+  "id": "com.lumora.example.hello-selection",
+  "name": "Hello Selection",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Logs the count and ids of selected assets. No modifications.",
+  "author": "Lumora contributors",
+  "permissions": [],
+  "contributions": {
+    "actions": [
+      {
+        "id": "hello-selection",
+        "label": "Hello Selection",
+        "scope": "selection",
+        "minSelection": 1,
+        "maxSelection": 500
+      }
+    ]
+  },
+  "main": "main.js"
+}

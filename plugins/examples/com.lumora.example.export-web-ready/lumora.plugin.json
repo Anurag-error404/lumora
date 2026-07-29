@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../docs/plugin.schema.json",
+  "id": "com.lumora.example.export-web-ready",
+  "name": "Export — Web Ready",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Exports selected photos as web-optimised JPEG (max 2048 px, quality 85) to a ZIP archive.",
+  "author": "Lumora contributors",
+  "permissions": [
+    "read:assets",
+    "export:assets"
+  ],
+  "contributions": {
+    "actions": [
+      {
+        "id": "export-web-ready",
+        "label": "Export web-ready ZIP…",
+        "scope": "selection",
+        "minSelection": 1,
+        "maxSelection": 500
+      }
+    ]
+  },
+  "main": "main.js"
+}

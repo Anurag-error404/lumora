@@ -12,6 +12,7 @@ import { AlbumModal } from "./components/modals/AlbumModal";
 import { DeleteAlbumDialog } from "./components/modals/DeleteAlbumDialog";
 import { ImportModal } from "./components/modals/ImportModal";
 import { PersonModal } from "./components/modals/PersonModal";
+import { PluginRunDialog } from "./components/modals/PluginRunDialog";
 import { TagModal } from "./components/modals/TagModal";
 import { VaultPickerDialog } from "./components/modals/VaultPickerDialog";
 import { ActivityView } from "./features/activity/ActivityView";
@@ -21,6 +22,7 @@ import { DeveloperView } from "./features/developer/DeveloperView";
 import { DuplicatesView } from "./features/duplicates/DuplicatesView";
 import { ExportsView } from "./features/exports/ExportsView";
 import { SettingsView } from "./features/settings/SettingsView";
+import { PluginsView } from "./features/plugins/PluginsView";
 import { RecentSearchesView } from "./features/search/RecentSearchesView";
 import { AssetEmptyState } from "./features/library/AssetEmptyState";
 import { LibraryGrid } from "./features/library/LibraryGrid";
@@ -43,6 +45,7 @@ import { useExportsFeed } from "./hooks/useExportsFeed";
 import { useHistoryFeed } from "./hooks/useHistoryFeed";
 import { useImportFlow } from "./hooks/useImportFlow";
 import { useImportProgress } from "./hooks/useImportProgress";
+import { usePluginRunProgress } from "./hooks/usePluginRunProgress";
 import { useIndexProgress } from "./hooks/useIndexProgress";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibraryAssets } from "./hooks/useLibraryAssets";
@@ -60,7 +63,7 @@ import { useVault } from "./hooks/useVault";
 import { useVaultAutoLock } from "./hooks/useVaultAutoLock";
 import { useViewer } from "./hooks/useViewer";
 import { useWatchedFolders } from "./hooks/useWatchedFolders";
-import { api, type Album, type AssetSummary, type Person } from "./lib/tauri";
+import { api, type Album, type AssetSummary, type Person, type PluginEntry } from "./lib/tauri";
 import { LIBRARY_PAGE_META } from "./lib/pageMeta";
 import type { AlbumPickTarget, View } from "./types/app";
 import "./styles/app.css";
@@ -71,6 +74,13 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pluginBusy, setPluginBusy] = useState(false);
+  const [plugins, setPlugins] = useState<PluginEntry[]>([]);
+
+  // Load enabled plugins once on mount (and whenever user navigates to plugins view)
+  useEffect(() => {
+    api.listPlugins().then(setPlugins).catch(() => setPlugins([]));
+  }, [view]);
   const [homeRecent, setHomeRecent] = useState<AssetSummary[]>([]);
   const [pickingForAlbum, setPickingForAlbum] = useState<AlbumPickTarget | null>(
     null,
@@ -235,6 +245,7 @@ export default function App() {
 
   const progress = useIndexProgress();
   const { importProgress, setImportProgress, importPct } = useImportProgress();
+  const { pluginRun, setPluginRun, pluginRunPct } = usePluginRunProgress();
 
   const {
     lightboxId,
@@ -441,6 +452,7 @@ export default function App() {
     rateAsset,
     labelAsset,
     deleteSelected,
+    trashAsset,
     cleanupDupeGroup,
     cleanupExactDupes,
     trashBlurryAssets,
@@ -528,6 +540,49 @@ export default function App() {
 
   const { tagModal, setTagModal, tagName, setTagName, submitTagModal, applyExistingTag } =
     useTagWorkflows({ selectedIds, refreshTags, loadAssets, setError });
+
+  const runPlugin = async (pluginId: string, actionId: string) => {
+    if (!selectedIds.length) return;
+    const plugin = plugins.find((p) => p.manifest.id === pluginId);
+    const action = plugin?.manifest.contributions.actions.find((a) => a.id === actionId);
+    setPluginRun({
+      runId: "",
+      pluginId,
+      pluginName: plugin?.manifest.name ?? pluginId,
+      actionId,
+      phase: "starting",
+      current: 0,
+      total: selectedIds.length,
+      message: `Starting ${action?.label ?? actionId}…`,
+      logs: [],
+    });
+    setPluginBusy(true);
+    try {
+      const result = await api.runPluginAction(pluginId, actionId, selectedIds, "apply");
+      setPluginRun((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: result.ok ? "done" : "error",
+              current: prev.total,
+              message: result.message,
+            }
+          : prev,
+      );
+      if (!result.ok) {
+        setError(result.message);
+      }
+    } catch (e) {
+      const message = String(e);
+      setPluginRun((prev) =>
+        prev ? { ...prev, phase: "error", message } : prev,
+      );
+      setError(message);
+    } finally {
+      setPluginBusy(false);
+      void loadAssets();
+    }
+  };
 
   const {
     importModal,
@@ -714,6 +769,8 @@ export default function App() {
             selectedCount={selectedIds.length}
             isTrashView={view === "trash"}
             busy={busy}
+            pluginBusy={pluginBusy}
+            plugins={plugins}
             onClearSelection={clearSelection}
             onRestore={() => void restoreSelected()}
             onPermanentDelete={(deleteFiles) =>
@@ -731,6 +788,7 @@ export default function App() {
             onSelectAllVisible={selectAllVisible}
             onRate={(rating) => void rateSelected(rating)}
             onLabel={(color) => void labelSelected(color)}
+            onRunPlugin={(pluginId, actionId) => void runPlugin(pluginId, actionId)}
           />
         )}
 
@@ -856,6 +914,8 @@ export default function App() {
               onAdd={() => void addWatchedFolder()}
               onRemove={(path) => void removeWatchedFolder(path)}
             />
+          ) : view === "plugins" ? (
+            <PluginsView />
           ) : view === "settings" ? (
             <SettingsView
               prefs={prefs}
@@ -1149,6 +1209,11 @@ export default function App() {
           onToggleFavorite={toggleFavorite}
           onShowInfo={() => setInfoAssetId(lightboxAsset.id)}
           onRemoveFromLibrary={(asset) => void removeMissingFromLibrary(asset)}
+          isTrashView={view === "trash"}
+          onTrash={(asset) => {
+            if (infoAssetId === asset.id) setInfoAssetId(null);
+            void trashAsset(asset, { list: viewerList, index: viewerIndex });
+          }}
           onEdited={(result) => {
             setAssets((rows) => {
               if (result.mode === "replace") {
@@ -1254,6 +1319,14 @@ export default function App() {
           onClose={() => setImportModal(false)}
           onChooseFiles={() => void onImportFiles()}
           onChooseFolder={() => void onImportFolder()}
+        />
+      )}
+
+      {pluginRun && (
+        <PluginRunDialog
+          progress={pluginRun}
+          pct={pluginRunPct}
+          onClose={() => setPluginRun(null)}
         />
       )}
 

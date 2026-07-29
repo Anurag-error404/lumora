@@ -63,6 +63,8 @@ tokenizers = { version = "0.23.1", default-features = false, features = ["onig"]
 # into the binary; no network at build or runtime.
 reverse_geocoder = "4.1.1"
 hnsw_rs = "0.3.4"
+# QuickJS JS sandbox for plugins (Milestone 2)
+rquickjs = { version = "0.9", features = ["futures", "loader", "allocator", "classes"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

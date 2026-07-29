@@ -20,12 +20,37 @@ type QuickAction = {
 };
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { id: "library", label: "Library", hint: "Browse everything", icon: "library" },
+  {
+    id: "library",
+    label: "Library",
+    hint: "Browse everything",
+    icon: "library",
+  },
   { id: "timeline", label: "Timeline", hint: "By date", icon: "calendar" },
-  { id: "favorites", label: "Favorites", hint: "Your best shots", icon: "star" },
-  { id: "memories", label: "Memories", hint: "On this day & trips", icon: "sparkle" },
-  { id: "recentViewed", label: "Recently viewed", hint: "Pick up where you left", icon: "eye" },
-  { id: "albums", label: "Albums", hint: "Organise collections", icon: "album" },
+  {
+    id: "favorites",
+    label: "Favorites",
+    hint: "Your best shots",
+    icon: "star",
+  },
+  {
+    id: "memories",
+    label: "Memories",
+    hint: "On this day & trips",
+    icon: "sparkle",
+  },
+  {
+    id: "recentViewed",
+    label: "Recently viewed",
+    hint: "Pick up where you left",
+    icon: "eye",
+  },
+  {
+    id: "albums",
+    label: "Albums",
+    hint: "Organise collections",
+    icon: "album",
+  },
 ];
 
 const FEATURES: {
@@ -35,6 +60,13 @@ const FEATURES: {
   action: View;
   cta: string;
 }[] = [
+  {
+    title: "Plugins & extensions",
+    body: "Run batch actions on your selection with sandboxed JavaScript plugins. Create, customize examples, or fork your own — permissions are inferred from your code.",
+    icon: "puzzle",
+    action: "plugins",
+    cta: "Open plugins",
+  },
   {
     title: "Encrypted Locked folder",
     body: "Move private photos and whole albums into a vault that stays ciphertext on disk — even in Finder.",
@@ -170,9 +202,14 @@ export function HomeView({
           <header className="home-section-head">
             <div>
               <h2>Memories</h2>
-              <p className="muted">On this day, weekend trips, and people in places.</p>
+              <p className="muted">
+                On this day, weekend trips, and people in places.
+              </p>
             </div>
-            <button className="secondary" onClick={() => onNavigate("memories")}>
+            <button
+              className="secondary"
+              onClick={() => onNavigate("memories")}
+            >
               See all
             </button>
           </header>
@@ -198,7 +235,9 @@ export function HomeView({
                     />
                   </div>
                   <span className="home-memory-title">{memory.title}</span>
-                  <span className="home-memory-sub muted">{memory.insight}</span>
+                  <span className="home-memory-sub muted">
+                    {memory.insight}
+                  </span>
                 </button>
               );
             })}
@@ -219,7 +258,9 @@ export function HomeView({
           </header>
           <div className="home-recent-strip">
             {recent.map((asset) => {
-              const src = asset.thumbnailPath ? fileSrc(asset.thumbnailPath) : null;
+              const src = asset.thumbnailPath
+                ? fileSrc(asset.thumbnailPath)
+                : null;
               return (
                 <button
                   key={asset.id}
@@ -259,7 +300,10 @@ export function HomeView({
                 <h3>{feature.title}</h3>
                 <p className="muted">{feature.body}</p>
               </div>
-              <button className="secondary" onClick={() => onNavigate(feature.action)}>
+              <button
+                className="secondary"
+                onClick={() => onNavigate(feature.action)}
+              >
                 {feature.cta}
               </button>
             </article>
@@ -271,8 +315,8 @@ export function HomeView({
         <section className="home-empty-call">
           <h2>Start with a folder</h2>
           <p className="muted">
-            Import photos or watch a directory. Everything stays on this machine —
-            no cloud account, no upload.
+            Import photos or watch a directory. Everything stays on this machine
+            — no cloud account, no upload.
           </p>
           <button className="primary" onClick={onImport}>
             Import your first photos

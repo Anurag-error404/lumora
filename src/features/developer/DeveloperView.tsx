@@ -1,6 +1,7 @@
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { formatBytes } from "../../lib/format";
-import type { DeveloperInfo } from "../../lib/tauri";
+import { api, type DeveloperInfo, type PluginEntry, type PluginRunRecord } from "../../lib/tauri";
 import { ImportAnalyticsCard } from "./ImportAnalyticsCard";
 
 /** Local diagnostics: app/database/cache details, paths, and logs. */
@@ -203,8 +204,142 @@ export function DeveloperView({
               </div>
             )}
           </section>
+
+          <PluginDiagnosticsSection />
         </>
       )}
     </div>
+  );
+}
+
+const OUTCOME_COLORS: Record<string, string> = {
+  ok: "var(--color-success, #27ae60)",
+  cancelled: "var(--color-muted, #999)",
+  timeout: "var(--color-warning, #e67e22)",
+  error: "var(--color-error, #c0392b)",
+};
+
+const OUTCOME_LABEL: Record<string, string> = {
+  ok: "✓ OK",
+  cancelled: "↩ Cancelled",
+  timeout: "⏱ Timeout",
+  error: "✗ Error",
+};
+
+function PluginDiagnosticsSection() {
+  const [plugins, setPlugins] = useState<PluginEntry[]>([]);
+  const [records, setRecords] = useState<PluginRunRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [clearBusy, setClearBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const installed = await api.listPlugins();
+      setPlugins(installed);
+      const tail: PluginRunRecord[] = [];
+      for (const p of installed) {
+        const recs = await api.getPluginHistory(p.manifest.id, 50);
+        tail.push(...recs);
+      }
+      // Sort newest first across all plugins.
+      tail.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+      setRecords(tail.slice(0, 50));
+    } catch {
+      /* silently ignore; this is a diagnostics panel */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleClearAll = async () => {
+    if (!window.confirm("Clear plugin run history for all plugins?")) return;
+    setClearBusy(true);
+    try {
+      await api.clearAllPluginHistory();
+      setRecords([]);
+    } catch {
+      /* ignore */
+    } finally {
+      setClearBusy(false);
+    }
+  };
+
+  if (plugins.length === 0 && !loading) return null;
+
+  return (
+    <section className="developer-log-section">
+      <header>
+        <div>
+          <h3>Plugin run history</h3>
+          <p className="muted">
+            Last 50 runs across {plugins.length} installed plugin(s).
+          </p>
+        </div>
+        <button disabled={clearBusy || loading} onClick={() => void handleClearAll()}>
+          Clear all history
+        </button>
+      </header>
+      {loading ? (
+        <div className="developer-loading" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Loading plugin history…
+        </div>
+      ) : records.length === 0 ? (
+        <div className="developer-empty-log">No plugin runs recorded yet.</div>
+      ) : (
+        <ul className="developer-plugin-history">
+          {records.map((rec) => (
+            <PluginRunRow key={rec.runId} record={rec} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PluginRunRow({ record }: { record: PluginRunRecord }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="developer-plugin-run">
+      <button
+        type="button"
+        className="developer-plugin-run-summary"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span style={{ color: OUTCOME_COLORS[record.outcome], minWidth: "60px" }}>
+          {OUTCOME_LABEL[record.outcome] ?? record.outcome}
+        </span>
+        <span className="muted" style={{ flex: 1, textAlign: "left", fontSize: "12px" }}>
+          {record.pluginId} · {record.actionId} · {record.mode} ·{" "}
+          {new Date(record.startedAt).toLocaleString()} · {record.durationMs}ms ·{" "}
+          {record.assetsAffected}/{record.assetsRequested} assets
+        </span>
+        <span aria-hidden="true">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="developer-plugin-run-detail">
+          {record.errorMessage && (
+            <p style={{ color: "var(--color-error, #c0392b)", fontSize: "12px", marginBottom: "4px" }}>
+              <strong>{record.errorCode}</strong>: {record.errorMessage}
+            </p>
+          )}
+          {record.logLines.length > 0 ? (
+            <pre className="developer-console" style={{ maxHeight: "200px", overflow: "auto" }}>
+              {record.logLines
+                .map((l) => `[+${l.timestampMs}ms] [${l.level}] ${l.message}`)
+                .join("\n")}
+            </pre>
+          ) : (
+            <p className="muted" style={{ fontSize: "11px" }}>No log lines.</p>
+          )}
+        </div>
+      )}
+    </li>
   );
 }

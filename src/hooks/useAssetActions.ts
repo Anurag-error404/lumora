@@ -203,6 +203,44 @@ export function useAssetActions({
     await loadAssets();
   }
 
+  async function trashAsset(
+    asset: AssetSummary,
+    viewer?: { list: AssetSummary[]; index: number },
+  ) {
+    const fileName = asset.path.split("/").pop() ?? asset.path;
+    if (
+      confirmBeforeDeleting &&
+      !window.confirm(
+        `Move “${fileName}” to Trash?\n\nYou can restore it from Trash or undo with ⌘Z.`,
+      )
+    ) {
+      return;
+    }
+    let nextLightboxId: string | null = null;
+    if (viewer && viewer.index >= 0) {
+      if (viewer.index < viewer.list.length - 1) {
+        nextLightboxId = viewer.list[viewer.index + 1].id;
+      } else if (viewer.index > 0) {
+        nextLightboxId = viewer.list[viewer.index - 1].id;
+      }
+    }
+    try {
+      await api.softDeleteAssets([asset.id]);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
+      setLightboxId(nextLightboxId);
+      setError(`Moved “${fileName}” to trash (undo with ⌘Z)`);
+      await refreshStats();
+      await refreshHistory();
+      await loadAssets();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function cleanupDupeGroup(group: DuplicateGroup, keepId: string) {
     const toTrash = group.assetIds.filter((id) => id !== keepId);
     if (!toTrash.length) return;
@@ -443,6 +481,7 @@ export function useAssetActions({
     rateAsset,
     labelAsset,
     deleteSelected,
+    trashAsset,
     cleanupDupeGroup,
     cleanupExactDupes,
     trashBlurryAssets,

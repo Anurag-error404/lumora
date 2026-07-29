@@ -9,3 +9,4 @@
 | [`THIRD_PARTY.md`](./THIRD_PARTY.md) | Optional model / data licences |
 | [`adr/`](./adr/) | Architecture decision records |
 | [`perf-smoke.md`](./perf-smoke.md) | Performance targets and measured runs |
+| [`plugins.md`](./plugins.md) | Phase 3 plugin MVP spec (proposed) |

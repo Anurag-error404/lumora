@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../docs/plugin.schema.json",
+  "id": "com.lumora.example.rename-by-date",
+  "name": "Rename by Capture Date",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Renames selected files to YYYY-MM-DD_<shortid>.<ext> using EXIF capture date.",
+  "author": "Lumora contributors",
+  "permissions": [
+    "read:assets",
+    "read:metadata",
+    "rename:filesystem"
+  ],
+  "contributions": {
+    "actions": [
+      {
+        "id": "rename-by-date",
+        "label": "Rename by capture date…",
+        "scope": "selection",
+        "minSelection": 1,
+        "maxSelection": 500
+      }
+    ]
+  },
+  "main": "main.js"
+}

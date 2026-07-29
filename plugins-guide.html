@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="LUMORA plugin author guide — build JavaScript selection actions with examples, API reference, and permissions."
+    />
+    <meta name="theme-color" content="#2f6f5e" />
+    <link rel="icon" href="favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="Lumora-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Plugin guide — LUMORA</title>
+  </head>
+  <body class="guide-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="LUMORA home">
+        <img class="brand-mark" src="lumora-icon-tp.png" width="28" height="28" alt="" />
+        <span class="brand-name">LUMORA</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="guide.html">Guide</a>
+        <a href="plugins-guide.html" aria-current="page">Plugins</a>
+        <a
+          class="nav-cta"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>
+      </nav>
+    </header>
+
+    <main id="main" class="guide-layout">
+      <aside class="guide-toc" aria-label="On this page">
+        <p class="guide-toc-label">On this page</p>
+        <ol>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#quickstart">Quick start</a></li>
+          <li><a href="#structure">Folder structure</a></li>
+          <li><a href="#runaction">runAction</a></li>
+          <li><a href="#api">lumora API</a></li>
+          <li><a href="#permissions">Permissions</a></li>
+          <li><a href="#examples">Example plugins</a></li>
+          <li><a href="#forks">Personal forks</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ol>
+      </aside>
+
+      <article class="guide-content">
+        <header class="guide-hero">
+          <p class="guide-kicker">Plugin documentation</p>
+          <h1>Build Lumora plugins</h1>
+          <p class="guide-lede">
+            Extend LUMORA with sandboxed JavaScript actions on your photo selection.
+            No network access, no hidden state — every plugin is a folder on disk you can
+            read and edit.
+          </p>
+        </header>
+
+        <section id="overview" class="guide-section">
+          <h2>Overview</h2>
+          <p>
+            Plugins live under <code>{app_data}/plugins/</code>. Each plugin exposes one or
+            more <strong>selection actions</strong> that appear in the
+            <strong>Plugins</strong> menu when photos are selected.
+          </p>
+          <ul>
+            <li><strong>No network</strong> — <code>fetch</code> and <code>XMLHttpRequest</code> are blocked</li>
+            <li><strong>Explicit permissions</strong> — the host enforces capabilities declared in the manifest</li>
+            <li><strong>Auto-inferred permissions</strong> — the in-app editor adds them from your <code>main.js</code> on save</li>
+          </ul>
+        </section>
+
+        <section id="quickstart" class="guide-section">
+          <h2>Quick start</h2>
+          <ol>
+            <li>Open <strong>Plugins</strong> in LUMORA → <strong>Create new plugin</strong></li>
+            <li>Fill in name, id, and action label</li>
+            <li>Edit <code>runAction</code> in the code editor (<code>lumora.</code> autocomplete)</li>
+            <li>Save — permissions are inferred automatically</li>
+            <li>Select photos → <strong>Plugins</strong> in the selection bar → run your action</li>
+          </ol>
+          <p>
+            Or install an example from <strong>Discover</strong>, then click
+            <strong>Customize</strong> to fork it into a personal copy.
+          </p>
+        </section>
+
+        <section id="structure" class="guide-section">
+          <h2>Folder structure</h2>
+          <pre class="guide-code"><code>{app_data}/plugins/com.personal.my-plugin/
+  lumora.plugin.json   ← manifest (required)
+  main.js              ← entry script (required)
+  README.md            ← optional notes</code></pre>
+          <p>The folder name <strong>must match</strong> the <code>id</code> in the manifest.</p>
+        </section>
+
+        <section id="runaction" class="guide-section">
+          <h2>Entry script (<code>main.js</code>)</h2>
+          <pre class="guide-code"><code>export async function runAction(actionId, context) {
+  lumora.log("info", `${context.assetIds.length} selected`);
+  context.reportProgress(0, context.assetIds.length);
+
+  // your logic here
+
+  return { ok: true, message: "Done" };
+}</code></pre>
+          <dl class="guide-dl">
+            <div>
+              <dt><code>context.assetIds</code></dt>
+              <dd>Ids of selected photos</dd>
+            </div>
+            <div>
+              <dt><code>context.mode</code></dt>
+              <dd><code>"preview"</code> or <code>"apply"</code></dd>
+            </div>
+            <div>
+              <dt><code>context.reportProgress(n, total)</code></dt>
+              <dd>Updates the progress dialog</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section id="api" class="guide-section">
+          <h2><code>lumora.*</code> API</h2>
+          <div class="guide-table-wrap">
+            <table class="guide-table">
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Permission</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><code>lumora.log(level, msg)</code></td><td>none</td></tr>
+                <tr><td><code>lumora.getAssets(ids)</code></td><td><code>read:assets</code></td></tr>
+                <tr><td><code>lumora.renameAsset(id, name)</code></td><td><code>rename:filesystem</code></td></tr>
+                <tr><td><code>lumora.setRating(id, rating)</code></td><td><code>write:metadata</code></td></tr>
+                <tr><td><code>lumora.setTags(id, tags)</code></td><td><code>write:metadata</code></td></tr>
+                <tr><td><code>lumora.moveAssets(ids, dir)</code></td><td><code>move:filesystem</code></td></tr>
+                <tr><td><code>lumora.exportAssets(ids, opts)</code></td><td><code>export:assets</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Reading fields like <code>.capturedAt</code>, <code>.rating</code>, or
+            <code>.camera</code> on assets requires <code>read:metadata</code>.
+          </p>
+        </section>
+
+        <section id="permissions" class="guide-section">
+          <h2>Permissions</h2>
+          <p>
+            Permissions are written to <code>lumora.plugin.json</code> when you save in the
+            editor. Undeclared API calls fail at runtime.
+          </p>
+          <ul>
+            <li><code>read:assets</code> — load paths and ids</li>
+            <li><code>read:metadata</code> — EXIF, ratings, camera</li>
+            <li><code>write:metadata</code> — ratings and tags</li>
+            <li><code>rename:filesystem</code> — rename on disk</li>
+            <li><code>move:filesystem</code> — move into folders</li>
+            <li><code>export:assets</code> — export copies</li>
+          </ul>
+        </section>
+
+        <section id="examples" class="guide-section">
+          <h2>Example plugins</h2>
+          <p>
+            First-party examples ship in
+            <a href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples"
+              >plugins/examples/</a
+            >. Install from <strong>Discover</strong> in the app, or browse source on GitHub:
+          </p>
+
+          <h3>Hello Selection</h3>
+          <p>Logging only — no permissions. Good starting point.</p>
+          <pre class="guide-code"><code>export async function runAction(actionId, context) {
+  lumora.log("info", `${context.assetIds.length} asset(s) selected`);
+  for (const id of context.assetIds) {
+    lumora.log("info", id);
+  }
+  return { ok: true, message: `Logged ${context.assetIds.length} ids` };
+}</code></pre>
+          <p>
+            <a
+              href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples/com.lumora.example.hello-selection"
+              >View on GitHub →</a
+            >
+          </p>
+
+          <h3>Rename by Capture Date</h3>
+          <p>
+            Uses <code>read:metadata</code> + <code>rename:filesystem</code>. Renames to
+            <code>YYYY-MM-DD_shortid.ext</code> from EXIF capture date.
+          </p>
+          <pre class="guide-code"><code>const assets = await lumora.getAssets(context.assetIds);
+for (const asset of assets) {
+  const date = asset.capturedAt ?? asset.createdAt;
+  const newName = `${date.slice(0, 10)}_${asset.id.slice(0, 8)}.jpg`;
+  await lumora.renameAsset(asset.id, newName);
+}</code></pre>
+          <p>
+            <a
+              href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples/com.lumora.example.rename-by-date"
+              >View on GitHub →</a
+            >
+          </p>
+
+          <h3>Export Web Ready</h3>
+          <p>Exports resized JPEG copies — requires <code>export:assets</code>.</p>
+          <p>
+            <a
+              href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples/com.lumora.example.export-web-ready"
+              >View on GitHub →</a
+            >
+          </p>
+
+          <h3>Organize by Template</h3>
+          <p>Moves files into a folder structure from a template — <code>move:filesystem</code>.</p>
+          <p>
+            <a
+              href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples/com.lumora.example.organize-by-template"
+              >View on GitHub →</a
+            >
+          </p>
+        </section>
+
+        <section id="forks" class="guide-section">
+          <h2>Personal forks</h2>
+          <p>
+            Click <strong>Customize</strong> on Discover or <strong>Save copy</strong> on an
+            installed plugin. Lumora copies the plugin to a new id (e.g.
+            <code>com.personal.fork-rename-by-date</code>) so you can edit without changing
+            the original.
+          </p>
+        </section>
+
+        <section id="troubleshooting" class="guide-section">
+          <h2>Troubleshooting</h2>
+          <div class="guide-table-wrap">
+            <table class="guide-table">
+              <thead>
+                <tr>
+                  <th>Symptom</th>
+                  <th>Likely cause</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Action not in menu</td>
+                  <td>Plugin disabled or not installed</td>
+                </tr>
+                <tr>
+                  <td>Permission error</td>
+                  <td>API used but not in manifest — re-save in editor</td>
+                </tr>
+                <tr>
+                  <td><code>PLUGIN_RUNTIME_ERROR</code></td>
+                  <td>JS exception — check run history on Installed tab</td>
+                </tr>
+                <tr>
+                  <td>Timeout after 120s</td>
+                  <td>Infinite loop or unresolved promise</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="guide-section guide-next">
+          <h2>Full specification</h2>
+          <p>
+            For manifest schema, host architecture, and milestone details, see
+            <a href="https://github.com/Anurag-error404/lumora/blob/main/docs/plugins.md"
+              >docs/plugins.md</a
+            >
+            and
+            <a href="https://github.com/Anurag-error404/lumora/blob/main/docs/plugin-author-guide.md"
+              >docs/plugin-author-guide.md</a
+            >
+            in the repository.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="guide.html">User guide</a>
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/Anurag-error404/lumora/tree/main/plugins/examples"
+              rel="noopener noreferrer"
+              >Example plugins on GitHub</a
+            >
+          </div>
+        </section>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <span class="brand-name">LUMORA</span>
+        <span class="footer-tag">your memories, your machine.</span>
+      </div>
+      <p class="footer-meta">
+        MIT License ·
+        <a href="index.html">Home</a>
+        ·
+        <a href="guide.html">Guide</a>
+        ·
+        <a href="plugins-guide.html" aria-current="page">Plugins</a>
+        ·
+        <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer">GitHub</a>
+      </p>
+    </footer>
+
+    <script src="site.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../docs/plugin.schema.json",
+  "id": "com.lumora.example.organize-by-template",
+  "name": "Organize by Album Template",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Moves selected photos into a template-based folder structure (e.g. ${year}/${album}/${filename}).",
+  "author": "Lumora contributors",
+  "permissions": [
+    "read:assets",
+    "read:metadata",
+    "move:filesystem"
+  ],
+  "contributions": {
+    "actions": [
+      {
+        "id": "organize-by-template",
+        "label": "Organize by template…",
+        "scope": "selection",
+        "minSelection": 1,
+        "maxSelection": 500
+      }
+    ]
+  },
+  "main": "main.js"
+}

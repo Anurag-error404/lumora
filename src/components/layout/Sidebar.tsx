@@ -82,8 +82,9 @@ const NAV_SECTIONS: readonly NavSection[] = [
     ],
   },
   {
-    heading: "Settings",
+    heading: "Advanced",
     items: [
+      { id: "plugins", label: "Plugins", icon: "puzzle" },
       { id: "settings", label: "Settings", icon: "settings" },
       { id: "developer", label: "Developer", icon: "code" },
     ],

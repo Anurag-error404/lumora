@@ -21,6 +21,7 @@ mod ml;
 mod models;
 mod ocr;
 mod places;
+mod plugins;
 mod preferences;
 mod prefs_runtime;
 mod saved_searches;
@@ -365,6 +366,23 @@ pub fn run() {
             delete_locked_assets,
             delete_locked_album,
             convert_file_src,
+            list_plugins,
+            set_plugin_enabled,
+            install_plugin_dir,
+            get_plugins_dir,
+            create_plugin,
+            analyze_plugin_source,
+            read_plugin_sources,
+            read_plugin_sources_from_dir,
+            save_plugin_draft,
+            fork_plugin,
+            get_plugin_examples_dir,
+            list_available_plugins,
+            remove_plugin,
+            run_plugin_action,
+            get_plugin_history,
+            clear_plugin_history,
+            clear_all_plugin_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LUMORA");

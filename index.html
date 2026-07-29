@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="LUMORA — your memories your machine. Local-first photo & video library with on-device AI search, faces, OCR, auto-tags, Places, and an encrypted vault. Nothing leaves your computer."
+      content="LUMORA — your memories your machine. Local-first photo & video library with Memories, global text-to-image search, on-device AI, faces, OCR, Places, encrypted vault, and sandboxed JavaScript plugins. Nothing leaves your computer."
     />
     <meta name="theme-color" content="#2f6f5e" />
     <link rel="icon" href="favicon.png" type="image/png" />
@@ -35,6 +35,7 @@
       </a>
       <nav class="nav" aria-label="Primary">
         <a href="guide.html">Guide</a>
+        <a href="plugins-guide.html">Plugins</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
@@ -57,12 +58,14 @@
           <p class="hero-brand" id="hero-brand">LUMORA</p>
           <h1 class="hero-tagline">your memories your machine.</h1>
           <p class="hero-lede">
-            A local-first photo &amp; video library — organise at scale, search
-            by meaning, lock private shots in an encrypted vault, and keep every
-            byte on your disk.
+            A local-first photo &amp; video library — rediscover moments with
+            Memories, search your whole archive by description, lock private shots
+            in an encrypted vault, extend workflows with sandboxed plugins, and keep
+            every byte on your disk.
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="guide.html">Read the guide</a>
+            <a class="btn btn-ghost" href="plugins-guide.html">Plugin docs</a>
             <a class="btn btn-ghost" href="#features">Explore features</a>
           </div>
         </div>
@@ -90,8 +93,9 @@
         <h2 id="intro-heading">Google Photos convenience. Zero cloud.</h2>
         <p>
           Built for archive and professional users who need filesystem-scale
-          indexing, fast search, on-device intelligence, and a privacy vault for
-          sensitive albums — without uploading a single frame.
+          indexing, global text-to-image search, curated Memories, on-device
+          intelligence, and a privacy vault for sensitive albums — without
+          uploading a single frame.
         </p>
       </section>
 
@@ -99,8 +103,10 @@
         <header class="section-head">
           <h2 id="features-heading">What LUMORA does</h2>
           <p>
-            One desktop app for importing, organising, searching, cleaning, and
-            locking private media in a vault that never leaves the machine.
+            One desktop app for importing, organising, searching by meaning across
+            your whole library, reliving curated Memories, cleaning up, locking
+            private media in a vault, and extending workflows with sandboxed plugins
+            — all without uploading a single frame.
           </p>
         </header>
 
@@ -108,10 +114,12 @@
           <a href="#library">Library</a>
           <a href="#organise">Organise</a>
           <a href="#search">Search</a>
+          <a href="#memories">Memories</a>
           <a href="#intelligence">On-device AI</a>
           <a href="#cleanup">Cleanup</a>
           <a href="#vault">Privacy vault</a>
           <a href="#places">Places</a>
+          <a href="#plugins">Plugins</a>
         </nav>
       </section>
 
@@ -200,24 +208,29 @@
         <div class="feature-band-inner">
           <div class="feature-copy reveal">
             <p class="feature-kicker">03 — Search</p>
-            <h2 id="search-heading">Find by filename, filter, or meaning</h2>
+            <h2 id="search-heading">Global text-to-image search across your library</h2>
             <p class="feature-lede">
-              Start with fast full-text search. Add structured filters. When you
-              install CLIP, ask in plain language — results blend with FTS instead
-              of replacing it.
+              The toolbar search spans your entire archive. Start with fast
+              full-text and structured filters. When you install CLIP, type a
+              description in plain language and LUMORA finds matching photos —
+              text-to-image, on-device, blended with FTS instead of replacing it.
             </p>
             <ul class="feature-points">
               <li>
+                <strong>Library-wide</strong>
+                <span>One search box from anywhere in the app — results cover your whole indexed library.</span>
+              </li>
+              <li>
                 <strong>Full-text</strong>
-                <span>Filename, tags, camera, OCR text, people names, and auto-tags.</span>
+                <span>Filename, tags, camera, OCR text, people names, captions, and auto-tags.</span>
               </li>
               <li>
                 <strong>Filters</strong>
                 <span><code>camera:</code>, <code>rating&gt;</code>, <code>before:</code>, <code>after:</code> and more.</span>
               </li>
               <li>
-                <strong>Semantic</strong>
-                <span>“Dog on a beach at sunset” — on-device CLIP, no cloud call.</span>
+                <strong>Text-to-image</strong>
+                <span>“Dog on a beach at sunset” — CLIP embeddings match meaning, not just keywords. No cloud call.</span>
               </li>
               <li>
                 <strong>History</strong>
@@ -228,16 +241,57 @@
           <div class="feature-visual reveal" aria-hidden="true">
             <div class="visual-panel visual-search">
               <span class="search-mock">dog on a beach · camera:iphone rating&gt;3</span>
-              <span class="visual-line muted">FTS + semantic · local only</span>
+              <span class="visual-line muted">Global · FTS + text-to-image · local only</span>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="feature-band alt" id="intelligence" aria-labelledby="intelligence-heading">
+      <section class="feature-band alt" id="memories" aria-labelledby="memories-heading">
         <div class="feature-band-inner reverse">
           <div class="feature-copy reveal">
-            <p class="feature-kicker">04 — On-device AI</p>
+            <p class="feature-kicker">04 — Memories</p>
+            <h2 id="memories-heading">Stories assembled from your library</h2>
+            <p class="feature-lede">
+              LUMORA surfaces curated collections on the Home screen and under
+              Discover — built locally from dates, people, and places. No cloud
+              storytelling; just your photos ranked with on-device CLIP when
+              embeddings are available.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>On this day</strong>
+                <span>Photos from past years on today’s calendar date — relive anniversaries and seasons.</span>
+              </li>
+              <li>
+                <strong>Weekend trips</strong>
+                <span>Clusters from a short date range when you were away — a quick trip recap.</span>
+              </li>
+              <li>
+                <strong>Person &amp; place</strong>
+                <span>Named people in a location, when faces and GPS EXIF line up.</span>
+              </li>
+              <li>
+                <strong>Save as album</strong>
+                <span>Turn a memory into a manual album when you want to keep the set.</span>
+              </li>
+            </ul>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-memories">
+              <span class="chip">On this day</span>
+              <span class="chip">Weekend trip</span>
+              <span class="chip">Person &amp; place</span>
+              <span class="visual-line muted">Local templates · CLIP diversity · optional prose</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-band" id="intelligence" aria-labelledby="intelligence-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">05 — On-device AI</p>
             <h2 id="intelligence-heading">Intelligence that stays offline</h2>
             <p class="feature-lede">
               Every model is optional. Install what you need from Settings → AI.
@@ -246,8 +300,8 @@
             </p>
             <div class="ai-grid">
               <div>
-                <h3>Semantic search</h3>
-                <p>CLIP ViT-B/32 embeddings for natural-language find.</p>
+                <h3>Text-to-image search</h3>
+                <p>CLIP ViT-B/32 — describe a scene, find matching photos library-wide.</p>
               </div>
               <div>
                 <h3>OCR</h3>
@@ -279,10 +333,10 @@
         </div>
       </section>
 
-      <section class="feature-band" id="cleanup" aria-labelledby="cleanup-heading">
-        <div class="feature-band-inner">
+      <section class="feature-band alt" id="cleanup" aria-labelledby="cleanup-heading">
+        <div class="feature-band-inner reverse">
           <div class="feature-copy reveal">
-            <p class="feature-kicker">05 — Cleanup</p>
+            <p class="feature-kicker">06 — Cleanup</p>
             <h2 id="cleanup-heading">Delete with confidence</h2>
             <p class="feature-lede">
               Exact copies, near lookalikes, and soft-focus shots are separated
@@ -317,10 +371,10 @@
         </div>
       </section>
 
-      <section class="feature-band alt" id="vault" aria-labelledby="vault-heading">
-        <div class="feature-band-inner reverse">
+      <section class="feature-band" id="vault" aria-labelledby="vault-heading">
+        <div class="feature-band-inner">
           <div class="feature-copy reveal">
-            <p class="feature-kicker">06 — Privacy vault</p>
+            <p class="feature-kicker">07 — Privacy vault</p>
             <h2 id="vault-heading">Lock what should stay private</h2>
             <p class="feature-lede">
               Move sensitive photos and whole albums into the encrypted Locked
@@ -357,10 +411,10 @@
         </div>
       </section>
 
-      <section class="feature-band" id="places" aria-labelledby="places-heading">
-        <div class="feature-band-inner">
+      <section class="feature-band alt" id="places" aria-labelledby="places-heading">
+        <div class="feature-band-inner reverse">
           <div class="feature-copy reveal">
-            <p class="feature-kicker">07 — Places &amp; extras</p>
+            <p class="feature-kicker">08 — Places &amp; extras</p>
             <h2 id="places-heading">Where it was shot — without a map server</h2>
             <p class="feature-lede">
               Browse by place from GPS EXIF using offline reverse geocoding, then
@@ -391,6 +445,49 @@
         </div>
       </section>
 
+      <section class="feature-band" id="plugins" aria-labelledby="plugins-heading">
+        <div class="feature-band-inner">
+          <div class="feature-copy reveal">
+            <p class="feature-kicker">09 — Plugins</p>
+            <h2 id="plugins-heading">Extend LUMORA with your own actions</h2>
+            <p class="feature-lede">
+              Run batch workflows on selected photos from a sandboxed JavaScript
+              plugin — rename by date, export web-ready copies, or build your own.
+              No network access. Every plugin is a folder on disk you can read and edit.
+            </p>
+            <ul class="feature-points">
+              <li>
+                <strong>Discover &amp; install</strong>
+                <span>First-party examples in one click, or import a plugin folder from disk.</span>
+              </li>
+              <li>
+                <strong>Create &amp; fork</strong>
+                <span>Built-in editor with syntax highlighting and <code>lumora.*</code> autocomplete.</span>
+              </li>
+              <li>
+                <strong>Auto permissions</strong>
+                <span>Capabilities are inferred from your code — no manual permission checkboxes.</span>
+              </li>
+              <li>
+                <strong>Selection actions</strong>
+                <span>Run from the Plugins menu when photos are selected — with progress and run history.</span>
+              </li>
+            </ul>
+            <p class="feature-note">
+              <a href="plugins-guide.html">Read the plugin author guide →</a>
+            </p>
+          </div>
+          <div class="feature-visual reveal" aria-hidden="true">
+            <div class="visual-panel visual-plugins">
+              <span class="visual-label">main.js</span>
+              <span class="visual-line">lumora.getAssets()</span>
+              <span class="visual-line">lumora.renameAsset()</span>
+              <span class="visual-line muted">No network · inspectable on disk</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="section privacy" id="privacy" aria-labelledby="privacy-heading">
         <div class="privacy-panel reveal">
           <h2 id="privacy-heading">Nothing leaves the machine</h2>
@@ -405,7 +502,10 @@
             <li>On-device ONNX Runtime (CoreML on macOS, CPU elsewhere)</li>
             <li>User-initiated model downloads with SHA-256 verification</li>
             <li>Embeddings, faces, OCR, and auto-tags rebuildable without touching originals</li>
+            <li>Global CLIP text-to-image search — embeddings stay on disk, no query leaves the machine</li>
+            <li>Memories built locally from dates, people, and places — no cloud storytelling</li>
             <li>Offline Places reverse-geocode from bundled GeoNames data</li>
+            <li>Sandboxed JavaScript plugins — no network, explicit permissions, local run history</li>
           </ul>
         </div>
       </section>
@@ -437,6 +537,10 @@
             <dd>ONNX · CLIP · OCR · Faces · Auto-tags</dd>
           </div>
           <div>
+            <dt>Plugins</dt>
+            <dd>JavaScript · sandboxed · no network</dd>
+          </div>
+          <div>
             <dt>Platforms</dt>
             <dd>macOS first · Windows &amp; Linux next</dd>
           </div>
@@ -447,10 +551,12 @@
         <h2 id="cta-heading">Start local. Stay local.</h2>
         <p>
           Follow the guide to run LUMORA, import a folder, and optionally install
-          on-device models — or clone the repo and build from source.
+          on-device models for text-to-image search and Memories. Extend the app
+          with plugins — or clone the repo and build from source.
         </p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="guide.html">Open the guide</a>
+          <a class="btn btn-ghost" href="plugins-guide.html">Plugin documentation</a>
           <a
             class="btn btn-ghost"
             href="https://github.com/Anurag-error404/lumora"
@@ -468,7 +574,11 @@
       </div>
       <p class="footer-meta">
         MIT License ·
+        <a href="index.html">Home</a>
+        ·
         <a href="guide.html">Guide</a>
+        ·
+        <a href="plugins-guide.html">Plugins</a>
         ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
           >GitHub</a

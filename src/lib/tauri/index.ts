@@ -605,6 +605,160 @@ export type Preferences = {
   };
 };
 
+// ─── Plugin types ─────────────────────────────────────────────────────────────
+
+export type CreatePluginInput = {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  actionId: string;
+  actionLabel: string;
+  mainJs?: string;
+};
+
+export type CreatePluginResult = {
+  id: string;
+  dir: string;
+};
+
+export type PluginValidationIssue = {
+  severity: string;
+  code: string;
+  message: string;
+  line?: number;
+};
+
+export type PluginAnalysis = {
+  permissions: string[];
+  issues: PluginValidationIssue[];
+  warnings: PluginValidationIssue[];
+  hasRunAction: boolean;
+  hasExport: boolean;
+};
+
+export type PluginSources = {
+  pluginId: string;
+  dir: string;
+  mainJs: string;
+  manifest: PluginManifest;
+  readme?: string;
+  forkedFrom?: string;
+};
+
+export type SavePluginDraftInput = {
+  pluginId: string;
+  name: string;
+  description?: string;
+  author?: string;
+  actionId: string;
+  actionLabel: string;
+  mainJs: string;
+};
+
+export type SavePluginResult = {
+  id: string;
+  dir: string;
+  analysis: PluginAnalysis;
+};
+
+export type ForkPluginInput = {
+  sourcePluginId?: string;
+  sourceDir?: string;
+  newId: string;
+  newName: string;
+  description?: string;
+  author?: string;
+  actionId?: string;
+  actionLabel?: string;
+  mainJs?: string;
+};
+
+export type PluginAction = {
+  id: string;
+  label: string;
+  scope: string;
+  minSelection: number;
+  maxSelection: number;
+};
+
+export type PluginContributions = {
+  actions: PluginAction[];
+};
+
+export type PluginManifest = {
+  id: string;
+  name: string;
+  version: string;
+  apiVersion: number;
+  description: string;
+  author: string;
+  permissions: string[];
+  contributions: PluginContributions;
+  main?: string;
+};
+
+export type PluginEntry = {
+  manifest: PluginManifest;
+  dir: string;
+  enabled: boolean;
+  hasIcon: boolean;
+  hasReadme: boolean;
+};
+
+export type AvailablePlugin = {
+  manifest: PluginManifest;
+  sourceDir: string;
+  installed: boolean;
+  enabled: boolean;
+};
+
+export type RunOutcome = "ok" | "cancelled" | "timeout" | "error";
+
+export type PluginLogLine = {
+  level: "info" | "warn" | "error";
+  message: string;
+  timestampMs: number;
+};
+
+export type PluginRunProgressEvent = {
+  runId: string;
+  pluginId: string;
+  pluginName: string;
+  actionId: string;
+  phase: "starting" | "running" | "done" | "error" | string;
+  current: number;
+  total: number;
+  message?: string;
+  logs: PluginLogLine[];
+};
+
+export type PluginRunRecord = {
+  runId: string;
+  pluginId: string;
+  pluginVersion: string;
+  actionId: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  mode: string;
+  outcome: RunOutcome;
+  errorCode?: string;
+  errorMessage?: string;
+  assetsRequested: number;
+  assetsAffected: number;
+  assetsSkipped: number;
+  logLines: PluginLogLine[];
+};
+
+export type PluginActionResult = {
+  ok: boolean;
+  message: string;
+  previewPlan?: unknown;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type StorageSummary = {
   databaseBytes: number;
   thumbnailBytes: number;
@@ -1053,6 +1207,57 @@ export const api = {
       albumId,
       album_id: albumId,
     }),
+
+  // ─── Plugin commands ───────────────────────────────────────────────────────
+  listPlugins: () => invoke<PluginEntry[]>("list_plugins"),
+  setPluginEnabled: (pluginId: string, enabled: boolean) =>
+    invoke<void>("set_plugin_enabled", { pluginId, plugin_id: pluginId, enabled }),
+  installPluginDir: (sourceDir: string) =>
+    invoke<string[]>("install_plugin_dir", { sourceDir, source_dir: sourceDir }),
+  getPluginExamplesDir: () => invoke<string>("get_plugin_examples_dir"),
+  getPluginsDir: () => invoke<string>("get_plugins_dir"),
+  createPlugin: (spec: CreatePluginInput) =>
+    invoke<CreatePluginResult>("create_plugin", { spec }),
+  analyzePluginSource: (mainJs: string) =>
+    invoke<PluginAnalysis>("analyze_plugin_source", { mainJs, main_js: mainJs }),
+  readPluginSources: (pluginId: string) =>
+    invoke<PluginSources>("read_plugin_sources", { pluginId, plugin_id: pluginId }),
+  readPluginSourcesFromDir: (sourceDir: string) =>
+    invoke<PluginSources>("read_plugin_sources_from_dir", {
+      sourceDir,
+      source_dir: sourceDir,
+    }),
+  savePluginDraft: (draft: SavePluginDraftInput) =>
+    invoke<SavePluginResult>("save_plugin_draft", { draft }),
+  forkPlugin: (spec: ForkPluginInput) =>
+    invoke<SavePluginResult>("fork_plugin", { spec }),
+  listAvailablePlugins: () => invoke<AvailablePlugin[]>("list_available_plugins"),
+  removePlugin: (pluginId: string) =>
+    invoke<void>("remove_plugin", { pluginId, plugin_id: pluginId }),
+  runPluginAction: (
+    pluginId: string,
+    actionId: string,
+    assetIds: string[],
+    mode?: "preview" | "apply",
+  ) =>
+    invoke<PluginActionResult>("run_plugin_action", {
+      pluginId,
+      plugin_id: pluginId,
+      actionId,
+      action_id: actionId,
+      assetIds,
+      asset_ids: assetIds,
+      mode,
+    }),
+  getPluginHistory: (pluginId: string, limit?: number) =>
+    invoke<PluginRunRecord[]>("get_plugin_history", {
+      pluginId,
+      plugin_id: pluginId,
+      limit,
+    }),
+  clearPluginHistory: (pluginId: string) =>
+    invoke<void>("clear_plugin_history", { pluginId, plugin_id: pluginId }),
+  clearAllPluginHistory: () => invoke<void>("clear_all_plugin_history"),
 };
 
 export function thumbSrc(asset: AssetSummary): string | null {

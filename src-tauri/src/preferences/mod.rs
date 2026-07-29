@@ -42,6 +42,8 @@ pub struct Preferences {
     pub performance: PerformancePrefs,
     pub import_export: ImportExportPrefs,
     pub updates: UpdatesPrefs,
+    #[serde(default)]
+    pub plugins: PluginsPrefs,
 }
 
 impl Default for Preferences {
@@ -55,6 +57,7 @@ impl Default for Preferences {
             performance: PerformancePrefs::default(),
             import_export: ImportExportPrefs::default(),
             updates: UpdatesPrefs::default(),
+            plugins: PluginsPrefs::default(),
         }
     }
 }
@@ -290,6 +293,15 @@ impl Default for UpdatesPrefs {
             download_in_background: false,
         }
     }
+}
+
+/// Per-plugin enabled toggle; keyed by plugin id (reverse-DNS string).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsPrefs {
+    /// `true` = enabled, absent or `false` = disabled.
+    #[serde(default)]
+    pub enabled: std::collections::HashMap<String, bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
