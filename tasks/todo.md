@@ -1,7 +1,7 @@
-# Memories v1 — Tasks
+# Memories v1.5 — Tasks
 
-- [x] Task 1: Backend types + commands + On this day
-- [x] Task 2: Weekend trips + person/place generators
-- [x] Task 3: Save as album
-- [x] Task 4: Frontend Memories view + Home + Sidebar
-- [x] Task 5: Unit tests + SPEC checklist shipped
+- [x] Rank helper + wire into asset lists / covers
+- [x] Caption quote picker + MemorySummary.quote
+- [x] UI: show quote on cards + detail + Home
+- [x] Tests with synthetic CLIP vectors + captions
+- [x] SPEC checklist v1.5 shipped

@@ -391,6 +391,8 @@ export type MemorySummary = {
   kind: MemoryKind;
   title: string;
   subtitle: string;
+  /** Florence caption quote when available (v1.5). */
+  quote: string | null;
   assetCount: number;
   coverAssetId: string | null;
   coverThumbnailPath: string | null;

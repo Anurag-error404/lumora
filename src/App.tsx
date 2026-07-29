@@ -1006,10 +1006,13 @@ export default function App() {
                   title={
                     memories.find((m) => m.id === activeMemory)?.title ?? "Memory"
                   }
-                  description={
-                    memories.find((m) => m.id === activeMemory)?.subtitle ??
-                    "Photos in this memory."
-                  }
+                  description={(() => {
+                    const m = memories.find((row) => row.id === activeMemory);
+                    if (!m) return "Photos in this memory.";
+                    return m.quote
+                      ? `${m.subtitle} · “${m.quote}”`
+                      : m.subtitle;
+                  })()}
                   actions={
                     <>
                       <button

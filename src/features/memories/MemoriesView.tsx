@@ -42,7 +42,7 @@ export function MemoriesView({
     <div className="memories-page">
       <PageHeader
         title="Memories"
-        description="Stories assembled on this machine from your dates, people, and places — templates only, no cloud AI."
+        description="Stories assembled on this machine from your dates, people, and places — ranked with on-device CLIP when available, with captions as quotes."
         actions={
           <button type="button" onClick={onRefresh}>
             Refresh
@@ -69,6 +69,9 @@ export function MemoriesView({
                   <span className="memory-kind muted">{kindLabel(memory.kind)}</span>
                   <span className="memory-cover-name">{memory.title}</span>
                   <span className="muted">{memory.subtitle}</span>
+                  {memory.quote ? (
+                    <span className="memory-quote">“{memory.quote}”</span>
+                  ) : null}
                 </div>
               </button>
             </article>

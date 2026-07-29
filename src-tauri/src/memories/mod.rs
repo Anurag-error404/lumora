@@ -1,18 +1,23 @@
-//! Memories v1 — local clustering + ranking + metadata templates.
+//! Memories — local clustering + ranking + metadata templates (+ v1.5 CLIP/captions).
 //!
 //! No LLM, no network, no persisted story table. A memory is a deterministic
 //! id + curated asset set + title/subtitle filled from dates / people / places.
-//! Optional Save as album creates a normal user album; memories never auto-create
-//! albums.
+//! v1.5 adds CLIP diversity ranking (when embeddings exist) and Florence captions
+//! as quotes. Optional Save as album creates a normal user album; memories never
+//! auto-create albums.
+
+mod rank;
 
 use chrono::{Datelike, Duration, NaiveDate, Utc, Weekday};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Album, AssetSummary};
 use crate::search::map_asset;
+
+use self::rank::{diversify, load_embeddings, pick_quote, RankCandidate, MAX_CANDIDATES};
 
 const MIN_ON_THIS_DAY: i64 = 3;
 const MIN_WEEKEND: i64 = 5;
@@ -43,6 +48,8 @@ pub struct MemorySummary {
     pub kind: MemoryKind,
     pub title: String,
     pub subtitle: String,
+    /// Florence caption quote when available (v1.5); otherwise null.
+    pub quote: Option<String>,
     pub asset_count: i64,
     pub cover_asset_id: Option<String>,
     pub cover_thumbnail_path: Option<String>,
@@ -57,6 +64,108 @@ pub struct MemorySummary {
 pub struct MemoryDetail {
     pub summary: MemorySummary,
     pub assets: Vec<AssetSummary>,
+}
+
+struct MetaRow {
+    id: String,
+    favorite: bool,
+    rating: i64,
+    thumbnail_path: Option<String>,
+}
+
+/// Load candidate metadata (base-ranked, capped), attach CLIP vectors, diversify.
+fn diversified_ids(
+    conn: &Connection,
+    where_sql: &str,
+    params: &[&dyn ToSql],
+    take: usize,
+) -> AppResult<Vec<String>> {
+    let sql = format!(
+        "SELECT a.id, a.favorite, a.rating, a.thumbnail_path
+         FROM assets a
+         WHERE a.deleted_at IS NULL AND ({where_sql})
+         ORDER BY {RANK_ORDER}
+         LIMIT {MAX_CANDIDATES}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params, |r| {
+        Ok(MetaRow {
+            id: r.get(0)?,
+            favorite: r.get::<_, i64>(1)? != 0,
+            rating: r.get(2)?,
+            thumbnail_path: r.get(3)?,
+        })
+    })?;
+    let metas: Vec<MetaRow> = rows.filter_map(|r| r.ok()).collect();
+    let ids: Vec<String> = metas.iter().map(|m| m.id.clone()).collect();
+    let embeds = load_embeddings(conn, &ids).unwrap_or_default();
+    let candidates: Vec<RankCandidate> = metas
+        .into_iter()
+        .map(|m| RankCandidate {
+            id: m.id.clone(),
+            favorite: m.favorite,
+            rating: m.rating,
+            has_thumb: m.thumbnail_path.is_some(),
+            embedding: embeds.get(&m.id).cloned(),
+        })
+        .collect();
+    Ok(diversify(candidates, take.max(1)))
+}
+
+fn assets_for_ordered_ids(
+    conn: &Connection,
+    ordered: &[String],
+    limit: u32,
+    offset: u32,
+) -> AppResult<Vec<AssetSummary>> {
+    let slice: Vec<&String> = ordered
+        .iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect();
+    if slice.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut by_id = std::collections::HashMap::new();
+    for id in &slice {
+        let asset = conn
+            .query_row(
+                &format!("SELECT {SELECT_COLUMNS} FROM assets a WHERE a.id = ?1"),
+                params![id.as_str()],
+                map_asset,
+            )
+            .ok();
+        if let Some(a) = asset {
+            by_id.insert(id.to_string(), a);
+        }
+    }
+    Ok(slice
+        .into_iter()
+        .filter_map(|id| by_id.remove(id.as_str()))
+        .collect())
+}
+
+fn cover_from_ids(
+    conn: &Connection,
+    ordered: &[String],
+) -> AppResult<(Option<String>, Option<String>)> {
+    let Some(id) = ordered.first() else {
+        return Ok((None, None));
+    };
+    let thumb: Option<String> = conn
+        .query_row(
+            "SELECT thumbnail_path FROM assets WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok((Some(id.clone()), thumb))
+}
+
+fn with_quote(conn: &Connection, mut summary: MemorySummary, ordered: &[String]) -> MemorySummary {
+    summary.quote = pick_quote(conn, ordered);
+    summary
 }
 
 /// List curated memories for Home / Discover. Order: On this day, then weekends,
@@ -293,43 +402,33 @@ fn on_this_day_for_month_day(
         return Ok(None);
     }
 
-    let (cover_asset_id, cover_thumbnail_path) = cover_for_on_this_day(conn, month_day, this_year)?;
+    let ordered = diversified_ids(
+        conn,
+        "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
+           AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
+        &[&month_day, &this_year],
+        32,
+    )?;
+    let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_on_this_day(years.len(), count);
-    Ok(Some(MemorySummary {
-        id: format!("on_this_day:{month_day}"),
-        kind: MemoryKind::OnThisDay,
-        title,
-        subtitle,
-        asset_count: count,
-        cover_asset_id,
-        cover_thumbnail_path,
-        start_date: Some(month_day.to_string()),
-        end_date: None,
-        place_label: None,
-        person_name: None,
-    }))
-}
-
-fn cover_for_on_this_day(
-    conn: &Connection,
-    month_day: &str,
-    this_year: i32,
-) -> AppResult<(Option<String>, Option<String>)> {
-    conn.query_row(
-        &format!(
-            "SELECT a.id, a.thumbnail_path FROM assets a
-             WHERE a.deleted_at IS NULL
-               AND strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
-               AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2
-             ORDER BY {RANK_ORDER}
-             LIMIT 1"
-        ),
-        params![month_day, this_year],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .optional()
-    .map(|opt| opt.unwrap_or((None, None)))
-    .map_err(Into::into)
+    Ok(Some(with_quote(
+        conn,
+        MemorySummary {
+            id: format!("on_this_day:{month_day}"),
+            kind: MemoryKind::OnThisDay,
+            title,
+            subtitle,
+            quote: None,
+            asset_count: count,
+            cover_asset_id,
+            cover_thumbnail_path,
+            start_date: Some(month_day.to_string()),
+            end_date: None,
+            place_label: None,
+            person_name: None,
+        },
+        &ordered,
+    )))
 }
 
 fn assets_for_on_this_day(
@@ -339,16 +438,14 @@ fn assets_for_on_this_day(
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
     let this_year = Utc::now().year();
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {SELECT_COLUMNS} FROM assets a
-         WHERE a.deleted_at IS NULL
-           AND strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
-           AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2
-         ORDER BY {RANK_ORDER}
-         LIMIT ?3 OFFSET ?4"
-    ))?;
-    let rows = stmt.query_map(params![month_day, this_year, limit, offset], map_asset)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let ordered = diversified_ids(
+        conn,
+        "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
+           AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
+        &[&month_day, &this_year],
+        MAX_CANDIDATES,
+    )?;
+    assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
 
 // ─── Weekend trips ──────────────────────────────────────────────────────────
@@ -454,21 +551,35 @@ fn build_weekend_summary(
     total: i64,
 ) -> AppResult<Option<MemorySummary>> {
     let place = dominant_place_in_range(conn, start, end)?;
-    let (cover_asset_id, cover_thumbnail_path) = cover_in_range(conn, start, end)?;
+    let start_s = start.format("%Y-%m-%d").to_string();
+    let end_s = end.format("%Y-%m-%d").to_string();
+    let ordered = diversified_ids(
+        conn,
+        "strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
+           AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2",
+        &[&start_s, &end_s],
+        32,
+    )?;
+    let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_weekend(place.as_deref(), start, end, total);
-    Ok(Some(MemorySummary {
-        id: format!("weekend:{}", start.format("%Y-%m-%d")),
-        kind: MemoryKind::WeekendTrip,
-        title,
-        subtitle,
-        asset_count: total,
-        cover_asset_id,
-        cover_thumbnail_path,
-        start_date: Some(start.format("%Y-%m-%d").to_string()),
-        end_date: Some(end.format("%Y-%m-%d").to_string()),
-        place_label: place,
-        person_name: None,
-    }))
+    Ok(Some(with_quote(
+        conn,
+        MemorySummary {
+            id: format!("weekend:{}", start.format("%Y-%m-%d")),
+            kind: MemoryKind::WeekendTrip,
+            title,
+            subtitle,
+            quote: None,
+            asset_count: total,
+            cover_asset_id,
+            cover_thumbnail_path,
+            start_date: Some(start_s),
+            end_date: Some(end_s),
+            place_label: place,
+            person_name: None,
+        },
+        &ordered,
+    )))
 }
 
 fn weekend_memory_for_start(
@@ -538,31 +649,6 @@ fn dominant_place_in_range(
     .map_err(Into::into)
 }
 
-fn cover_in_range(
-    conn: &Connection,
-    start: NaiveDate,
-    end: NaiveDate,
-) -> AppResult<(Option<String>, Option<String>)> {
-    conn.query_row(
-        &format!(
-            "SELECT a.id, a.thumbnail_path FROM assets a
-             WHERE a.deleted_at IS NULL
-               AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
-               AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2
-             ORDER BY {RANK_ORDER}
-             LIMIT 1"
-        ),
-        params![
-            start.format("%Y-%m-%d").to_string(),
-            end.format("%Y-%m-%d").to_string()
-        ],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .optional()
-    .map(|opt| opt.unwrap_or((None, None)))
-    .map_err(Into::into)
-}
-
 fn assets_for_weekend(
     conn: &Connection,
     start: NaiveDate,
@@ -577,24 +663,16 @@ fn assets_for_weekend(
         .as_deref()
         .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
         .unwrap_or(start);
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {SELECT_COLUMNS} FROM assets a
-         WHERE a.deleted_at IS NULL
-           AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
-           AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2
-         ORDER BY {RANK_ORDER}
-         LIMIT ?3 OFFSET ?4"
-    ))?;
-    let rows = stmt.query_map(
-        params![
-            start.format("%Y-%m-%d").to_string(),
-            end.format("%Y-%m-%d").to_string(),
-            limit,
-            offset
-        ],
-        map_asset,
+    let start_s = start.format("%Y-%m-%d").to_string();
+    let end_s = end.format("%Y-%m-%d").to_string();
+    let ordered = diversified_ids(
+        conn,
+        "strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
+           AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2",
+        &[&start_s, &end_s],
+        MAX_CANDIDATES,
     )?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
 
 // ─── Person + place ─────────────────────────────────────────────────────────
@@ -663,44 +741,36 @@ fn person_place_summary(
     place: &str,
     count: i64,
 ) -> AppResult<Option<MemorySummary>> {
-    let (cover_asset_id, cover_thumbnail_path) =
-        cover_for_person_place(conn, person_id, place)?;
+    let ordered = diversified_ids(
+        conn,
+        "EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1)
+           AND EXISTS (
+             SELECT 1 FROM asset_places ap
+             WHERE ap.asset_id = a.id AND ap.place_label = ?2
+           )",
+        &[&person_id, &place],
+        32,
+    )?;
+    let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_person_place(person_name, place, count);
-    Ok(Some(MemorySummary {
-        id: format!("person_place:{person_id}|{place}"),
-        kind: MemoryKind::PersonPlace,
-        title,
-        subtitle,
-        asset_count: count,
-        cover_asset_id,
-        cover_thumbnail_path,
-        start_date: None,
-        end_date: None,
-        place_label: Some(place.to_string()),
-        person_name: Some(person_name.to_string()),
-    }))
-}
-
-fn cover_for_person_place(
-    conn: &Connection,
-    person_id: &str,
-    place: &str,
-) -> AppResult<(Option<String>, Option<String>)> {
-    conn.query_row(
-        &format!(
-            "SELECT a.id, a.thumbnail_path FROM assets a
-             JOIN faces f ON f.asset_id = a.id AND f.person_id = ?1
-             JOIN asset_places ap ON ap.asset_id = a.id AND ap.place_label = ?2
-             WHERE a.deleted_at IS NULL
-             ORDER BY {RANK_ORDER}
-             LIMIT 1"
-        ),
-        params![person_id, place],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .optional()
-    .map(|opt| opt.unwrap_or((None, None)))
-    .map_err(Into::into)
+    Ok(Some(with_quote(
+        conn,
+        MemorySummary {
+            id: format!("person_place:{person_id}|{place}"),
+            kind: MemoryKind::PersonPlace,
+            title,
+            subtitle,
+            quote: None,
+            asset_count: count,
+            cover_asset_id,
+            cover_thumbnail_path,
+            start_date: None,
+            end_date: None,
+            place_label: Some(place.to_string()),
+            person_name: Some(person_name.to_string()),
+        },
+        &ordered,
+    )))
 }
 
 fn assets_for_person_place(
@@ -710,21 +780,17 @@ fn assets_for_person_place(
     limit: u32,
     offset: u32,
 ) -> AppResult<Vec<AssetSummary>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {SELECT_COLUMNS} FROM assets a
-         WHERE a.deleted_at IS NULL
-           AND EXISTS (
-             SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1
-           )
+    let ordered = diversified_ids(
+        conn,
+        "EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1)
            AND EXISTS (
              SELECT 1 FROM asset_places ap
              WHERE ap.asset_id = a.id AND ap.place_label = ?2
-           )
-         ORDER BY {RANK_ORDER}
-         LIMIT ?3 OFFSET ?4"
-    ))?;
-    let rows = stmt.query_map(params![person_id, place, limit, offset], map_asset)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+           )",
+        &[&person_id, &place],
+        MAX_CANDIDATES,
+    )?;
+    assets_for_ordered_ids(conn, &ordered, limit, offset)
 }
 
 #[cfg(test)]
@@ -866,6 +932,73 @@ mod tests {
         let album = save_memory_as_album(&conn, &otd.id, None).unwrap();
         assert_eq!(album.name, "On this day");
         assert_eq!(album.asset_count, 3);
+    }
+
+    #[test]
+    fn on_this_day_uses_caption_as_quote() {
+        let conn = setup();
+        let today = Utc::now().date_naive();
+        let md = format!("{:02}-{:02}", today.month(), today.day());
+        let y = today.year();
+        for i in 0..3 {
+            insert_asset(
+                &conn,
+                &format!("q{i}"),
+                &format!("{}-{md}T12:0{i}:00Z", y - 1),
+                i == 0,
+            );
+        }
+        conn.execute(
+            "INSERT INTO asset_captions (asset_id, caption, model_id, created_at)
+             VALUES ('q0', 'A quiet street lined with trees', 'florence-test', datetime('now'))",
+            [],
+        )
+        .unwrap();
+
+        let list = list_memories(&conn, 10).unwrap();
+        let otd = list
+            .iter()
+            .find(|m| m.kind == MemoryKind::OnThisDay)
+            .expect("on this day");
+        assert_eq!(
+            otd.quote.as_deref(),
+            Some("A quiet street lined with trees")
+        );
+    }
+
+    #[test]
+    fn clip_diversity_prefers_orthogonal_cover_set() {
+        let conn = setup();
+        let today = Utc::now().date_naive();
+        let md = format!("{:02}-{:02}", today.month(), today.day());
+        let y = today.year();
+        for (id, fav) in [("d0", true), ("d1", true), ("d2", false)] {
+            insert_asset(
+                &conn,
+                id,
+                &format!("{}-{md}T12:00:00Z", y - 1),
+                fav,
+            );
+        }
+        // d0 and d1 nearly identical; d2 orthogonal.
+        let mut a = vec![1.0f32, 0.0];
+        crate::ml::vector::normalize(&mut a);
+        let mut b = vec![0.99f32, 0.14];
+        crate::ml::vector::normalize(&mut b);
+        let mut c = vec![0.0f32, 1.0];
+        crate::ml::vector::normalize(&mut c);
+        for (id, v) in [("d0", a), ("d1", b), ("d2", c)] {
+            crate::semantic::store(&conn, id, crate::semantic::IMAGE_MODEL_ID, &v).unwrap();
+        }
+
+        let memory_id = format!("on_this_day:{md}");
+        let assets = list_memory_assets(&conn, &memory_id, 3, 0).unwrap();
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[0].id, "d0");
+        assert_eq!(
+            assets[1].id, "d2",
+            "second slot should be diverse, not the near-duplicate favourite"
+        );
     }
 
     #[test]
