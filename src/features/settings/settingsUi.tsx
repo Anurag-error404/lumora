@@ -12,7 +12,8 @@ export type SettingsSectionId =
   | "shortcuts"
   | "importExport"
   | "updates"
-  | "about";
+  | "about"
+  | "fromMaker";
 
 export const SETTINGS_NAV: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
@@ -26,6 +27,7 @@ export const SETTINGS_NAV: { id: SettingsSectionId; label: string }[] = [
   { id: "importExport", label: "Import & Export" },
   { id: "updates", label: "Updates" },
   { id: "about", label: "About" },
+  { id: "fromMaker", label: "From the maker" },
 ];
 
 export function SettingsBlock({

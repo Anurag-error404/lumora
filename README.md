@@ -174,6 +174,12 @@ Hard-to-reverse technical choices belong in a new ADR under `docs/adr/`.
 
 ---
 
+## Support
+
+If LUMORA helps you, you can support the project on [Ko-fi](https://ko-fi.com/anuragerror404). Support is optional and never changes privacy defaults or unlocks features. There’s also a short maker note in the app under **Settings → From the maker**.
+
+---
+
 ## License
 
 [MIT](./LICENSE) © 2026 Anurag Verma.

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { PageHeader } from "../../components/PageHeader";
 import { formatBytes } from "../../lib/format";
+import { MAKER } from "../../lib/maker";
 import {
   api,
   type Preferences,
@@ -210,8 +212,10 @@ export function SettingsView({
               update={update}
               updater={updater}
             />
-          ) : (
+          ) : section === "about" ? (
             <AboutSection appVersion={appVersion} />
+          ) : (
+            <FromMakerSection />
           )}
         </div>
       </div>
@@ -1092,5 +1096,71 @@ function AboutSection({ appVersion }: { appVersion: string }) {
         </div>
       </dl>
     </SettingsBlock>
+  );
+}
+
+async function openExternal(url: string) {
+  try {
+    await openUrl(url);
+  } catch (e) {
+    console.error("Failed to open URL", url, e);
+  }
+}
+
+function FromMakerSection() {
+  return (
+    <>
+      <SettingsBlock title="A note from the maker">
+        <div className="settings-maker-hero">
+          <strong>{MAKER.name}</strong>
+          <span className="muted">@{MAKER.githubUser}</span>
+        </div>
+        <div className="settings-maker-copy">
+          <p>
+            LUMORA exists because I wanted a photo library that treats an archive like
+            something private — not a funnel. Your originals stay on your disk. Search,
+            faces, and tags only run when you ask, and they run on your machine.
+          </p>
+          <p>
+            The long-term vision is simple: a calm, local-first home for decades of
+            photos and video — fast at scale, honest about what it does online, and open
+            enough that you can inspect, fork, and keep it forever.
+          </p>
+          <p>
+            If the app helps you keep memories without renting them back from the cloud,
+            a Ko-fi tip keeps the late nights of indexing, model wiring, and release
+            signing going. Thank you for being here.
+          </p>
+        </div>
+      </SettingsBlock>
+
+      <SettingsBlock title="Support the work">
+        <p className="muted settings-note">
+          Optional — LUMORA stays free and open source either way. Support never unlocks
+          features or changes privacy defaults.
+        </p>
+        <div className="settings-maker-actions">
+          <button
+            type="button"
+            className="primary settings-coffee-btn"
+            onClick={() => void openExternal(MAKER.koFiUrl)}
+          >
+            Support on Ko-fi
+          </button>
+          <button
+            type="button"
+            onClick={() => void openExternal(MAKER.repoUrl)}
+          >
+            View on GitHub
+          </button>
+          <button
+            type="button"
+            onClick={() => void openExternal(MAKER.githubProfileUrl)}
+          >
+            Maker profile
+          </button>
+        </div>
+      </SettingsBlock>
+    </>
   );
 }
