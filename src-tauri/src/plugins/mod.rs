@@ -25,5 +25,5 @@ pub use editor::{
 };
 pub use history::{clear_all_history, clear_history, append_record, read_records, PluginRunRecord};
 pub use manifest::PluginManifest;
-pub use registry::{install_plugin_dir, plugin_dir, remove_plugin_dir, scan, PluginEntry};
+pub use registry::{install_plugin_dir, plugin_dir, remove_plugin_dir, resolve_examples_dir, scan, PluginEntry};
 pub use scaffold::{create_plugin, CreatePluginResult, CreatePluginSpec};

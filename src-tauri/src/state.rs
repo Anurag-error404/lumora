@@ -78,6 +78,8 @@ impl AppPaths {
 
 pub struct AppState {
     pub paths: AppPaths,
+    /// Bundled first-party example plugins (read-only). `None` when not shipped.
+    pub plugin_examples_dir: Option<PathBuf>,
     pub db: Mutex<Connection>,
     pub indexer: Arc<IndexerQueue>,
     pub embedder: Arc<EmbedWorker>,
@@ -97,6 +99,7 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         paths: AppPaths,
+        plugin_examples_dir: Option<PathBuf>,
         db: Connection,
         indexer: Arc<IndexerQueue>,
         embedder: Arc<EmbedWorker>,
@@ -108,6 +111,7 @@ impl AppState {
     ) -> Self {
         Self {
             paths,
+            plugin_examples_dir,
             db: Mutex::new(db),
             indexer,
             embedder,

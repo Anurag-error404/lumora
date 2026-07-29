@@ -3332,33 +3332,17 @@ pub fn fork_plugin(
 }
 
 /// Return the absolute path to the bundled first-party example plugins directory.
-/// Used by the frontend to offer a "Browse examples" shortcut.
 #[tauri::command]
-pub fn get_plugin_examples_dir() -> AppResult<String> {
-    // Resolve relative to the app bundle / working directory at runtime.
-    // During `tauri dev` this resolves to the project root's plugins/examples/.
-    let candidates = [
-        // Tauri dev: cwd is src-tauri/
-        std::path::PathBuf::from("../plugins/examples"),
-        // Tauri dev from project root
-        std::path::PathBuf::from("plugins/examples"),
-        // Released app: next to the bundle
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("plugins/examples")))
-            .unwrap_or_default(),
-    ];
-    for path in &candidates {
-        if path.exists() {
-            return path
-                .canonicalize()
-                .map(|p| p.display().to_string())
-                .map_err(|e| AppError::msg(e.to_string()));
-        }
-    }
-    Err(AppError::msg(
-        "Examples directory not found. Clone the repository and look in plugins/examples/.",
-    ))
+pub fn get_plugin_examples_dir(state: State<'_, AppState>) -> AppResult<String> {
+    state
+        .plugin_examples_dir
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .ok_or_else(|| {
+            AppError::msg(
+                "Examples directory not found. Clone the repository and look in plugins/examples/.",
+            )
+        })
 }
 
 /// A plugin entry from the examples / discovery catalogue.
@@ -3378,12 +3362,11 @@ pub struct AvailablePlugin {
 /// plugins annotated with their installed / enabled state.
 #[tauri::command]
 pub fn list_available_plugins(state: State<'_, AppState>) -> AppResult<Vec<AvailablePlugin>> {
-    let examples_dir = match get_plugin_examples_dir() {
-        Ok(p) => std::path::PathBuf::from(p),
-        Err(_) => return Ok(Vec::new()), // examples not bundled — graceful empty
+    let Some(examples_dir) = state.plugin_examples_dir.as_ref() else {
+        return Ok(Vec::new());
     };
     let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
-    let Ok(entries) = std::fs::read_dir(&examples_dir) else {
+    let Ok(entries) = std::fs::read_dir(examples_dir) else {
         return Ok(Vec::new());
     };
     let mut result = Vec::new();

@@ -169,8 +169,15 @@ pub fn run() {
             let tags = tags::worker::TagsWorker::new(paths.db_path.clone(), paths.app_data.clone());
             let captions =
                 captions::worker::CaptionsWorker::new(paths.db_path.clone(), paths.app_data.clone());
+            let plugin_examples_dir = plugins::resolve_examples_dir(app.handle());
+            if let Some(ref dir) = plugin_examples_dir {
+                tracing::info!(examples = %dir.display(), "plugin examples directory");
+            } else {
+                tracing::warn!("plugin examples directory not found");
+            }
             let state = AppState::new(
                 paths,
+                plugin_examples_dir,
                 conn,
                 Arc::clone(&indexer),
                 Arc::clone(&embedder),

@@ -40,6 +40,9 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    },
+    "resources": {
+      "../plugins/examples/": "plugins/examples/"
     }
   },
   "plugins": {

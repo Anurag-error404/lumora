@@ -3,9 +3,38 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 use crate::error::AppResult;
 use crate::plugins::manifest::PluginManifest;
+
+/// Resolve the bundled first-party example plugins directory.
+///
+/// Release builds ship examples under `$RESOURCE/plugins/examples/` (see
+/// `tauri.conf.json > bundle > resources`). Dev builds read from the repo.
+pub fn resolve_examples_dir(app: &AppHandle) -> Option<PathBuf> {
+    if let Ok(path) = app
+        .path()
+        .resolve("plugins/examples", BaseDirectory::Resource)
+    {
+        if path.is_dir() {
+            return path.canonicalize().ok().or(Some(path));
+        }
+    }
+
+    for rel in ["../plugins/examples", "plugins/examples"] {
+        let path = PathBuf::from(rel);
+        if path.is_dir() {
+            return path.canonicalize().ok();
+        }
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("plugins/examples")))
+        .filter(|path| path.is_dir())
+        .and_then(|path| path.canonicalize().ok())
+}
 
 /// A fully-resolved plugin entry returned to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,5 +273,25 @@ mod tests {
         let mut ids = install_plugin_dir(&parent, &plugins_dir).unwrap();
         ids.sort();
         assert_eq!(ids, vec!["com.test.alpha", "com.test.beta"]);
+    }
+
+    #[test]
+    fn repo_example_plugins_ship_in_tree() {
+        let path = PathBuf::from("../plugins/examples");
+        assert!(
+            path.is_dir(),
+            "expected bundled examples at {}",
+            path.display()
+        );
+        let count = std::fs::read_dir(&path)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(|e| PluginManifest::load(&e.path()).is_ok())
+            .count();
+        assert!(
+            count >= 4,
+            "expected at least four first-party example plugins, found {count}"
+        );
     }
 }
