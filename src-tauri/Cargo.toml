@@ -62,6 +62,7 @@ tokenizers = { version = "0.23.1", default-features = false, features = ["onig"]
 # Offline reverse geocoding for Places. Bundles GeoNames city data (CC-BY 4.0)
 # into the binary; no network at build or runtime.
 reverse_geocoder = "4.1.1"
+hnsw_rs = "0.3.4"
 
 [dev-dependencies]
 tempfile = "3.27.0"

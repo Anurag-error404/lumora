@@ -1360,7 +1360,9 @@ pub fn remove_ml_model(state: State<'_, AppState>, id: String) -> AppResult<ml::
 /// Drop every embedding without uninstalling models, so they can be rebuilt.
 #[tauri::command]
 pub fn clear_ml_embeddings(state: State<'_, AppState>) -> AppResult<usize> {
+    let app_data = state.paths.app_data.clone();
     let n = state.with_db(ml::clear_embeddings)?;
+    semantic::ann::invalidate_and_remove(&app_data);
     state.embedder.kick();
     Ok(n)
 }
@@ -2102,6 +2104,7 @@ pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult
     })?;
 
     if want_semantic {
+        semantic::ann::invalidate_and_remove(&state.paths.app_data);
         state.embedder.invalidate();
         state.embedder.kick();
     }
@@ -2393,6 +2396,7 @@ pub async fn semantic_search(
     let limit = limit.clamp(1, 500) as usize;
     let embedder = Arc::clone(&state.embedder);
     let db_path = state.paths.db_path.clone();
+    let app_data = state.paths.app_data.clone();
 
     tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<AssetSummary>> {
         let Some(engine) = embedder.engine()? else {
@@ -2400,7 +2404,7 @@ pub async fn semantic_search(
         };
         let embedding = semantic::worker::embed_query(&engine, &query)?;
         let conn = open_db(&db_path)?;
-        let hits = semantic::search_by_vector(&conn, &embedding, limit)?;
+        let hits = semantic::search_by_vector(&conn, &app_data, &embedding, limit)?;
         if hits.is_empty() {
             return Ok(Vec::new());
         }

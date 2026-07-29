@@ -443,6 +443,9 @@ pub fn invalidate_embedding(conn: &Connection, asset_id: &str) -> AppResult<bool
         "DELETE FROM ml_jobs WHERE asset_id = ?1 AND kind = ?2",
         params![asset_id, ModelKind::ClipImage.as_str()],
     )?;
+    if removed > 0 {
+        semantic::ann::mark_dirty();
+    }
     Ok(removed > 0)
 }
 

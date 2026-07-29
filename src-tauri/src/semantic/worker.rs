@@ -76,6 +76,7 @@ impl EmbedWorker {
     pub fn invalidate(&self) {
         *self.engine.lock() = None;
         self.wake.store(true, Ordering::Relaxed);
+        super::ann::mark_dirty();
     }
 
     pub fn kick(&self) {

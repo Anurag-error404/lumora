@@ -5,13 +5,14 @@
 //! the library. Keeping inference out means the whole search path is testable
 //! with synthetic vectors and no model on disk.
 //!
-//! Ranking is a brute-force scan. At the sizes we can actually measure today
-//! that is fast — 512 floats per asset is a 2 KB dot product — and it avoids
-//! committing to an ANN index before there is evidence one is needed.
+//! Ranking uses brute force by default. When the library is large enough, an
+//! optional HNSW index (`ann`) accelerates search and falls back transparently.
 
+pub mod ann;
 pub mod worker;
 
 use rusqlite::{params, Connection};
+use std::path::Path;
 
 use crate::error::AppResult;
 use crate::ml::{self, catalog::ModelKind, vector};
@@ -69,6 +70,7 @@ pub fn store(
         ],
     )?;
     mark_job(conn, asset_id, ModelKind::ClipImage, "done", None)?;
+    ann::mark_dirty();
     Ok(())
 }
 
@@ -144,16 +146,28 @@ pub fn coverage(conn: &Connection) -> AppResult<(i64, i64)> {
 
 /// Rank the library against a query vector, best first.
 ///
-/// Trashed assets are excluded in SQL rather than filtered afterwards, so a
-/// deleted photo can never surface in results.
+/// Uses the HNSW index when available (`app_data` + library size ≥ threshold),
+/// otherwise scans every embedding in SQLite.
 pub fn search_by_vector(
     conn: &Connection,
+    app_data: &Path,
     query: &[f32],
     limit: usize,
 ) -> AppResult<Vec<(String, f32)>> {
     let mut q = query.to_vec();
     vector::normalize(&mut q);
 
+    if let Some(hits) = ann::try_search(conn, app_data, &q, limit)? {
+        return Ok(hits);
+    }
+    search_by_vector_brute(conn, &q, limit)
+}
+
+fn search_by_vector_brute(
+    conn: &Connection,
+    query: &[f32],
+    limit: usize,
+) -> AppResult<Vec<(String, f32)>> {
     let mut stmt = conn.prepare(
         "SELECT e.asset_id, e.vector
          FROM asset_embeddings e
@@ -170,11 +184,10 @@ pub fn search_by_vector(
             Ok(v) => v,
             Err(_) => continue,
         };
-        // A single unreadable row must not fail the whole search.
         let Ok(v) = vector::decode(&blob) else {
             continue;
         };
-        let score = vector::similarity(&q, &v);
+        let score = vector::similarity(query, &v);
         if score >= MIN_SCORE {
             scored.push((id, score));
         }
@@ -242,7 +255,7 @@ mod tests {
         // Halfway between axis 0 and axis 1.
         store(&conn, "a3", IMAGE_MODEL_ID, &[0.7, 0.7, 0.0, 0.0]).unwrap();
 
-        let hits = search_by_vector(&conn, &axis(4, 0), 10).unwrap();
+        let hits = search_by_vector(&conn, _dir.path(), &axis(4, 0), 10).unwrap();
         assert_eq!(hits[0].0, "a1", "exact direction must rank first");
         assert_eq!(hits[1].0, "a3", "partial match ranks second");
         assert!(
@@ -259,7 +272,7 @@ mod tests {
             add_asset(&conn, &id, "image");
             store(&conn, &id, IMAGE_MODEL_ID, &axis(4, 0)).unwrap();
         }
-        assert_eq!(search_by_vector(&conn, &axis(4, 0), 3).unwrap().len(), 3);
+        assert_eq!(search_by_vector(&conn, _dir.path(), &axis(4, 0), 3).unwrap().len(), 3);
     }
 
     #[test]
@@ -275,7 +288,7 @@ mod tests {
         )
         .unwrap();
 
-        let hits = search_by_vector(&conn, &axis(4, 0), 10).unwrap();
+        let hits = search_by_vector(&conn, _dir.path(), &axis(4, 0), 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "a1");
     }
@@ -294,7 +307,7 @@ mod tests {
         )
         .unwrap();
 
-        let hits = search_by_vector(&conn, &axis(4, 0), 10).unwrap();
+        let hits = search_by_vector(&conn, _dir.path(), &axis(4, 0), 10).unwrap();
         assert_eq!(hits.len(), 1, "one bad row must not fail the search");
         assert_eq!(hits[0].0, "good");
     }
@@ -303,7 +316,7 @@ mod tests {
     fn search_on_an_unembedded_library_returns_nothing_rather_than_erroring() {
         let (_dir, conn) = open();
         add_asset(&conn, "a1", "image");
-        assert!(search_by_vector(&conn, &axis(4, 0), 10).unwrap().is_empty());
+        assert!(search_by_vector(&conn, _dir.path(), &axis(4, 0), 10).unwrap().is_empty());
     }
 
     #[test]
@@ -382,7 +395,7 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 1);
 
-        let hits = search_by_vector(&conn, &axis(4, 1), 10).unwrap();
+        let hits = search_by_vector(&conn, _dir.path(), &axis(4, 1), 10).unwrap();
         assert_eq!(hits[0].0, "a1", "latest vector wins");
     }
 }
