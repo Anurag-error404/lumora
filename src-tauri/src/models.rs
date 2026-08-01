@@ -133,6 +133,29 @@ pub struct DuplicateGroup {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DuplicateScanResult {
+    pub groups: Vec<DuplicateGroup>,
+    /// On-disk files matching an existing SHA that were missing from the library.
+    pub copies_indexed: u32,
+    pub phash_backfilled: u32,
+    pub blur_scored: u32,
+    pub exact_groups: u32,
+    pub near_groups: u32,
+}
+
+/// Progress while running a manual duplicate scan (`duplicate-scan-progress`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateScanProgress {
+    /// `copies` | `phash` | `blur` | `grouping` | `done`
+    pub phase: String,
+    pub current: u32,
+    pub total: u32,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlurryAsset {
     pub asset: AssetSummary,
     pub blur_score: f64,
@@ -163,6 +186,20 @@ pub struct ImportProgressEvent {
     pub total: u64,
     pub path: String,
     pub phase: String,
+}
+
+/// Progress while regenerating missing / stale thumbnails (`thumbnail-repair-progress`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailRepairProgress {
+    /// `scanning` | `repairing` | `done`
+    pub phase: String,
+    /// `retry` | `rebuild`
+    pub op: String,
+    pub current: u32,
+    pub total: u32,
+    pub repaired: u32,
+    pub path: Option<String>,
 }
 
 /// Readiness of semantic search: whether the model is installed and how much
@@ -338,4 +375,16 @@ pub struct DeveloperInfo {
     pub index_progress: IndexProgress,
     pub recent_logs: Vec<String>,
     pub crash_logs: Vec<String>,
+    pub thumbnail_failures: Vec<ThumbnailFailure>,
+}
+
+/// Recent thumbnail generation failure for Developer diagnostics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailFailure {
+    pub asset_id: Option<String>,
+    pub path: String,
+    pub media_type: String,
+    pub error: String,
+    pub at: String,
 }

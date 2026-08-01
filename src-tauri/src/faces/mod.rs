@@ -10,7 +10,7 @@ use image::ImageFormat;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::faces::engine::DetectedFace;
 use crate::indexer;
 use crate::ml::{self, catalog::ModelKind, vector};
@@ -289,10 +289,10 @@ pub fn repair_missing_face_crops(conn: &Connection) -> AppResult<u32> {
         if !missing {
             continue;
         }
-        conn.execute(
-            "UPDATE faces SET crop_path = NULL WHERE id = ?1",
-            params![face_id],
-        )?;
+        if let Err(e) = clear_face_crop_path(conn, &face_id) {
+            tracing::warn!(face = %face_id, error = %e, "face crop clear skipped");
+            continue;
+        }
         cleared += 1;
         if let Some(pid) = person_id {
             people.insert(pid);
@@ -302,6 +302,31 @@ pub fn repair_missing_face_crops(conn: &Connection) -> AppResult<u32> {
         let _ = cluster::refresh_person_stats(conn, &person_id);
     }
     Ok(cleared)
+}
+
+fn clear_face_crop_path(conn: &Connection, face_id: &str) -> AppResult<()> {
+    const ATTEMPTS: u32 = 8;
+    let mut last = None;
+    for attempt in 1..=ATTEMPTS {
+        match conn.execute(
+            "UPDATE faces SET crop_path = NULL WHERE id = ?1",
+            params![face_id],
+        ) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                let err = AppError::from(e);
+                if err.is_db_busy() && attempt < ATTEMPTS {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        50u64.saturating_mul(attempt as u64),
+                    ));
+                    last = Some(err);
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| AppError::msg("face crop clear failed")))
 }
 
 /// Hide (or restore) a person. The cluster and its centroid are kept so future

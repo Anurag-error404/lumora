@@ -97,6 +97,22 @@ export type DuplicateGroup = {
   assetIds: string[];
 };
 
+export type DuplicateScanResult = {
+  groups: DuplicateGroup[];
+  copiesIndexed: number;
+  phashBackfilled: number;
+  blurScored: number;
+  exactGroups: number;
+  nearGroups: number;
+};
+
+export type DuplicateScanProgress = {
+  phase: "copies" | "phash" | "blur" | "grouping" | "done" | string;
+  current: number;
+  total: number;
+  path?: string | null;
+};
+
 export type BlurryAsset = {
   asset: AssetSummary;
   blurScore: number;
@@ -117,6 +133,15 @@ export type ImportProgressEvent = {
   total: number;
   path: string;
   phase: string;
+};
+
+export type ThumbnailRepairProgress = {
+  phase: "scanning" | "repairing" | "done" | string;
+  op: "retry" | "rebuild" | string;
+  current: number;
+  total: number;
+  repaired: number;
+  path?: string | null;
 };
 
 export type PermanentDeleteResult = {
@@ -539,6 +564,15 @@ export type DeveloperInfo = {
   indexProgress: IndexProgress;
   recentLogs: string[];
   crashLogs: string[];
+  thumbnailFailures: ThumbnailFailure[];
+};
+
+export type ThumbnailFailure = {
+  assetId?: string | null;
+  path: string;
+  mediaType: string;
+  error: string;
+  at: string;
 };
 
 export type Preferences = {
@@ -845,6 +879,9 @@ export const api = {
   getStorageSummary: () => invoke<StorageSummary>("get_storage_summary"),
   clearThumbnailCache: () => invoke<number>("clear_thumbnail_cache"),
   rebuildThumbnailCache: () => invoke<number>("rebuild_thumbnail_cache"),
+  retryMissingThumbnails: () => invoke<number>("retry_missing_thumbnails"),
+  regenerateAssetThumbnail: (assetId: string) =>
+    invoke<AssetSummary>("regenerate_asset_thumbnail", { assetId }),
   optimizeDatabase: () => invoke<void>("optimize_database"),
   setFavorite: (id: string, favorite: boolean) =>
     invoke<void>("set_favorite", { id, favorite }),
@@ -1072,10 +1109,17 @@ export const api = {
       memory_id: memoryId,
       name: name ?? null,
     }),
+  dismissMemory: (memoryId: string) =>
+    invoke<void>("dismiss_memory", {
+      memoryId,
+      memory_id: memoryId,
+    }),
   placesProgress: () => invoke<PlacesProgress>("places_progress"),
   kickPlaces: () => invoke<void>("kick_places"),
   clearPlaces: () => invoke<number>("clear_places"),
   findDuplicates: () => invoke<DuplicateGroup[]>("find_duplicates"),
+  scanDuplicates: (limit = 2000) =>
+    invoke<DuplicateScanResult>("scan_duplicates", { limit }),
   listBlurryAssets: (limit = 200, offset = 0) =>
     invoke<BlurryAsset[]>("list_blurry_assets", { limit, offset }),
   scanBlurScores: (limit = 500) =>

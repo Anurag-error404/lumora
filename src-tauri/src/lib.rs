@@ -133,27 +133,59 @@ pub fn run() {
             tracing::info!(app_data = %paths.app_data.display(), "app data directory");
 
             let conn = db::open_and_migrate(&paths.db_path)?;
-            // Defer thumbnail / face-crop repair off the critical startup path so
-            // the window can appear while background maintenance catches up.
+            // Defer thumbnail / face-crop repair until after AppState and workers
+            // claim their connections — racing them caused "database is locked".
             let repair_db = paths.db_path.clone();
             let repair_thumbs = paths.thumbs_dir.clone();
             std::thread::spawn(move || {
-                let Ok(conn) = db::open_and_migrate(&repair_db) else {
-                    return;
-                };
-                match thumbnails::repair_missing_thumbnails(&conn, &repair_thumbs) {
-                    Ok(n) if n > 0 => {
-                        tracing::info!(repaired = n, "regenerated missing thumbnails")
+                std::thread::sleep(Duration::from_secs(2));
+                for attempt in 1u32..=5 {
+                    let Ok(conn) = state::open_db(&repair_db) else {
+                        return;
+                    };
+                    match thumbnails::repair_missing_thumbnails(&conn, &repair_thumbs) {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(repaired = n, "regenerated missing thumbnails");
+                            break;
+                        }
+                        Ok(_) => break,
+                        Err(e) if e.is_db_busy() && attempt < 5 => {
+                            tracing::warn!(
+                                attempt,
+                                error = %e,
+                                "thumbnail repair busy; will retry"
+                            );
+                            std::thread::sleep(Duration::from_millis(400 * u64::from(attempt)));
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "thumbnail repair skipped");
+                            break;
+                        }
                     }
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!(error = %e, "thumbnail repair skipped"),
                 }
-                match faces::repair_missing_face_crops(&conn) {
-                    Ok(n) if n > 0 => {
-                        tracing::info!(cleared = n, "cleared missing face crop paths")
+                for attempt in 1u32..=5 {
+                    let Ok(conn) = state::open_db(&repair_db) else {
+                        return;
+                    };
+                    match faces::repair_missing_face_crops(&conn) {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(cleared = n, "cleared missing face crop paths");
+                            break;
+                        }
+                        Ok(_) => break,
+                        Err(e) if e.is_db_busy() && attempt < 5 => {
+                            tracing::warn!(
+                                attempt,
+                                error = %e,
+                                "face crop repair busy; will retry"
+                            );
+                            std::thread::sleep(Duration::from_millis(400 * u64::from(attempt)));
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "face crop repair skipped");
+                            break;
+                        }
                     }
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!(error = %e, "face crop repair skipped"),
                 }
             });
             let indexer =
@@ -317,6 +349,7 @@ pub fn run() {
             enrich_memory_prose,
             list_memory_assets,
             save_memory_as_album,
+            dismiss_memory,
             install_prose_models,
             prose_status,
             clear_memory_prose,
@@ -324,6 +357,7 @@ pub fn run() {
             kick_places,
             clear_places,
             find_duplicates,
+            scan_duplicates,
             list_blurry_assets,
             scan_blur_scores,
             list_assets_by_ids,
@@ -347,6 +381,8 @@ pub fn run() {
             get_storage_summary,
             clear_thumbnail_cache,
             rebuild_thumbnail_cache,
+            retry_missing_thumbnails,
+            regenerate_asset_thumbnail,
             optimize_database,
             get_history,
             list_exports,

@@ -482,6 +482,72 @@ struct MediaMeta {
     force_write: bool,
 }
 
+fn fill_external_image_meta(
+    meta: &mut MediaMeta,
+    path: &Path,
+    thumbs_dir: &Path,
+    generate_thumb: bool,
+    hash: &str,
+    options: &ImportOptions,
+    kind: &str,
+    write_thumb: fn(&Path, &Path, u32) -> AppResult<()>,
+    open_scaled: fn(&Path, u32) -> AppResult<image::DynamicImage>,
+) {
+    if let Some((w, h)) = thumbnails::heic::probe_dimensions(path) {
+        meta.width = Some(w as i64);
+        meta.height = Some(h as i64);
+    }
+
+    let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
+    let thumb_img = if generate_thumb {
+        let ready = if dest.exists() {
+            true
+        } else {
+            match write_thumb(path, &dest, thumbnails::THUMB_MAX_EDGE) {
+                Ok(()) => {
+                    thumbnails::enforce_cache_budget(thumbs_dir, options.thumbnail_cache_mb);
+                    true
+                }
+                Err(e) => {
+                    tracing::error!(
+                        path = %path.display(),
+                        media_type = "image",
+                        kind,
+                        error = %e,
+                        "external thumbnail generation failed"
+                    );
+                    thumbnails::record_failure_for_path(None, path, "image", &e.to_string());
+                    false
+                }
+            }
+        };
+        if ready {
+            meta.thumbnail_path = Some(dest.clone());
+            thumbnails::open_oriented(&dest).ok()
+        } else {
+            None
+        }
+    } else {
+        open_scaled(path, thumbnails::THUMB_MAX_EDGE).ok()
+    };
+
+    match thumb_img {
+        Some(img) => {
+            if meta.width.is_none() || meta.height.is_none() {
+                let (w, h) = img.dimensions();
+                meta.width = Some(w as i64);
+                meta.height = Some(h as i64);
+            }
+            meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
+            meta.blur_score = Some(crate::blur::blur_score_from_image(&img));
+        }
+        None if !generate_thumb => {
+            tracing::warn!(path = %path.display(), kind, "external image decode skipped");
+        }
+        None => {}
+    }
+}
+
 fn read_media_meta(
     path: &Path,
     kind: MediaKind,
@@ -524,41 +590,84 @@ fn read_media_meta(
             }
         }
 
-        // One decode: dimensions + perceptual hash + thumbnail-sized blur + JPEG thumb.
-        // Resize once to thumb max edge, then score blur on that (not full-res).
-        match thumbnails::open_oriented(path) {
-            Ok(img) => {
-                let (w, h) = img.dimensions();
-                meta.width = Some(w as i64);
-                meta.height = Some(h as i64);
-                meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
+        // HEIC / RAW: convert once at thumb size via system tools.
+        if thumbnails::heic::is_heic_path(path) {
+            fill_external_image_meta(
+                &mut meta,
+                path,
+                thumbs_dir,
+                generate_thumb,
+                hash,
+                options,
+                "HEIC",
+                thumbnails::heic::write_thumbnail,
+                thumbnails::heic::open_heic_scaled,
+            );
+        } else if thumbnails::raw::is_raw_path(path) {
+            fill_external_image_meta(
+                &mut meta,
+                path,
+                thumbs_dir,
+                generate_thumb,
+                hash,
+                options,
+                "RAW",
+                thumbnails::raw::write_thumbnail,
+                thumbnails::raw::open_raw_scaled,
+            );
+        } else {
+            // One decode: dimensions + perceptual hash + thumbnail-sized blur + JPEG thumb.
+            // Resize once to thumb max edge, then score blur on that (not full-res).
+            match thumbnails::open_oriented(path) {
+                Ok(img) => {
+                    let (w, h) = img.dimensions();
+                    meta.width = Some(w as i64);
+                    meta.height = Some(h as i64);
+                    meta.perceptual_hash = Some(thumbnails::perceptual_hash_from_image(&img));
 
-                let thumb_src = if w > thumbnails::THUMB_MAX_EDGE || h > thumbnails::THUMB_MAX_EDGE
-                {
-                    img.resize(
-                        thumbnails::THUMB_MAX_EDGE,
-                        thumbnails::THUMB_MAX_EDGE,
-                        image::imageops::FilterType::Triangle,
-                    )
-                } else {
-                    img
-                };
-                meta.blur_score = Some(crate::blur::blur_score_from_image(&thumb_src));
-                if generate_thumb {
-                    let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
-                    if dest.exists() {
-                        meta.thumbnail_path = Some(dest);
-                    } else if thumbnails::write_thumbnail_jpeg(&thumb_src, &dest).is_ok() {
-                        meta.thumbnail_path = Some(dest);
-                        thumbnails::enforce_cache_budget(thumbs_dir, options.thumbnail_cache_mb);
+                    let thumb_src =
+                        if w > thumbnails::THUMB_MAX_EDGE || h > thumbnails::THUMB_MAX_EDGE {
+                            img.resize(
+                                thumbnails::THUMB_MAX_EDGE,
+                                thumbnails::THUMB_MAX_EDGE,
+                                image::imageops::FilterType::Triangle,
+                            )
+                        } else {
+                            img
+                        };
+                    meta.blur_score = Some(crate::blur::blur_score_from_image(&thumb_src));
+                    if generate_thumb {
+                        let dest = thumbnails::thumbnail_path(thumbs_dir, hash);
+                        if dest.exists() {
+                            meta.thumbnail_path = Some(dest);
+                        } else if thumbnails::write_thumbnail_jpeg_with_retry(
+                            &thumb_src, &dest, path, None,
+                        )
+                        .is_ok()
+                        {
+                            meta.thumbnail_path = Some(dest);
+                            thumbnails::enforce_cache_budget(
+                                thumbs_dir,
+                                options.thumbnail_cache_mb,
+                            );
+                        }
                     }
                 }
-            }
-            Err(e) => {
-                tracing::debug!(path = %path.display(), error = %e, "image decode skipped");
-                if let Ok(dims) = image::image_dimensions(path) {
-                    meta.width = Some(dims.0 as i64);
-                    meta.height = Some(dims.1 as i64);
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "image decode skipped");
+                    if generate_thumb {
+                        tracing::error!(
+                            path = %path.display(),
+                            media_type = "image",
+                            error = %e,
+                            "thumbnail generation failed: image decode error"
+                        );
+                        thumbnails::record_failure_for_path(None, path, "image", &e.to_string());
+                    }
+                    if let Ok(dims) = image::image_dimensions(path) {
+                        meta.width = Some(dims.0 as i64);
+                        meta.height = Some(dims.1 as i64);
+                    }
                 }
             }
         }
@@ -572,14 +681,12 @@ fn read_media_meta(
             if dest.exists() {
                 meta.thumbnail_path = Some(dest);
             } else {
-                match thumbnails::ffmpeg::extract_frame_thumbnail(path, thumbs_dir, hash) {
+                match thumbnails::generate_media_thumbnail_with_retry(
+                    path, thumbs_dir, hash, "video", None,
+                ) {
                     Ok(dest) => meta.thumbnail_path = Some(dest),
-                    Err(e) => {
-                        tracing::debug!(
-                            path = %path.display(),
-                            error = %e,
-                            "video frame thumbnail skipped"
-                        );
+                    Err(_) => {
+                        // Already logged + recorded by generate_media_thumbnail_with_retry.
                     }
                 }
             }

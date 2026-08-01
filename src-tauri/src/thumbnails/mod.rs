@@ -1,17 +1,64 @@
 pub mod ffmpeg;
+pub mod heic;
+pub mod raw;
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+use parking_lot::Mutex;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
+use crate::models::ThumbnailFailure;
 
 pub const THUMB_MAX_EDGE: u32 = 320;
 
 /// Oriented JPEG thumbs. The `.o` marker distinguishes them from older
 /// unoriented `{hash}.jpg` files so startup repair can regenerate.
 const THUMB_SUFFIX: &str = ".o.jpg";
+
+const THUMB_ATTEMPTS: u32 = 3;
+const THUMB_BACKOFF_MS: [u64; 2] = [50, 150];
+const MAX_RECENT_FAILURES: usize = 100;
+
+static RECENT_FAILURES: Mutex<VecDeque<ThumbnailFailure>> = Mutex::new(VecDeque::new());
+
+pub fn recent_failures() -> Vec<ThumbnailFailure> {
+    RECENT_FAILURES.lock().iter().cloned().collect()
+}
+
+/// Record a thumbnail failure when generation never reached the retry helper
+/// (e.g. image decode failed before write).
+pub fn record_failure_for_path(
+    asset_id: Option<&str>,
+    source: &Path,
+    media_type: &str,
+    error: &str,
+) {
+    record_failure(asset_id, source, media_type, &AppError::msg(error));
+}
+
+fn record_failure(
+    asset_id: Option<&str>,
+    source: &Path,
+    media_type: &str,
+    error: &AppError,
+) {
+    let entry = ThumbnailFailure {
+        asset_id: asset_id.map(str::to_string),
+        path: source.display().to_string(),
+        media_type: media_type.to_string(),
+        error: error.to_string(),
+        at: chrono::Utc::now().to_rfc3339(),
+    };
+    let mut q = RECENT_FAILURES.lock();
+    if q.len() >= MAX_RECENT_FAILURES {
+        q.pop_front();
+    }
+    q.push_back(entry);
+}
 
 pub fn thumbnail_path(thumbs_dir: &Path, hash: &str) -> PathBuf {
     thumbs_dir.join(format!("{hash}{THUMB_SUFFIX}"))
@@ -21,11 +68,157 @@ fn is_current_thumb(path: &str) -> bool {
     path.ends_with(THUMB_SUFFIX) && Path::new(path).is_file()
 }
 
+/// Generate an image or video thumbnail with retries and failure logging.
+pub fn generate_media_thumbnail_with_retry(
+    source: &Path,
+    thumbs_dir: &Path,
+    hash: &str,
+    media_type: &str,
+    asset_id: Option<&str>,
+) -> AppResult<PathBuf> {
+    // External converts (HEIC / RAW) are deterministic — one attempt.
+    let attempts = if media_type != "video"
+        && (heic::is_heic_path(source) || raw::is_raw_path(source))
+    {
+        1
+    } else {
+        THUMB_ATTEMPTS
+    };
+    let mut last_err: Option<AppError> = None;
+    for attempt in 1..=attempts {
+        let result = if media_type == "video" {
+            ffmpeg::extract_frame_thumbnail(source, thumbs_dir, hash)
+        } else {
+            generate_thumbnail(source, thumbs_dir, hash)
+        };
+        match result {
+            Ok(dest) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        attempt,
+                        path = %source.display(),
+                        media_type,
+                        "thumbnail succeeded after retry"
+                    );
+                }
+                return Ok(dest);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    attempt,
+                    attempts,
+                    path = %source.display(),
+                    media_type,
+                    error = %e,
+                    "thumbnail attempt failed"
+                );
+                let dest = thumbnail_path(thumbs_dir, hash);
+                let _ = std::fs::remove_file(&dest);
+                last_err = Some(e);
+                if attempt < attempts {
+                    let delay = THUMB_BACKOFF_MS[(attempt as usize) - 1];
+                    std::thread::sleep(Duration::from_millis(delay));
+                }
+            }
+        }
+    }
+    let err = last_err.unwrap_or_else(|| AppError::msg("thumbnail generation failed"));
+    tracing::error!(
+        path = %source.display(),
+        media_type,
+        asset_id = asset_id.unwrap_or(""),
+        error = %err,
+        "thumbnail generation failed after retries"
+    );
+    record_failure(asset_id, source, media_type, &err);
+    Err(err)
+}
+
+/// Write a decoded image to a JPEG thumb path with retries.
+pub fn write_thumbnail_jpeg_with_retry(
+    img: &DynamicImage,
+    dest: &Path,
+    source: &Path,
+    asset_id: Option<&str>,
+) -> AppResult<()> {
+    let mut last_err: Option<AppError> = None;
+    for attempt in 1..=THUMB_ATTEMPTS {
+        match write_thumbnail_jpeg(img, dest) {
+            Ok(()) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        attempt,
+                        path = %source.display(),
+                        "thumbnail write succeeded after retry"
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    attempt,
+                    attempts = THUMB_ATTEMPTS,
+                    path = %source.display(),
+                    error = %e,
+                    "thumbnail write attempt failed"
+                );
+                let _ = std::fs::remove_file(dest);
+                last_err = Some(e);
+                if attempt < THUMB_ATTEMPTS {
+                    let delay = THUMB_BACKOFF_MS[(attempt as usize) - 1];
+                    std::thread::sleep(Duration::from_millis(delay));
+                }
+            }
+        }
+    }
+    let err = last_err.unwrap_or_else(|| AppError::msg("thumbnail write failed"));
+    tracing::error!(
+        path = %source.display(),
+        media_type = "image",
+        asset_id = asset_id.unwrap_or(""),
+        error = %err,
+        "thumbnail write failed after retries"
+    );
+    record_failure(asset_id, source, "image", &err);
+    Err(err)
+}
+
 /// Open an image and bake EXIF/TIFF orientation into the pixel buffer.
 ///
 /// Browsers apply orientation when showing the original; `image::open` does
 /// not, which made library thumbnails appear rotated relative to the viewer.
+///
+/// HEIC/HEIF and camera RAW (DNG, …) are decoded via system tools because the
+/// `image` crate cannot handle those formats.
 pub fn open_oriented(path: &Path) -> AppResult<DynamicImage> {
+    if heic::is_heic_path(path) {
+        return heic::open_heic(path);
+    }
+    if raw::is_raw_path(path) {
+        return raw::open_raw(path);
+    }
+    match open_oriented_native(path) {
+        Ok(img) => Ok(img),
+        Err(e) => {
+            // Misnamed / unusual containers: try external decoders.
+            let msg = e.to_string().to_ascii_lowercase();
+            if msg.contains("not recognized")
+                || msg.contains("unsupported")
+                || msg.contains("tiff")
+            {
+                if let Ok(img) = heic::open_heic(path) {
+                    return Ok(img);
+                }
+                if let Ok(img) = raw::open_raw(path) {
+                    return Ok(img);
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+pub(crate) fn open_oriented_native(path: &Path) -> AppResult<DynamicImage> {
     let reader = ImageReader::open(path)?.with_guessed_format()?;
     let mut decoder = reader.into_decoder()?;
     let orientation = decoder.orientation()?;
@@ -38,6 +231,16 @@ pub fn generate_thumbnail(source: &Path, thumbs_dir: &Path, hash: &str) -> AppRe
     std::fs::create_dir_all(thumbs_dir)?;
     let dest = thumbnail_path(thumbs_dir, hash);
     if dest.exists() {
+        return Ok(dest);
+    }
+
+    // HEIC / RAW: ask sips/ffmpeg to emit the thumb-sized JPEG directly.
+    if heic::is_heic_path(source) {
+        heic::write_thumbnail(source, &dest, THUMB_MAX_EDGE)?;
+        return Ok(dest);
+    }
+    if raw::is_raw_path(source) {
+        raw::write_thumbnail(source, &dest, THUMB_MAX_EDGE)?;
         return Ok(dest);
     }
 
@@ -103,26 +306,44 @@ pub fn thumbnail_bytes(source: &Path) -> AppResult<Vec<u8>> {
 /// Recreate thumbnail files that are missing or still on the pre-orientation naming.
 /// Videos use ffmpeg frame extraction when available.
 pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path) -> AppResult<u32> {
-    let mut stmt = conn.prepare(
-        "SELECT id, path, hash, thumbnail_path, media_type FROM assets
-         WHERE deleted_at IS NULL
-           AND media_type IN ('image', 'video')
-           AND hash IS NOT NULL
-           AND hash != ''",
-    )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, Option<String>>(3)?,
-            r.get::<_, String>(4)?,
-        ))
-    })?;
+    repair_missing_thumbnails_with_progress(conn, thumbs_dir, |_| {})
+}
 
-    let mut repaired = 0u32;
-    for row in rows.flatten() {
-        let (id, path, hash, thumb_path, media_type) = row;
+/// Same as [`repair_missing_thumbnails`], with a progress callback after each attempt.
+pub fn repair_missing_thumbnails_with_progress(
+    conn: &rusqlite::Connection,
+    thumbs_dir: &Path,
+    mut on_progress: impl FnMut(crate::models::ThumbnailRepairProgress),
+) -> AppResult<u32> {
+    use crate::models::ThumbnailRepairProgress;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+
+    // Materialize candidates first so we don't hold an open SELECT while doing
+    // slow ffmpeg/image work and UPDATEs (that pattern races other writers).
+    let candidates: Vec<(String, String, String, Option<String>, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, path, hash, thumbnail_path, media_type FROM assets
+             WHERE deleted_at IS NULL
+               AND media_type IN ('image', 'video')
+               AND hash IS NOT NULL
+               AND hash != ''",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut work: Vec<(String, String, String, Option<String>, String)> = Vec::new();
+    for (id, path, hash, thumb_path, media_type) in candidates {
         let needs = match &thumb_path {
             Some(p) => !is_current_thumb(p),
             None => true,
@@ -130,12 +351,37 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
         if !needs {
             continue;
         }
-        let source = Path::new(&path);
-        if !source.is_file() {
+        if !Path::new(&path).is_file() {
             continue;
         }
-        // Drop stale unoriented sibling if present.
-        if let Some(old) = &thumb_path {
+        work.push((id, path, hash, thumb_path, media_type));
+    }
+
+    let total = work.len() as u32;
+    on_progress(ThumbnailRepairProgress {
+        phase: "repairing".into(),
+        op: String::new(),
+        current: 0,
+        total,
+        repaired: 0,
+        path: None,
+    });
+
+    if work.is_empty() {
+        on_progress(ThumbnailRepairProgress {
+            phase: "done".into(),
+            op: String::new(),
+            current: 0,
+            total: 0,
+            repaired: 0,
+            path: None,
+        });
+        return Ok(0);
+    }
+
+    // Cheap cleanup before parallel convert (avoids races on legacy siblings).
+    for (_, _, hash, thumb_path, _) in &work {
+        if let Some(old) = thumb_path {
             if !old.ends_with(THUMB_SUFFIX) {
                 let _ = std::fs::remove_file(old);
             }
@@ -144,24 +390,122 @@ pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path)
         if legacy.exists() {
             let _ = std::fs::remove_file(&legacy);
         }
-        // Force regenerate even if a leftover current file exists with wrong pixels.
-        let dest = thumbnail_path(thumbs_dir, &hash);
+        let dest = thumbnail_path(thumbs_dir, hash);
         let _ = std::fs::remove_file(&dest);
-        let generated = if media_type == "video" {
-            ffmpeg::extract_frame_thumbnail(source, thumbs_dir, &hash)
-        } else {
-            generate_thumbnail(source, thumbs_dir, &hash)
-        };
-        if let Ok(dest) = generated {
-            let dest_str = dest.to_string_lossy().to_string();
-            conn.execute(
-                "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
-                rusqlite::params![dest_str, id],
-            )?;
-            repaired += 1;
+    }
+
+    // ffmpeg HEIC converts are CPU-light relative to full decode; allow more
+    // concurrency so phone libraries finish repair faster.
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4);
+    let work = Arc::new(work);
+    let next = Arc::new(AtomicUsize::new(0));
+    let thumbs_dir_buf = thumbs_dir.to_path_buf();
+    let (tx, rx) = mpsc::channel::<(usize, String, String, AppResult<PathBuf>)>();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let work = Arc::clone(&work);
+            let next = Arc::clone(&next);
+            let thumbs_dir_buf = thumbs_dir_buf.clone();
+            let tx = tx.clone();
+            scope.spawn(move || {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= work.len() {
+                        break;
+                    }
+                    let (id, path, hash, _thumb_path, media_type) = &work[i];
+                    let result = generate_media_thumbnail_with_retry(
+                        Path::new(path),
+                        &thumbs_dir_buf,
+                        hash,
+                        media_type,
+                        Some(id),
+                    );
+                    let _ = tx.send((i, id.clone(), path.clone(), result));
+                }
+            });
+        }
+        drop(tx);
+
+        let mut completed = 0u32;
+        let mut repaired = 0u32;
+        for (_i, id, path, result) in rx {
+            completed = completed.saturating_add(1);
+            on_progress(ThumbnailRepairProgress {
+                phase: "repairing".into(),
+                op: String::new(),
+                current: completed,
+                total,
+                repaired,
+                path: Some(path.clone()),
+            });
+            match result {
+                Ok(dest) => {
+                    let dest_str = dest.to_string_lossy().to_string();
+                    match update_thumbnail_path(conn, &id, &dest_str) {
+                        Ok(()) => repaired = repaired.saturating_add(1),
+                        Err(e) => {
+                            tracing::error!(
+                                asset_id = %id,
+                                path = %path,
+                                error = %e,
+                                "thumbnail path update failed after generate"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        asset_id = %id,
+                        path = %path,
+                        error = %e,
+                        "thumbnail repair failed"
+                    );
+                }
+            }
+        }
+
+        on_progress(ThumbnailRepairProgress {
+            phase: "done".into(),
+            op: String::new(),
+            current: total,
+            total,
+            repaired,
+            path: None,
+        });
+        Ok(repaired)
+    })
+}
+
+fn update_thumbnail_path(conn: &rusqlite::Connection, id: &str, dest: &str) -> AppResult<()> {
+    const ATTEMPTS: u32 = 8;
+    let mut last = None;
+    for attempt in 1..=ATTEMPTS {
+        match conn.execute(
+            "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
+            rusqlite::params![dest, id],
+        ) {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                let err = AppError::from(e);
+                if err.is_db_busy() && attempt < ATTEMPTS {
+                    tracing::warn!(
+                        attempt,
+                        asset_id = %id,
+                        "thumbnail db update busy; retrying"
+                    );
+                    std::thread::sleep(Duration::from_millis(50u64.saturating_mul(attempt as u64)));
+                    last = Some(err);
+                    continue;
+                }
+                return Err(err);
+            }
         }
     }
-    Ok(repaired)
+    Err(last.unwrap_or_else(|| AppError::msg("thumbnail path update failed")))
 }
 
 /// aHash from an already-decoded image (avoids a second full decode on import).
@@ -288,5 +632,21 @@ mod tests {
         let repaired = repair_missing_thumbnails(&conn, &thumbs).unwrap();
         assert_eq!(repaired, 1);
         assert!(missing.exists());
+    }
+
+    #[test]
+    fn records_thumbnail_failures_in_ring_buffer() {
+        record_failure_for_path(
+            Some("asset-1"),
+            Path::new("/tmp/missing.mp4"),
+            "video",
+            "ffmpeg not found on PATH",
+        );
+        let failures = recent_failures();
+        assert!(!failures.is_empty());
+        let last = failures.last().unwrap();
+        assert_eq!(last.asset_id.as_deref(), Some("asset-1"));
+        assert_eq!(last.media_type, "video");
+        assert!(last.error.contains("ffmpeg"));
     }
 }

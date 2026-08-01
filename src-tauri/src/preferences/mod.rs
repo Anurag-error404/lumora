@@ -269,7 +269,7 @@ fn default_export_naming() -> String {
 impl Default for ImportExportPrefs {
     fn default() -> Self {
         Self {
-            skip_duplicates: true,
+            skip_duplicates: false,
             preserve_folder_structure: true,
             jpeg_quality: 95,
             strip_metadata: false,

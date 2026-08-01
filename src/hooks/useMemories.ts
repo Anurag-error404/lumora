@@ -62,6 +62,21 @@ export function useMemories({
     [setError],
   );
 
+  const dismissMemory = useCallback(
+    async (memoryId: string) => {
+      try {
+        await api.dismissMemory(memoryId);
+        setMemories((prev) => prev.filter((m) => m.id !== memoryId));
+        setActiveMemory((cur) => (cur === memoryId ? null : cur));
+        return true;
+      } catch (e) {
+        setError(String(e));
+        return false;
+      }
+    },
+    [setError],
+  );
+
   return {
     memories,
     activeMemory,
@@ -69,6 +84,7 @@ export function useMemories({
     openMemoryDetail,
     refreshMemories,
     saveAsAlbum,
+    dismissMemory,
     saving,
   };
 }

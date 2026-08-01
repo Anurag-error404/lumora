@@ -39,15 +39,15 @@ export function PlacesView({
       ) : (
         <>
           <PlacesMap places={places} onOpenPlace={onOpenPlace} />
-          <div className="person-cover-grid">
+          <div className="place-cover-grid">
             {places.map((place) => (
-              <article key={place.label} className="person-cover-card">
+              <article key={place.label} className="place-cover-card">
                 <button
                   type="button"
-                  className="person-cover-open"
+                  className="place-cover-open"
                   onClick={() => onOpenPlace(place.label)}
                 >
-                  <div className="person-cover-media">
+                  <div className="place-cover-media">
                     <SafeImage
                       src={
                         place.coverThumbnailPath
@@ -59,14 +59,14 @@ export function PlacesView({
                       fallback={<MediaFallback type="album" />}
                     />
                   </div>
-                  <div className="person-cover-info">
-                    <span className="person-cover-name">
+                  <div className="place-cover-info">
+                    <span className="place-cover-name">
                       {place.label}
                       {place.country ? (
                         <span className="muted"> · {place.country}</span>
                       ) : null}
                     </span>
-                    <span className="muted">
+                    <span className="place-cover-count muted">
                       {placeCountLabel(place.assetCount)}
                     </span>
                   </div>

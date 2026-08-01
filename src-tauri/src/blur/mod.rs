@@ -86,6 +86,15 @@ pub fn blur_score_for_asset(path: &Path, thumbnail_path: Option<&str>) -> AppRes
 
 /// Fill `blur_score` for images that still lack one (up to `limit` rows).
 pub fn backfill_missing(conn: &Connection, limit: u32) -> AppResult<usize> {
+    backfill_missing_with_progress(conn, limit, |_, _, _| {})
+}
+
+/// Same as [`backfill_missing`], with a progress callback after each attempt.
+pub fn backfill_missing_with_progress(
+    conn: &Connection,
+    limit: u32,
+    mut on_progress: impl FnMut(u32, u32, &str),
+) -> AppResult<usize> {
     let mut stmt = conn.prepare(
         "SELECT id, path, thumbnail_path FROM assets
          WHERE deleted_at IS NULL
@@ -100,8 +109,10 @@ pub fn backfill_missing(conn: &Connection, limit: u32) -> AppResult<usize> {
         .filter_map(|r| r.ok())
         .collect();
 
+    let total = rows.len() as u32;
     let mut updated = 0usize;
-    for (id, path, thumb) in rows {
+    for (i, (id, path, thumb)) in rows.into_iter().enumerate() {
+        on_progress(i as u32 + 1, total, &path);
         match blur_score_for_asset(Path::new(&path), thumb.as_deref()) {
             Ok(score) => {
                 conn.execute(

@@ -7,15 +7,37 @@ import type {
   AssetSummary,
   BlurryAsset,
   DuplicateGroup,
+  DuplicateScanProgress,
 } from "../../lib/tauri";
 import { AssetThumb } from "../library/AssetThumb";
+
+function scanPhaseLabel(phase: string): string {
+  switch (phase) {
+    case "copies":
+      return "Finding identical copies on disk…";
+    case "phash":
+      return "Filling perceptual hashes…";
+    case "blur":
+      return "Scoring blur…";
+    case "grouping":
+      return "Grouping exact and near duplicates…";
+    case "done":
+      return "Finishing…";
+    default:
+      return "Scanning…";
+  }
+}
 
 /** Duplicate groups with per-kind cleanup, plus blurry-image review. */
 export function DuplicatesView({
   dupes,
   dupeAssets,
   blurry,
-  onRefresh,
+  scanning,
+  scanMessage,
+  scanProgress,
+  onScan,
+  onOpenSkipDuplicates,
   onCleanupExact,
   onCleanupGroup,
   onTrashBlurry,
@@ -26,7 +48,11 @@ export function DuplicatesView({
   dupes: DuplicateGroup[];
   dupeAssets: Map<string, AssetSummary>;
   blurry: BlurryAsset[];
-  onRefresh: () => void;
+  scanning: boolean;
+  scanMessage: string | null;
+  scanProgress: DuplicateScanProgress | null;
+  onScan: () => void;
+  onOpenSkipDuplicates: () => void;
   onCleanupExact: () => void;
   onCleanupGroup: (group: DuplicateGroup, keepId: string) => void;
   onTrashBlurry: (ids: string[]) => void;
@@ -41,13 +67,88 @@ export function DuplicatesView({
   const hasAnything =
     exactGroups.length > 0 || nearGroups.length > 0 || blurry.length > 0;
 
+  const hasCount = !!scanProgress && scanProgress.total > 0;
+  const pct = hasCount
+    ? Math.min(100, Math.round((scanProgress.current / scanProgress.total) * 100))
+    : 0;
+  const countLabel = hasCount
+    ? `${scanProgress.current} / ${scanProgress.total}`
+    : scanProgress
+      ? scanPhaseLabel(scanProgress.phase)
+      : null;
+
   return (
     <div className="panel-list">
       <PageHeader
         title="Duplicates"
         description="Exact matches share the same file hash. Near duplicates look similar. Blurry photos are flagged for optional cleanup."
-        actions={<button onClick={onRefresh}>Refresh</button>}
+        actions={
+          <button
+            type="button"
+            className="primary"
+            disabled={scanning}
+            onClick={onScan}
+          >
+            {scanning ? "Scanning…" : "Scan for duplicates"}
+          </button>
+        }
       />
+
+      <p className="muted dupe-skip-hint">
+        Already imported? <strong>Scan for duplicates</strong> also walks your
+        watched folders for identical files that were skipped earlier.{" "}
+        <button
+          type="button"
+          className="linkish"
+          onClick={onOpenSkipDuplicates}
+        >
+          Skip duplicates
+        </button>{" "}
+        (Settings → Import &amp; Export) only affects future imports.
+      </p>
+
+      {scanning && (
+        <div
+          className="dupe-scan-progress"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="dupe-scan-progress-meta">
+            <span className="import-progress-label">
+              <span className="spinner" aria-hidden="true" />
+              {scanProgress
+                ? scanPhaseLabel(scanProgress.phase)
+                : "Scanning…"}
+            </span>
+            {hasCount && (
+              <span className="dupe-scan-progress-count">
+                {countLabel}
+                {pct > 0 ? ` · ${pct}%` : ""}
+              </span>
+            )}
+          </div>
+          <div
+            className={`import-progress-track ${hasCount ? "" : "indeterminate"}`}
+          >
+            <div
+              className="import-progress-fill"
+              style={hasCount ? { width: `${pct}%` } : undefined}
+            />
+          </div>
+          {scanProgress?.path && (
+            <p className="muted dupe-scan-progress-file" title={scanProgress.path}>
+              {scanProgress.path}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!scanning && scanMessage && (
+        <p className="muted dupe-scan-status" aria-live="polite">
+          {scanMessage}
+        </p>
+      )}
 
       {hasAnything && (
         <div className="dupe-summary" aria-label="Cleanup summary">
@@ -71,18 +172,21 @@ export function DuplicatesView({
         </div>
       )}
 
-      {!hasAnything ? (
+      {!hasAnything && !scanning ? (
         <EmptyState
           icon="copy"
           title="Nothing to clean up"
-          description="No exact duplicates, near duplicates, or blurry images found. Refresh after importing more photos."
-          action={{ label: "Scan again", onClick: onRefresh }}
+          description="Run Scan for duplicates to find identical copies on disk (even ones skipped during import) plus near-duplicates already in the library."
+          action={{
+            label: "Scan for duplicates",
+            onClick: onScan,
+          }}
           secondaryAction={{
             label: "Browse library",
             onClick: onBrowseLibrary,
           }}
         />
-      ) : (
+      ) : !hasAnything && scanning ? null : (
         <>
           <DupeSection
             kind="exact"

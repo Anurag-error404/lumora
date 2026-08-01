@@ -21,6 +21,7 @@ const MIGRATION_015: &str = include_str!("../../migrations/015_blur_score.sql");
 const MIGRATION_016: &str = include_str!("../../migrations/016_edit_history.sql");
 const MIGRATION_017: &str = include_str!("../../migrations/017_captions.sql");
 const MIGRATION_018: &str = include_str!("../../migrations/018_memory_prose.sql");
+const MIGRATION_019: &str = include_str!("../../migrations/019_dismissed_memories.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -325,6 +326,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         tracing::info!("applied migration 018_memory_prose");
     }
 
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 19 {
+        conn.execute_batch(MIGRATION_019)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (19)", [])?;
+        tracing::info!("applied migration 019_dismissed_memories");
+    }
+
     Ok(())
 }
 
@@ -484,7 +499,7 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -501,6 +516,7 @@ mod tests {
         assert!(tables.iter().any(|t| t == "locked_albums"));
         assert!(tables.iter().any(|t| t == "saved_searches"));
         assert!(tables.iter().any(|t| t == "memory_prose"));
+        assert!(tables.iter().any(|t| t == "dismissed_memories"));
 
         let has_blur_score: i64 = conn
             .query_row(
@@ -516,6 +532,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 18);
+        assert_eq!(version2, 19);
     }
 }

@@ -19,8 +19,8 @@ const IMAGE_EXT: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif",
 ];
 
-/// Camera RAW formats. Most cannot be decoded for thumbnails, which is handled
-/// gracefully (the asset is indexed and shown with a placeholder).
+/// Camera RAW formats. Thumbnails are built via macOS `sips` / ffmpeg (see
+/// `thumbnails::raw`); assets still index if convert fails.
 pub const RAW_EXT: &[&str] = &[
     "raw", "dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "orf", "raf", "rw2", "pef",
     "srw", "x3f", "3fr", "erf", "mrw", "dcr", "kdc",

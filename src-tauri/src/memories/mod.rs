@@ -280,18 +280,24 @@ fn finalize_insight(mut summary: MemorySummary) -> MemorySummary {
 }
 
 /// List curated memories for Home / Discover. Order: On this day, then weekends,
-/// then person+place. `limit` caps the total returned.
+/// then person+place. `limit` caps the total returned. Dismissed ids are omitted.
 pub fn list_memories(conn: &Connection, limit: u32) -> AppResult<Vec<MemorySummary>> {
     let limit = limit.clamp(1, 50) as usize;
     let today = Utc::now().date_naive();
+    let dismissed = dismissed_ids(conn)?;
     let mut out = Vec::new();
 
     if let Some(m) = on_this_day_memory(conn, today)? {
-        out.push(with_cached_prose(conn, m));
+        if !dismissed.contains(&m.id) {
+            out.push(with_cached_prose(conn, m));
+        }
     }
     for m in weekend_trip_memories(conn, today)? {
         if out.len() >= limit {
             break;
+        }
+        if dismissed.contains(&m.id) {
+            continue;
         }
         out.push(with_cached_prose(conn, m));
     }
@@ -300,11 +306,37 @@ pub fn list_memories(conn: &Connection, limit: u32) -> AppResult<Vec<MemorySumma
             if out.len() >= limit {
                 break;
             }
+            if dismissed.contains(&m.id) {
+                continue;
+            }
             out.push(with_cached_prose(conn, m));
         }
     }
     out.truncate(limit);
     Ok(out)
+}
+
+fn dismissed_ids(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT memory_id FROM dismissed_memories")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Hide a curated memory from Home / Discover. Photos stay in the library.
+pub fn dismiss_memory(conn: &Connection, memory_id: &str) -> AppResult<()> {
+    // Validate id shape so we never store garbage.
+    let _ = parse_memory_id(memory_id)?;
+    let at = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR REPLACE INTO dismissed_memories (memory_id, dismissed_at) VALUES (?1, ?2)",
+        params![memory_id, at],
+    )?;
+    let _ = conn.execute(
+        "DELETE FROM memory_prose WHERE memory_id = ?1",
+        params![memory_id],
+    );
+    tracing::info!(memory_id, "memory dismissed");
+    Ok(())
 }
 
 pub fn get_memory(conn: &Connection, memory_id: &str) -> AppResult<MemoryDetail> {

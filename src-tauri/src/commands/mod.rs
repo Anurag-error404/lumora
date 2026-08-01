@@ -330,7 +330,78 @@ pub fn get_developer_info(state: State<'_, AppState>) -> AppResult<DeveloperInfo
         index_progress: state.indexer.progress(),
         recent_logs,
         crash_logs,
+        thumbnail_failures: thumbnails::recent_failures(),
     })
+}
+
+/// Force-regenerate a single asset thumbnail (used by per-tile Retry).
+#[tauri::command]
+pub async fn regenerate_asset_thumbnail(
+    app: AppHandle,
+    asset_id: String,
+) -> AppResult<AssetSummary> {
+    let state = app.state::<AppState>();
+    let thumbs = state.paths.thumbs_dir.clone();
+    let db_path = state.paths.db_path.clone();
+
+    let (path, hash, media_type) = state.with_db(|conn| {
+        conn.query_row(
+            "SELECT path, hash, media_type FROM assets
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![asset_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .map_err(|_| AppError::msg("asset not found"))
+    })?;
+
+    if hash.is_empty() {
+        return Err(AppError::msg("asset has no content hash yet — wait for indexing"));
+    }
+    if media_type != "image" && media_type != "video" {
+        return Err(AppError::msg("thumbnails only apply to images and videos"));
+    }
+
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<AssetSummary> {
+        let source = std::path::PathBuf::from(&path);
+        if !source.is_file() {
+            return Err(AppError::msg(format!("source file missing: {path}")));
+        }
+
+        let dest = thumbnails::thumbnail_path(&thumbs, &hash);
+        let _ = std::fs::remove_file(&dest);
+
+        let generated = thumbnails::generate_media_thumbnail_with_retry(
+            &source,
+            &thumbs,
+            &hash,
+            &media_type,
+            Some(&asset_id),
+        )?;
+        let dest_str = generated.to_string_lossy().to_string();
+
+        let conn = open_db(&db_path)?;
+        conn.execute(
+            "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
+            params![dest_str, asset_id],
+        )?;
+        conn.query_row(
+            "SELECT id, path, hash, perceptual_hash, media_type, width, height, duration_ms,
+                    created_at, captured_at, indexed_at, favorite, rating, color_label,
+                    thumbnail_path, camera, lens, deleted_at
+             FROM assets WHERE id = ?1",
+            params![asset_id],
+            search::map_asset,
+        )
+        .map_err(|_| AppError::msg("asset not found after thumbnail regenerate"))
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("thumbnail regenerate task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -398,10 +469,43 @@ pub fn clear_thumbnail_cache(state: State<'_, AppState>) -> AppResult<u64> {
 
 /// Clear the thumbnail cache, then regenerate missing previews for library images.
 #[tauri::command]
-pub fn rebuild_thumbnail_cache(state: State<'_, AppState>) -> AppResult<u32> {
+pub async fn rebuild_thumbnail_cache(app: AppHandle) -> AppResult<u32> {
+    let state = app.state::<AppState>();
     let thumbs = state.paths.thumbs_dir.clone();
-    let _ = clear_thumbs_dir(&thumbs);
-    state.with_db(|conn| thumbnails::repair_missing_thumbnails(conn, &thumbs))
+    let db_path = state.paths.db_path.clone();
+    let app_for_job = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<u32> {
+        let _ = clear_thumbs_dir(&thumbs);
+        let conn = open_db(&db_path)?;
+        let n = thumbnails::repair_missing_thumbnails_with_progress(&conn, &thumbs, |mut p| {
+            p.op = "rebuild".into();
+            let _ = app_for_job.emit("thumbnail-repair-progress", &p);
+        })?;
+        tracing::info!(repaired = n, "rebuilt thumbnail cache");
+        Ok(n)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("thumbnail rebuild task failed: {e}")))?
+}
+
+/// Retry generating missing / stale thumbnails without wiping existing previews.
+#[tauri::command]
+pub async fn retry_missing_thumbnails(app: AppHandle) -> AppResult<u32> {
+    let state = app.state::<AppState>();
+    let thumbs = state.paths.thumbs_dir.clone();
+    let db_path = state.paths.db_path.clone();
+    let app_for_job = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<u32> {
+        let conn = open_db(&db_path)?;
+        let n = thumbnails::repair_missing_thumbnails_with_progress(&conn, &thumbs, |mut p| {
+            p.op = "retry".into();
+            let _ = app_for_job.emit("thumbnail-repair-progress", &p);
+        })?;
+        tracing::info!(repaired = n, "retried missing thumbnails");
+        Ok(n)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("thumbnail retry task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -2327,6 +2431,12 @@ pub fn save_memory_as_album(
     Ok(album)
 }
 
+/// Hide a curated memory from Home / Discover (photos stay in the library).
+#[tauri::command]
+pub fn dismiss_memory(state: State<'_, AppState>, memory_id: String) -> AppResult<()> {
+    state.with_db(|conn| memories::dismiss_memory(conn, &memory_id))
+}
+
 /// Download LaMini-Flan-T5 for optional memory prose.
 #[tauri::command]
 pub async fn install_prose_models(app: AppHandle) -> AppResult<ml::MlStatus> {
@@ -2450,6 +2560,30 @@ fn list_assets_preserving_order(conn: &Connection, ids: &[String]) -> AppResult<
 #[tauri::command]
 pub fn find_duplicates(state: State<'_, AppState>) -> AppResult<Vec<DuplicateGroup>> {
     state.with_db(duplicates::all_duplicates)
+}
+
+/// Manual scan: backfill missing phash/blur, then return regrouped duplicates.
+#[tauri::command]
+pub async fn scan_duplicates(
+    app: AppHandle,
+    limit: Option<u32>,
+) -> AppResult<crate::models::DuplicateScanResult> {
+    let state = app.state::<AppState>();
+    let db_path = state.paths.db_path.clone();
+    let app_data = state.paths.app_data.clone();
+    let app_for_job = app.clone();
+    let limit = limit.unwrap_or(2_000);
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<crate::models::DuplicateScanResult> {
+        let ignore = preferences::load(&app_data)
+            .map(|p| p.library.ignore_patterns)
+            .unwrap_or_default();
+        let conn = open_db(&db_path)?;
+        duplicates::scan_duplicates_with_progress(&conn, limit, &ignore, |p| {
+            let _ = app_for_job.emit("duplicate-scan-progress", &p);
+        })
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("duplicate scan task failed: {e}")))?
 }
 
 /// Soft-focus / out-of-focus images (Laplacian variance ≤ threshold).

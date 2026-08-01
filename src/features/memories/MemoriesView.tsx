@@ -33,10 +33,12 @@ export function MemoriesView({
   memories,
   onOpenMemory,
   onRefresh,
+  onDeleteMemory,
 }: {
   memories: MemorySummary[];
   onOpenMemory: (memoryId: string) => void;
   onRefresh: () => void;
+  onDeleteMemory: (memoryId: string) => void;
 }) {
   return (
     <div className="memories-page">
@@ -72,6 +74,18 @@ export function MemoriesView({
                     {memory.insight}
                   </span>
                 </div>
+              </button>
+              <button
+                type="button"
+                className="memory-cover-delete"
+                title="Remove this memory"
+                aria-label={`Remove memory ${memory.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteMemory(memory.id);
+                }}
+              >
+                Remove
               </button>
             </article>
           ))}

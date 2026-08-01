@@ -22,6 +22,7 @@ import { DeveloperView } from "./features/developer/DeveloperView";
 import { DuplicatesView } from "./features/duplicates/DuplicatesView";
 import { ExportsView } from "./features/exports/ExportsView";
 import { SettingsView } from "./features/settings/SettingsView";
+import type { SettingsSectionId } from "./features/settings/settingsUi";
 import { PluginsView } from "./features/plugins/PluginsView";
 import { RecentSearchesView } from "./features/search/RecentSearchesView";
 import { AssetEmptyState } from "./features/library/AssetEmptyState";
@@ -70,6 +71,8 @@ import "./styles/app.css";
 
 export default function App() {
   const [view, setView] = useState<View>("home");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +94,7 @@ export default function App() {
     | null
   >(null);
   const [deleteAlbumTarget, setDeleteAlbumTarget] = useState<Album | null>(null);
+  const [thumbRetryBusy, setThumbRetryBusy] = useState(false);
   const [personModal, setPersonModal] = useState<Person | null>(null);
   const [personName, setPersonName] = useState("");
   const lastActivityPing = useRef(0);
@@ -141,6 +145,7 @@ export default function App() {
     openMemoryDetail,
     refreshMemories,
     saveAsAlbum,
+    dismissMemory,
     saving: savingMemoryAlbum,
   } = useMemories({
     view,
@@ -178,8 +183,18 @@ export default function App() {
     selectTimelineGroup,
   } = useTimeline({ view, setError, selected, setSelected });
 
-  const { dupes, dupeAssets, setDupeAssets, blurry, loadDuplicates, dupeAssetList } =
-    useDuplicates({ view, setError });
+  const {
+    dupes,
+    dupeAssets,
+    setDupeAssets,
+    blurry,
+    loadDuplicates,
+    scanDuplicates,
+    scanning,
+    scanMessage,
+    scanProgress,
+    dupeAssetList,
+  } = useDuplicates({ view, setError });
 
   const { history, refreshHistory } = useHistoryFeed({ view, setError });
   const { exports, refreshExports } = useExportsFeed({ view, setError });
@@ -932,6 +947,8 @@ export default function App() {
               vaultStatus={vault.status}
               appVersion={developerInfo?.appVersion ?? "—"}
               updater={updater}
+              initialSection={settingsSection}
+              onSectionConsumed={() => setSettingsSection(null)}
             />
           ) : view === "savedSearches" ? (
             <RecentSearchesView
@@ -960,6 +977,25 @@ export default function App() {
               onRefresh={() => void refreshDeveloperInfo()}
               onOpenPath={(path, reveal) => void openLocalPath(path, reveal)}
               onViewActivity={() => setView("activity")}
+              retryBusy={thumbRetryBusy}
+              onRetryMissingThumbnails={async () => {
+                setThumbRetryBusy(true);
+                try {
+                  const n = await api.retryMissingThumbnails();
+                  setError(null);
+                  await refreshDeveloperInfo();
+                  await loadAssets();
+                  window.alert(
+                    n > 0
+                      ? `Regenerated ${n} missing preview(s).`
+                      : "No missing previews to regenerate.",
+                  );
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setThumbRetryBusy(false);
+                }
+              }}
             />
           ) : view === "activity" ? (
             <ActivityView
@@ -1019,13 +1055,32 @@ export default function App() {
                 void openMemoryDetail(memoryId);
                 setSelected(new Set());
               }}
+              onDeleteMemory={(memoryId) => {
+                const title =
+                  memories.find((m) => m.id === memoryId)?.title ?? "this memory";
+                if (
+                  !window.confirm(
+                    `Remove “${title}”?\n\nIt will leave Memories. Your photos stay in the library.`,
+                  )
+                ) {
+                  return;
+                }
+                void dismissMemory(memoryId);
+              }}
             />
           ) : view === "duplicates" ? (
             <DuplicatesView
               dupes={dupes}
               dupeAssets={dupeAssets}
               blurry={blurry}
-              onRefresh={() => void loadDuplicates()}
+              scanning={scanning}
+              scanMessage={scanMessage}
+              scanProgress={scanProgress}
+              onScan={() => void scanDuplicates()}
+              onOpenSkipDuplicates={() => {
+                setSettingsSection("importExport");
+                setView("settings");
+              }}
               onCleanupExact={() => void cleanupExactDupes()}
               onCleanupGroup={(group, keepId) =>
                 void cleanupDupeGroup(group, keepId)
@@ -1093,6 +1148,28 @@ export default function App() {
                         }}
                       >
                         {savingMemoryAlbum ? "Saving…" : "Save as album"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const title =
+                            memories.find((m) => m.id === activeMemory)?.title ??
+                            "this memory";
+                          if (
+                            !window.confirm(
+                              `Remove “${title}”?\n\nIt will leave Memories. Your photos stay in the library.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          void (async () => {
+                            const ok = await dismissMemory(activeMemory);
+                            if (!ok) return;
+                            setSelected(new Set());
+                          })();
+                        }}
+                      >
+                        Remove memory
                       </button>
                       <button
                         type="button"

@@ -11,12 +11,16 @@ export function DeveloperView({
   onRefresh,
   onOpenPath,
   onViewActivity,
+  onRetryMissingThumbnails,
+  retryBusy = false,
 }: {
   info: DeveloperInfo | null;
   loading: boolean;
   onRefresh: () => void;
   onOpenPath: (path: string, reveal?: boolean) => void;
   onViewActivity: () => void;
+  onRetryMissingThumbnails?: () => Promise<void> | void;
+  retryBusy?: boolean;
 }) {
   return (
     <div className="developer-page">
@@ -149,6 +153,66 @@ export function DeveloperView({
               Reveal logs folder
             </button>
             <button onClick={onViewActivity}>View activity log</button>
+          </section>
+
+          <section className="developer-log-section">
+            <header>
+              <div>
+                <h3>Thumbnail failures</h3>
+                <p className="muted">
+                  Recent preview generation errors from this session (import,
+                  repair, and Retry). Also written to the application log at
+                  ERROR level.
+                </p>
+              </div>
+              <div className="developer-thumb-actions">
+                {onRetryMissingThumbnails && (
+                  <button
+                    type="button"
+                    disabled={retryBusy || loading}
+                    onClick={() => void onRetryMissingThumbnails()}
+                  >
+                    {retryBusy ? "Retrying…" : "Retry missing previews"}
+                  </button>
+                )}
+                <span
+                  className={`developer-health ${
+                    info.thumbnailFailures?.length ? "has-errors" : ""
+                  }`}
+                >
+                  {info.thumbnailFailures?.length
+                    ? `${info.thumbnailFailures.length} entries`
+                    : "No failures"}
+                </span>
+              </div>
+            </header>
+            {info.thumbnailFailures?.length ? (
+              <ul className="developer-thumb-failures">
+                {info.thumbnailFailures
+                  .slice()
+                  .reverse()
+                  .map((failure, i) => (
+                    <li key={`${failure.at}-${failure.path}-${i}`}>
+                      <div className="developer-thumb-failure-meta">
+                        <strong>{failure.mediaType}</strong>
+                        <span className="muted">
+                          {new Date(failure.at).toLocaleString()}
+                        </span>
+                      </div>
+                      <code className="developer-path" title={failure.path}>
+                        {failure.path}
+                      </code>
+                      <p className="developer-thumb-failure-error">
+                        {failure.error}
+                      </p>
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <div className="developer-empty-log">
+                No thumbnail failures recorded this session.
+              </div>
+            )}
           </section>
 
           <section className="developer-log-section">

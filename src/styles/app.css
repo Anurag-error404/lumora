@@ -682,6 +682,43 @@ button .nav-icon {
   box-shadow: none;
 }
 
+.media-fallback-retry {
+  pointer-events: auto;
+  margin-top: 0.15rem;
+  padding: 0.28rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 550;
+  cursor: pointer;
+  z-index: 4;
+}
+
+.media-fallback-retry:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--text-muted);
+}
+
+.media-fallback-retry:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.media-fallback-error {
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: var(--danger, #c0392b);
+}
+
+.asset-card .media-fallback-retry {
+  pointer-events: auto;
+}
+
 .asset-card .badge {
   position: absolute;
   bottom: 8px;
@@ -1898,6 +1935,66 @@ button .nav-icon {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin: -0.35rem 0 1rem;
+}
+
+.dupe-scan-status {
+  margin: -0.15rem 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+.dupe-skip-hint {
+  margin: -0.35rem 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+.dupe-skip-hint .linkish {
+  display: inline;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.dupe-skip-hint .linkish:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+.dupe-scan-progress {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.dupe-scan-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.dupe-scan-progress-count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dupe-scan-progress-file {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dupe-summary-chip {
@@ -3701,6 +3798,31 @@ button .nav-icon {
 .memory-cover-card {
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
+}
+
+.memory-cover-delete {
+  align-self: flex-start;
+  padding: 0.28rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.memory-cover-delete:hover:not(:disabled) {
+  color: var(--danger, #c0392b);
+  border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, var(--border));
+}
+
+.developer-thumb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .memory-cover-open {
@@ -3868,6 +3990,77 @@ button .nav-icon {
 
 .places-page .places-map {
   margin: 0 0 1.5rem;
+}
+
+.place-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 0.85rem;
+}
+
+.place-cover-card {
+  min-width: 0;
+}
+
+.place-cover-open {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.place-cover-media {
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+  transition: box-shadow 160ms ease;
+}
+
+.place-cover-card:hover .place-cover-media {
+  box-shadow: var(--shadow-1);
+}
+
+.place-cover-media img,
+.place-cover-media .media-fallback {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.place-cover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.place-cover-name {
+  min-width: 0;
+  width: 100%;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-align: left;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.place-cover-count {
+  min-width: 0;
+  font-size: 0.78rem;
 }
 
 .places-map {
@@ -4610,6 +4803,39 @@ button .nav-icon {
 .developer-console-error {
   border-color: #8c1d18;
   color: #f6aea9;
+}
+
+.developer-thumb-failures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.developer-thumb-failures > li {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.developer-thumb-failure-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.developer-thumb-failure-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .developer-empty-log {
@@ -5577,7 +5803,11 @@ button .nav-icon {
 .home-memory-card {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0.4rem;
+  min-width: 0;
+  width: 100%;
   padding: 0;
   border: none;
   background: transparent;
@@ -5606,18 +5836,24 @@ button .nav-icon {
 }
 
 .home-memory-title {
+  min-width: 0;
+  width: 100%;
   font-weight: 600;
   font-size: 0.9rem;
+  text-align: left;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .home-memory-sub {
+  min-width: 0;
   font-size: 0.78rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .home-recent-tile {
@@ -5947,6 +6183,38 @@ button .nav-icon {
 
 .settings-storage-list dt {
   color: var(--text-muted);
+}
+
+.settings-storage-progress {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 4%);
+}
+
+.settings-storage-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+}
+
+.settings-storage-progress-count {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-weight: 550;
+}
+
+.settings-storage-progress-file {
+  margin: 0.45rem 0 0;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-storage-list dd {

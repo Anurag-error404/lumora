@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PageHeader } from "../../components/PageHeader";
 import { formatBytes } from "../../lib/format";
@@ -7,6 +8,7 @@ import {
   api,
   type Preferences,
   type StorageSummary,
+  type ThumbnailRepairProgress,
   type VaultStatus,
 } from "../../lib/tauri";
 import { AiModelsPanel } from "./AiModelsPanel";
@@ -52,6 +54,8 @@ export function SettingsView({
   vaultStatus,
   appVersion,
   updater,
+  initialSection = null,
+  onSectionConsumed,
 }: {
   prefs: Preferences | null;
   loading: boolean;
@@ -67,11 +71,21 @@ export function SettingsView({
   vaultStatus: VaultStatus | null;
   appVersion: string;
   updater: ReturnType<typeof useAppUpdater>;
+  initialSection?: SettingsSectionId | null;
+  onSectionConsumed?: () => void;
 }) {
   const [section, setSection] = useState<SettingsSectionId>("general");
   const [storage, setStorage] = useState<StorageSummary | null>(null);
-  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageBusy, setStorageBusy] = useState<string | null>(null);
   const [storageMsg, setStorageMsg] = useState<string | null>(null);
+  const [thumbProgress, setThumbProgress] =
+    useState<ThumbnailRepairProgress | null>(null);
+
+  useEffect(() => {
+    if (!initialSection) return;
+    setSection(initialSection);
+    onSectionConsumed?.();
+  }, [initialSection, onSectionConsumed]);
 
   const refreshStorage = useCallback(async () => {
     try {
@@ -84,6 +98,18 @@ export function SettingsView({
   useEffect(() => {
     if (section === "storage") void refreshStorage();
   }, [section, refreshStorage]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<ThumbnailRepairProgress>("thumbnail-repair-progress", (event) => {
+      setThumbProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const navLabel = SETTINGS_NAV.find((n) => n.id === section)?.label ?? "Settings";
 
@@ -143,7 +169,8 @@ export function SettingsView({
           ) : section === "storage" ? (
             <StorageSection
               storage={storage}
-              busy={storageBusy}
+              busyLabel={storageBusy}
+              progress={thumbProgress}
               message={storageMsg}
               onRefresh={() => void refreshStorage()}
               onOpenPath={onOpenPath}
@@ -154,7 +181,8 @@ export function SettingsView({
                   )
                 )
                   return;
-                setStorageBusy(true);
+                setThumbProgress(null);
+                setStorageBusy("Clearing thumbnail cache…");
                 setStorageMsg(null);
                 try {
                   const n = await api.clearThumbnailCache();
@@ -163,7 +191,8 @@ export function SettingsView({
                 } catch (e) {
                   setStorageMsg(String(e));
                 } finally {
-                  setStorageBusy(false);
+                  setStorageBusy(null);
+                  setThumbProgress(null);
                 }
               }}
               onRebuild={async () => {
@@ -173,7 +202,8 @@ export function SettingsView({
                   )
                 )
                   return;
-                setStorageBusy(true);
+                setThumbProgress(null);
+                setStorageBusy("Rebuilding thumbnail cache…");
                 setStorageMsg(null);
                 try {
                   const n = await api.rebuildThumbnailCache();
@@ -182,11 +212,38 @@ export function SettingsView({
                 } catch (e) {
                   setStorageMsg(String(e));
                 } finally {
-                  setStorageBusy(false);
+                  setStorageBusy(null);
+                  setThumbProgress(null);
+                }
+              }}
+              onRetryMissing={async () => {
+                if (
+                  !window.confirm(
+                    "Retry missing previews?\n\nExisting thumbnails stay; only missing or stale previews are regenerated.",
+                  )
+                )
+                  return;
+                setThumbProgress(null);
+                setStorageBusy("Retrying missing previews…");
+                setStorageMsg(null);
+                try {
+                  const n = await api.retryMissingThumbnails();
+                  setStorageMsg(
+                    n > 0
+                      ? `Regenerated ${n} missing preview(s).`
+                      : "No missing previews to regenerate.",
+                  );
+                  await refreshStorage();
+                } catch (e) {
+                  setStorageMsg(String(e));
+                } finally {
+                  setStorageBusy(null);
+                  setThumbProgress(null);
                 }
               }}
               onOptimize={async () => {
-                setStorageBusy(true);
+                setThumbProgress(null);
+                setStorageBusy("Optimizing database…");
                 setStorageMsg(null);
                 try {
                   await api.optimizeDatabase();
@@ -195,7 +252,8 @@ export function SettingsView({
                 } catch (e) {
                   setStorageMsg(String(e));
                 } finally {
-                  setStorageBusy(false);
+                  setStorageBusy(null);
+                  setThumbProgress(null);
                 }
               }}
             />
@@ -787,23 +845,42 @@ function PerformanceSection({
 
 function StorageSection({
   storage,
-  busy,
+  busyLabel,
+  progress,
   message,
   onRefresh,
   onOpenPath,
   onClearCache,
   onRebuild,
+  onRetryMissing,
   onOptimize,
 }: {
   storage: StorageSummary | null;
-  busy: boolean;
+  busyLabel: string | null;
+  progress: ThumbnailRepairProgress | null;
   message: string | null;
   onRefresh: () => void;
   onOpenPath: (path: string, reveal?: boolean) => void;
   onClearCache: () => Promise<void>;
   onRebuild: () => Promise<void>;
+  onRetryMissing: () => Promise<void>;
   onOptimize: () => Promise<void>;
 }) {
+  const busy = busyLabel != null;
+  const hasCount = !!progress && progress.total > 0;
+  const pct = hasCount
+    ? Math.min(100, Math.round((progress.current / progress.total) * 100))
+    : null;
+  const countLabel = hasCount
+    ? `${progress.current} / ${progress.total}`
+    : "This may take a while";
+  const detail =
+    hasCount && progress.repaired > 0
+      ? `${progress.repaired} fixed`
+      : hasCount
+        ? `${pct}%`
+        : null;
+
   return (
     <>
       <SettingsBlock title="Storage">
@@ -839,10 +916,45 @@ function StorageSection({
             </div>
           </dl>
         )}
-        {message && <p className="muted">{message}</p>}
+        {busy && (
+          <div
+            className="settings-storage-progress"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="settings-storage-progress-meta">
+              <span className="import-progress-label">
+                <span className="spinner" aria-hidden="true" />
+                {busyLabel}
+              </span>
+              <span className="settings-storage-progress-count">
+                {countLabel}
+                {detail ? ` · ${detail}` : ""}
+              </span>
+            </div>
+            <div
+              className={`import-progress-track ${hasCount ? "" : "indeterminate"}`}
+            >
+              <div
+                className="import-progress-fill"
+                style={hasCount ? { width: `${pct}%` } : undefined}
+              />
+            </div>
+            {progress?.path && (
+              <p className="muted settings-storage-progress-file" title={progress.path}>
+                {progress.path}
+              </p>
+            )}
+          </div>
+        )}
+        {message && !busy && <p className="muted">{message}</p>}
         <div className="settings-inline-actions">
           <button type="button" disabled={busy} onClick={() => void onClearCache()}>
             Clear Thumbnail Cache
+          </button>
+          <button type="button" disabled={busy} onClick={() => void onRetryMissing()}>
+            Retry Missing Previews
           </button>
           <button type="button" disabled={busy} onClick={() => void onRebuild()}>
             Rebuild Cache
@@ -858,17 +970,18 @@ function StorageSection({
       {storage && (
         <SettingsBlock title="Folders">
           <div className="settings-path-actions">
-            <button type="button" onClick={() => onOpenPath(storage.appDataPath)}>
+            <button type="button" disabled={busy} onClick={() => onOpenPath(storage.appDataPath)}>
               Open Data Folder
             </button>
-            <button type="button" onClick={() => onOpenPath(storage.thumbsPath)}>
+            <button type="button" disabled={busy} onClick={() => onOpenPath(storage.thumbsPath)}>
               Open Cache Folder
             </button>
-            <button type="button" onClick={() => onOpenPath(storage.modelsPath)}>
+            <button type="button" disabled={busy} onClick={() => onOpenPath(storage.modelsPath)}>
               Open Models Folder
             </button>
             <button
               type="button"
+              disabled={busy}
               onClick={() => onOpenPath(storage.databasePath, true)}
             >
               Show Database
@@ -908,7 +1021,7 @@ function ImportExportSection({
       <SettingsBlock title="Import">
         <ToggleRow
           label="Skip duplicates"
-          description="Skip files whose content hash already exists in the library (different path, same bytes)."
+          description="When on, a second file with the same SHA-256 as one already in the library is not indexed during import. To find copies you already imported while this was on, open Duplicates and run Scan for duplicates — it picks them up from watched folders without a full re-import."
           checked={ie.skipDuplicates}
           onChange={(v) =>
             void update((p) => {
@@ -917,6 +1030,10 @@ function ImportExportSection({
             })
           }
         />
+        <p className="muted settings-inline-note">
+          Duplicates → Scan for duplicates indexes skipped identical copies from
+          watched folders.
+        </p>
       </SettingsBlock>
       <SettingsBlock title="Export">
         <ToggleRow
