@@ -1,4 +1,4 @@
-# Deploy the static marketing site (index.html, guide.html, plugins-guide.html, assets) to GitHub Pages.
+# Deploy the static marketing site (index.html, download.html, guide.html, plugins-guide.html, assets) to GitHub Pages.
 #
 # After merging this workflow, switch the repo to Actions-based Pages:
 #   Settings → Pages → Build and deployment → Source: GitHub Actions
@@ -14,10 +14,12 @@ on:
       - '.github/workflows/pages.yml'
       - '.nojekyll'
       - 'index.html'
+      - 'download.html'
       - 'guide.html'
       - 'plugins-guide.html'
       - 'styles.css'
       - 'site.js'
+      - 'download.js'
       - 'favicon.png'
       - 'Lumora-icon.png'
       - 'lumora-icon-tp.png'
@@ -47,10 +49,12 @@ jobs:
           mkdir -p _site
           cp \
             index.html \
+            download.html \
             guide.html \
             plugins-guide.html \
             styles.css \
             site.js \
+            download.js \
             favicon.png \
             Lumora-icon.png \
             lumora-icon-tp.png \

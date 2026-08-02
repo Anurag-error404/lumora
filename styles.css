@@ -1593,3 +1593,294 @@ code {
     min-width: 10rem;
   }
 }
+
+/* —— Download page —— */
+
+.download-hero {
+  position: relative;
+  padding: clamp(4.5rem, 12vh, 7rem) var(--space) clamp(3rem, 8vh, 4.5rem);
+  max-width: var(--max);
+  margin: 0 auto;
+  isolation: isolate;
+}
+
+.download-hero::before {
+  content: "";
+  position: absolute;
+  inset: 8% -5% auto auto;
+  width: min(42vw, 22rem);
+  height: min(42vw, 22rem);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(143, 191, 174, 0.45) 0%,
+    transparent 68%
+  );
+  pointer-events: none;
+  z-index: 0;
+  animation: download-glow 8s ease-in-out infinite alternate;
+}
+
+.download-hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 36rem;
+  animation: rise-in 800ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.download-brand {
+  margin: 0 0 0.65rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2.25rem, 5vw + 0.75rem, 4.5rem);
+  letter-spacing: 0.06em;
+  line-height: 0.95;
+  color: var(--ink);
+}
+
+.download-title {
+  margin: 0 0 0.85rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.45rem, 2.4vw + 0.6rem, 2.15rem);
+  line-height: 1.2;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.download-lede {
+  margin: 0 0 1.75rem;
+  color: var(--text-muted);
+  font-size: 1.08rem;
+  max-width: 34rem;
+}
+
+.download-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.download-status {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.btn-download {
+  min-width: min(100%, 16rem);
+  padding: 0.9rem 1.6rem;
+  font-size: 1.05rem;
+}
+
+.download-version,
+.download-hint {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.download-hint {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.download-steps .section-head,
+.download-platforms .section-head,
+.download-help .section-head {
+  max-width: 36rem;
+}
+
+.install-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.25rem;
+  counter-reset: step;
+  max-width: 40rem;
+}
+
+.install-steps li {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  padding-left: 3.25rem;
+  counter-increment: step;
+}
+
+.install-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.install-steps strong {
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.install-steps span {
+  color: var(--text-muted);
+  font-size: 0.98rem;
+}
+
+.platform-list {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+  max-width: 40rem;
+}
+
+.platform-option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  text-decoration: none;
+  color: inherit;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 180ms ease;
+}
+
+.platform-option:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: inherit;
+  transform: translateY(-1px);
+}
+
+.platform-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.platform-option.is-recommended {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.platform-option-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--accent-strong);
+}
+
+.platform-option-body {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.platform-option-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.platform-option-meta {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.platform-option-action {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+.download-fallback {
+  margin: 0;
+  max-width: 40rem;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.help-list {
+  margin: 0;
+  max-width: 40rem;
+  display: grid;
+  gap: 1.35rem;
+}
+
+.help-list > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.help-list dt {
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 1.02rem;
+}
+
+.help-list dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.98rem;
+}
+
+@keyframes download-glow {
+  from {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.85;
+  }
+  to {
+    transform: translate(-6%, 8%) scale(1.08);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-hero::before,
+  .download-hero-copy {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .download-hero {
+    padding-top: calc(var(--header-h) + 2rem);
+  }
+
+  .platform-option {
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem 1rem;
+  }
+
+  .platform-option-action {
+    grid-column: 2;
+  }
+
+  .btn-download {
+    width: 100%;
+  }
+}
