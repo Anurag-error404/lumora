@@ -478,6 +478,7 @@ export default function App() {
     openExportInFolder,
     openLocalPath,
     exportSelectedZip,
+    optimizeSelected,
     undo,
     redo,
   } = useAssetActions({
@@ -797,6 +798,7 @@ export default function App() {
               setTagModal(true);
             }}
             onExportZip={() => void exportSelectedZip()}
+            onOptimize={() => void optimizeSelected()}
             onOpenMoveAlbum={openMoveAlbumModal}
             onMoveToLocked={() => void moveSelectionToLocked()}
             onDelete={() => void deleteSelected()}

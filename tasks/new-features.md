@@ -1,0 +1,4 @@
+- for photos and videos in the media view add option to zoom in and zoom out too. 
+- for video implement trip and crop for video.
+- Add option to select multiple photos/videos and compress it with lossless compression
+- for ai features let people browse hugging face etc to bring any model of their choice for that feature. We just evaluate the model and let it run if its compatible

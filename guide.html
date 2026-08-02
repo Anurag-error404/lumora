@@ -196,7 +196,11 @@ bun run tauri build    # release bundle</code></pre>
               <dt>Model library</dt>
               <dd>
                 Switch backends per capability, install the active option, and
-                re-run processing when you change models.
+                re-run processing when you change models. For Auto-tags and
+                Semantic search you can also
+                <strong>Import local model…</strong> — pick ONNX files from disk;
+                LUMORA evaluates compatibility and only installs if the graph
+                matches. (Browsing Hugging Face from the app is not available yet.)
               </dd>
             </div>
           </dl>
@@ -291,6 +295,10 @@ bun run tauri build    # release bundle</code></pre>
                 <tr>
                   <td>← / →</td>
                   <td>Previous / next in viewer</td>
+                </tr>
+                <tr>
+                  <td>= / − / 0</td>
+                  <td>Zoom in / out / reset in viewer (0 resets only while zoomed)</td>
                 </tr>
                 <tr>
                   <td>F</td>

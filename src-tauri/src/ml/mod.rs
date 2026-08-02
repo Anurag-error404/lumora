@@ -10,9 +10,12 @@
 
 pub mod catalog;
 pub mod clip;
+pub mod evaluate;
 pub mod library;
 pub mod preprocess;
+pub mod profiles;
 pub mod session;
+pub mod user;
 pub mod vector;
 
 use std::io::Read;
@@ -164,7 +167,11 @@ pub fn library_status(
                 library::default_option(opt.capability).id
             }
         };
-        let active = library::resolve_active(opt.capability, active_id).id == opt.id;
+        let active = if user::is_user_option_id(active_id) {
+            false
+        } else {
+            library::resolve_active(opt.capability, active_id).id == opt.id
+        };
         out.push(LibraryOptionStatus {
             id: opt.id.to_string(),
             capability: opt.capability.as_str().to_string(),
@@ -184,6 +191,36 @@ pub fn library_status(
             input_size: opt.input_size,
         });
     }
+
+    // Append user-imported BYO options.
+    for uopt in user::list(conn)? {
+        let cap = library::Capability::from_str(&uopt.capability);
+        let Some(cap) = cap else { continue };
+        let active_id = match cap {
+            library::Capability::SemanticSearch => prefs.semantic_model.as_str(),
+            library::Capability::AutoTags => prefs.tags_model.as_str(),
+            library::Capability::Ocr => prefs.ocr_model.as_str(),
+            library::Capability::Faces => prefs.faces_model.as_str(),
+            library::Capability::Captions => prefs.captions_model.as_str(),
+            library::Capability::MemoryProse => prefs.prose_model.as_str(),
+            library::Capability::Duplicates | library::Capability::BlurDetection => "",
+        };
+        out.push(LibraryOptionStatus {
+            id: uopt.id.clone(),
+            capability: uopt.capability.clone(),
+            capability_label: cap.label().to_string(),
+            name: uopt.name.clone(),
+            summary: uopt.summary.clone(),
+            runtime: "onnx".into(),
+            license: "user".into(),
+            bundle: None,
+            download_bytes: 0,
+            installed: true,
+            active: active_id == uopt.id,
+            available: true,
+            input_size: uopt.input_size,
+        });
+    }
     Ok(out)
 }
 
@@ -199,6 +236,36 @@ fn bundle_ready(conn: &Connection, bundle: &str) -> AppResult<bool> {
 /// True only when every file of the semantic bundle is present in the registry.
 /// A half-installed bundle is treated as not ready.
 pub fn semantic_ready(conn: &Connection) -> AppResult<bool> {
+    semantic_ready_for(conn, None)
+}
+
+/// Ready when the catalog CLIP bundle is installed, or a user CLIP option exists
+/// and is selected (pass `app_data` to honour the active preference).
+pub fn semantic_ready_for(
+    conn: &Connection,
+    app_data: Option<&Path>,
+) -> AppResult<bool> {
+    if let Some(app_data) = app_data {
+        if let Ok(prefs) = crate::preferences::load(app_data) {
+            if user::is_user_option_id(&prefs.ai.semantic_model) {
+                if let Some(uopt) = user::get(conn, &prefs.ai.semantic_model)? {
+                    let vision = PathBuf::from(&uopt.primary_path);
+                    let text_ok = uopt
+                        .text_path
+                        .as_ref()
+                        .map(|p| PathBuf::from(p).is_file())
+                        .unwrap_or(false);
+                    let tok_ok = uopt
+                        .tokenizer_path
+                        .as_ref()
+                        .map(|p| PathBuf::from(p).is_file())
+                        .unwrap_or(false);
+                    return Ok(vision.is_file() && text_ok && tok_ok);
+                }
+                return Ok(false);
+            }
+        }
+    }
     for entry in catalog::bundle(catalog::SEMANTIC_BUNDLE) {
         if installed_row(conn, entry.id)?.is_none() {
             return Ok(false);

@@ -32,6 +32,7 @@ const SHORTCUTS: { action: string; keys: string }[] = [
   { action: "Rate 0–5", keys: "0–5" },
   { action: "Delete / Restore", keys: "Delete" },
   { action: "Open / close viewer", keys: "Space" },
+  { action: "Zoom in / out / reset (viewer)", keys: "= / − / 0" },
   { action: "Select all", keys: "⌘A" },
   { action: "Undo", keys: "⌘Z" },
   { action: "Redo", keys: "⌘⇧Z" },

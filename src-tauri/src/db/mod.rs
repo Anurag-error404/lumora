@@ -22,6 +22,7 @@ const MIGRATION_016: &str = include_str!("../../migrations/016_edit_history.sql"
 const MIGRATION_017: &str = include_str!("../../migrations/017_captions.sql");
 const MIGRATION_018: &str = include_str!("../../migrations/018_memory_prose.sql");
 const MIGRATION_019: &str = include_str!("../../migrations/019_dismissed_memories.sql");
+const MIGRATION_020: &str = include_str!("../../migrations/020_user_models.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -338,6 +339,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         conn.execute_batch(MIGRATION_019)?;
         conn.execute("INSERT INTO schema_migrations (version) VALUES (19)", [])?;
         tracing::info!("applied migration 019_dismissed_memories");
+    }
+
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 20 {
+        conn.execute_batch(MIGRATION_020)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (20)", [])?;
+        tracing::info!("applied migration 020_user_models");
     }
 
     Ok(())

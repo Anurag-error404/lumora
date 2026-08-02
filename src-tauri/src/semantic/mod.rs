@@ -37,6 +37,23 @@ pub struct SemanticModelPaths {
 
 /// Locate every file inference needs, or explain which one is missing.
 pub fn model_paths(conn: &Connection) -> AppResult<SemanticModelPaths> {
+    model_paths_for(conn, None)
+}
+
+/// Resolve CLIP paths for the active preference (catalog or user BYO).
+pub fn model_paths_for(
+    conn: &Connection,
+    app_data: Option<&Path>,
+) -> AppResult<SemanticModelPaths> {
+    if let Some(app_data) = app_data {
+        if let Ok(prefs) = crate::preferences::load(app_data) {
+            if ml::user::is_user_option_id(&prefs.ai.semantic_model) {
+                if let Some(uopt) = ml::user::get(conn, &prefs.ai.semantic_model)? {
+                    return ml::user::clip_paths(&uopt);
+                }
+            }
+        }
+    }
     Ok(SemanticModelPaths {
         image: ml::require_path(conn, IMAGE_MODEL_ID)?,
         text: ml::require_path(conn, TEXT_MODEL_ID)?,

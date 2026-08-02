@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { formatBytes } from "../../lib/format";
 import {
   api,
@@ -18,14 +19,18 @@ const CAPABILITY_ORDER = [
   "blurDetection",
 ];
 
+const IMPORTABLE = new Set(["autoTags", "semanticSearch"]);
+
 /**
- * Pluggable backends per AI capability: install, activate, and re-run.
+ * Pluggable backends per AI capability: install, activate, import local ONNX,
+ * and re-run.
  */
 export function ModelLibraryPanel() {
   const [options, setOptions] = useState<LibraryOptionStatus[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<ModelProgressEvent | null>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -83,7 +88,7 @@ export function ModelLibraryPanel() {
     setError(null);
     setDownload(null);
     try {
-      if (!opt.installed && opt.runtime === "onnx") {
+      if (!opt.installed && opt.runtime === "onnx" && !opt.id.startsWith("user-")) {
         await api.installModelOption(opt.id);
       }
       const next = await api.setActiveModel(opt.id, reprocess);
@@ -97,6 +102,90 @@ export function ModelLibraryPanel() {
     }
   }
 
+  async function importLocal(capability: string) {
+    setError(null);
+    setImportNote(null);
+    try {
+      if (capability === "autoTags") {
+        const modelPath = await open({
+          title: "Select AutoTags ONNX model",
+          multiple: false,
+          filters: [{ name: "ONNX", extensions: ["onnx"] }],
+        });
+        if (!modelPath || Array.isArray(modelPath)) return;
+        const labelsPath = await open({
+          title: "Select ImageNet labels .txt (1000 lines)",
+          multiple: false,
+          filters: [{ name: "Labels", extensions: ["txt"] }],
+        });
+        if (!labelsPath || Array.isArray(labelsPath)) return;
+
+        setBusyId(`import:${capability}`);
+        const report = await api.evaluateLocalAutotags(modelPath, labelsPath);
+        if (!report.compatible) {
+          setError(`Not compatible: ${report.reasons.join("; ")}`);
+          return;
+        }
+        const ok = window.confirm(
+          `Compatible AutoTags model.\n\n${report.reasons.join("\n")}\n\nImport and activate? Derived tags will be rebuilt.`,
+        );
+        if (!ok) return;
+        await api.importLocalAutotags(modelPath, labelsPath, null, true);
+        setImportNote(`Imported and activated local AutoTags model.`);
+        await refresh();
+      } else if (capability === "semanticSearch") {
+        const visionPath = await open({
+          title: "Select CLIP vision ONNX",
+          multiple: false,
+          filters: [{ name: "ONNX", extensions: ["onnx"] }],
+        });
+        if (!visionPath || Array.isArray(visionPath)) return;
+        const textPath = await open({
+          title: "Select CLIP text ONNX",
+          multiple: false,
+          filters: [{ name: "ONNX", extensions: ["onnx"] }],
+        });
+        if (!textPath || Array.isArray(textPath)) return;
+        const tokenizerPath = await open({
+          title: "Select CLIP tokenizer.json",
+          multiple: false,
+          filters: [{ name: "Tokenizer", extensions: ["json"] }],
+        });
+        if (!tokenizerPath || Array.isArray(tokenizerPath)) return;
+
+        setBusyId(`import:${capability}`);
+        const report = await api.evaluateLocalClip(
+          visionPath,
+          textPath,
+          tokenizerPath,
+        );
+        if (!report.compatible) {
+          setError(`Not compatible: ${report.reasons.join("; ")}`);
+          return;
+        }
+        const ok = window.confirm(
+          `Compatible CLIP bundle.\n\n${report.reasons.join("\n")}\n\nImport and activate? All embeddings will be cleared and rebuilt.`,
+        );
+        if (!ok) return;
+        await api.importLocalClip(
+          visionPath,
+          textPath,
+          tokenizerPath,
+          null,
+          true,
+        );
+        setImportNote(`Imported and activated local CLIP model.`);
+        await refresh();
+      } else {
+        setError("Custom import is not supported for this capability yet.");
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="model-library">
       <header className="settings-block-head">
@@ -104,19 +193,35 @@ export function ModelLibraryPanel() {
           <h3>Model library</h3>
           <p className="muted">
             Pick which backend powers each capability. Downloads only start when
-            you ask. Switching an ONNX model clears and re-runs that capability.
+            you ask. You can also import a local ONNX model for Auto-tags or
+            Semantic search after a compatibility check. Hugging Face browse is
+            not included yet.
           </p>
         </div>
       </header>
 
       {error && <p className="error-banner">{error}</p>}
+      {importNote && <p className="muted">{importNote}</p>}
       {busyId && downloadPct != null && (
         <p className="muted">Downloading… {downloadPct}%</p>
       )}
 
       {groups.map((group) => (
         <section key={group.id} className="model-library-group">
-          <h4>{group.label}</h4>
+          <div className="model-library-group-head">
+            <h4>{group.label}</h4>
+            {IMPORTABLE.has(group.id) && (
+              <button
+                type="button"
+                disabled={busyId != null}
+                onClick={() => void importLocal(group.id)}
+              >
+                {busyId === `import:${group.id}`
+                  ? "Evaluating…"
+                  : "Import local model…"}
+              </button>
+            )}
+          </div>
           <div className="model-library-options">
             {group.options.map((opt) => (
               <article
@@ -126,7 +231,11 @@ export function ModelLibraryPanel() {
                 }`}
               >
                 <span className="developer-card-label">
-                  {opt.runtime === "onnx" ? "ONNX Runtime" : "Native"}
+                  {opt.id.startsWith("user-")
+                    ? "Local ONNX"
+                    : opt.runtime === "onnx"
+                      ? "ONNX Runtime"
+                      : "Native"}
                 </span>
                 <strong>{opt.name}</strong>
                 <p className="muted">{opt.summary}</p>

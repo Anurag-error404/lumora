@@ -12,6 +12,7 @@ use crate::captions;
 use crate::diagnostics;
 use crate::duplicates;
 use crate::edit::{self, EditOps, EditResult, EditRevisionSummary, SaveMode, SavedEditOps};
+use crate::edit::video::{self as video_edit, VideoEditOps, VideoProbeInfo};
 use crate::error::{AppError, AppResult};
 use crate::export;
 use crate::faces;
@@ -22,6 +23,7 @@ use crate::memories;
 use crate::ml;
 use crate::models::*;
 use crate::ocr;
+use crate::optimize::{self, OptimizeBatchResult, OptimizeOptions, OptimizeProgressEvent};
 use crate::places;
 use crate::preferences::{self, Preferences, StorageSummary};
 use crate::prefs_runtime;
@@ -2042,24 +2044,52 @@ pub async fn set_active_model(
     option_id: String,
     reprocess: bool,
 ) -> AppResult<Vec<ml::LibraryOptionStatus>> {
-    let opt = ml::library::option(&option_id)
-        .ok_or_else(|| AppError::msg(format!("unknown model option '{option_id}'")))?;
+    // User BYO options are stored in ml_user_options, not the static catalog.
+    let user_cap = if ml::user::is_user_option_id(&option_id) {
+        let state = app.state::<AppState>();
+        let uopt = state.with_db(|conn| {
+            ml::user::get(conn, &option_id)?
+                .ok_or_else(|| AppError::msg(format!("unknown user model '{option_id}'")))
+        })?;
+        Some(
+            ml::library::Capability::from_str(&uopt.capability).ok_or_else(|| {
+                AppError::msg(format!("unsupported user capability '{}'", uopt.capability))
+            })?,
+        )
+    } else {
+        None
+    };
+
+    let catalog_opt = if user_cap.is_none() {
+        Some(
+            ml::library::option(&option_id)
+                .ok_or_else(|| AppError::msg(format!("unknown model option '{option_id}'")))?,
+        )
+    } else {
+        None
+    };
+
+    let capability = user_cap
+        .or_else(|| catalog_opt.map(|o| o.capability))
+        .expect("capability");
 
     // Install first when the option needs files that aren't present.
-    if let Some(bundle) = opt.bundle {
-        let needs_install = {
-            let state = app.state::<AppState>();
-            state.with_db(|conn| {
-                for entry in ml::catalog::bundle(bundle) {
-                    if ml::installed_row(conn, entry.id)?.is_none() {
-                        return Ok(true);
+    if let Some(opt) = catalog_opt {
+        if let Some(bundle) = opt.bundle {
+            let needs_install = {
+                let state = app.state::<AppState>();
+                state.with_db(|conn| {
+                    for entry in ml::catalog::bundle(bundle) {
+                        if ml::installed_row(conn, entry.id)?.is_none() {
+                            return Ok(true);
+                        }
                     }
-                }
-                Ok(false)
-            })?
-        };
-        if needs_install {
-            install_model_option(app.clone(), option_id.clone()).await?;
+                    Ok(false)
+                })?
+            };
+            if needs_install {
+                install_model_option(app.clone(), option_id.clone()).await?;
+            }
         }
     }
 
@@ -2068,25 +2098,27 @@ pub async fn set_active_model(
         state.paths.app_data.clone()
     };
     let mut prefs = preferences::load(&app_data)?;
-    match opt.capability {
+    match capability {
         ml::library::Capability::SemanticSearch => {
-            prefs.ai.semantic_model = opt.id.to_string();
+            prefs.ai.semantic_model = option_id.clone();
+            prefs.ai.semantic_search = true;
         }
         ml::library::Capability::Ocr => {
-            prefs.ai.ocr_model = opt.id.to_string();
+            prefs.ai.ocr_model = option_id.clone();
         }
         ml::library::Capability::Faces => {
-            prefs.ai.faces_model = opt.id.to_string();
+            prefs.ai.faces_model = option_id.clone();
         }
         ml::library::Capability::AutoTags => {
-            prefs.ai.tags_model = opt.id.to_string();
+            prefs.ai.tags_model = option_id.clone();
+            prefs.ai.object_detection = true;
         }
         ml::library::Capability::Captions => {
-            prefs.ai.captions_model = opt.id.to_string();
+            prefs.ai.captions_model = option_id.clone();
             prefs.ai.captions = true;
         }
         ml::library::Capability::MemoryProse => {
-            prefs.ai.prose_model = opt.id.to_string();
+            prefs.ai.prose_model = option_id.clone();
             prefs.ai.memory_prose = true;
         }
         _ => {}
@@ -2103,7 +2135,7 @@ pub async fn set_active_model(
 
     if reprocess {
         let faces_dir = state.paths.faces_dir.clone();
-        match opt.capability {
+        match capability {
             ml::library::Capability::SemanticSearch => {
                 let _ = state.with_db(ml::clear_embeddings);
                 state.embedder.kick();
@@ -2135,6 +2167,123 @@ pub async fn set_active_model(
     }
 
     state.with_db(|conn| ml::library_status(conn, &prefs.ai))
+}
+
+/// Probe a local AutoTags ONNX + labels file without installing.
+#[tauri::command]
+pub fn evaluate_local_autotags(
+    model_path: String,
+    labels_path: String,
+) -> AppResult<ml::evaluate::EvalReport> {
+    ml::evaluate::evaluate_autotags(PathBuf::from(model_path).as_path(), PathBuf::from(labels_path).as_path())
+}
+
+/// Probe a local CLIP vision/text/tokenizer bundle without installing.
+#[tauri::command]
+pub fn evaluate_local_clip(
+    vision_path: String,
+    text_path: String,
+    tokenizer_path: String,
+) -> AppResult<ml::evaluate::EvalReport> {
+    ml::evaluate::evaluate_clip_bundle(
+        PathBuf::from(vision_path).as_path(),
+        PathBuf::from(text_path).as_path(),
+        PathBuf::from(tokenizer_path).as_path(),
+    )
+}
+
+/// Evaluate + import a local AutoTags model, then activate it.
+#[tauri::command]
+pub fn import_local_autotags(
+    state: State<'_, AppState>,
+    model_path: String,
+    labels_path: String,
+    name: Option<String>,
+    activate: bool,
+) -> AppResult<ml::LibraryOptionStatus> {
+    let models_dir = state.paths.models_dir.clone();
+    let app_data = state.paths.app_data.clone();
+    let (opt, _report) = state.with_db(|conn| {
+        ml::user::import_autotags(
+            conn,
+            &models_dir,
+            PathBuf::from(&model_path).as_path(),
+            PathBuf::from(&labels_path).as_path(),
+            name,
+        )
+    })?;
+    if activate {
+        let mut prefs = preferences::load(&app_data)?;
+        prefs.ai.tags_model = opt.id.clone();
+        prefs.ai.object_detection = true;
+        preferences::save(&app_data, &prefs)?;
+        let _ = state.with_db(tags::clear_all);
+        state.tags.invalidate();
+        state.tags.kick();
+    }
+    Ok(ml::LibraryOptionStatus {
+        id: opt.id,
+        capability: opt.capability,
+        capability_label: ml::library::Capability::AutoTags.label().to_string(),
+        name: opt.name,
+        summary: opt.summary,
+        runtime: "onnx".into(),
+        license: "user".into(),
+        bundle: None,
+        download_bytes: 0,
+        installed: true,
+        active: activate,
+        available: true,
+        input_size: opt.input_size,
+    })
+}
+
+/// Evaluate + import a local CLIP bundle, then activate it (clears embeddings).
+#[tauri::command]
+pub fn import_local_clip(
+    state: State<'_, AppState>,
+    vision_path: String,
+    text_path: String,
+    tokenizer_path: String,
+    name: Option<String>,
+    activate: bool,
+) -> AppResult<ml::LibraryOptionStatus> {
+    let models_dir = state.paths.models_dir.clone();
+    let app_data = state.paths.app_data.clone();
+    let (opt, _report) = state.with_db(|conn| {
+        ml::user::import_clip(
+            conn,
+            &models_dir,
+            PathBuf::from(&vision_path).as_path(),
+            PathBuf::from(&text_path).as_path(),
+            PathBuf::from(&tokenizer_path).as_path(),
+            name,
+        )
+    })?;
+    if activate {
+        let mut prefs = preferences::load(&app_data)?;
+        prefs.ai.semantic_model = opt.id.clone();
+        prefs.ai.semantic_search = true;
+        preferences::save(&app_data, &prefs)?;
+        let _ = state.with_db(ml::clear_embeddings);
+        state.embedder.invalidate();
+        state.embedder.kick();
+    }
+    Ok(ml::LibraryOptionStatus {
+        id: opt.id,
+        capability: opt.capability,
+        capability_label: ml::library::Capability::SemanticSearch.label().to_string(),
+        name: opt.name,
+        summary: opt.summary,
+        runtime: "onnx".into(),
+        license: "user".into(),
+        bundle: None,
+        download_bytes: 0,
+        installed: true,
+        active: activate,
+        available: true,
+        input_size: opt.input_size,
+    })
 }
 
 /// Wipe derived AI data for the chosen capabilities and re-queue background work.
@@ -2823,6 +2972,76 @@ pub fn export_assets_zip(
         missing = result.missing,
         "exported selection to zip"
     );
+    Ok(result)
+}
+
+/// Lossless / bit-preserving optimize for a selection. Keeps results only when smaller.
+#[tauri::command]
+pub fn optimize_assets(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    mode: SaveMode,
+) -> AppResult<OptimizeBatchResult> {
+    let thumbs = state.paths.thumbs_dir.clone();
+    let options = OptimizeOptions { mode };
+    let app_progress = app.clone();
+    let result = state.with_db(|conn| {
+        optimize::optimize_assets(conn, &thumbs, &ids, &options, |p: OptimizeProgressEvent| {
+            let _ = app_progress.emit("optimize-progress", &p);
+        })
+    })?;
+    let _ = state.with_db(|conn| {
+        history::record_activity(
+            conn,
+            "optimize",
+            &format!(
+                "Optimized {} · skipped {} · failed {} · saved {} bytes",
+                result.optimized, result.skipped, result.failed, result.bytes_saved
+            ),
+            None,
+        )
+    });
+    tracing::info!(
+        optimized = result.optimized,
+        skipped = result.skipped,
+        failed = result.failed,
+        bytes_saved = result.bytes_saved,
+        "optimized selection"
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn probe_video_asset(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> AppResult<VideoProbeInfo> {
+    state.with_db(|conn| video_edit::probe_asset(conn, &asset_id))
+}
+
+/// Trim / crop a video via system ffmpeg (replace or sibling copy).
+#[tauri::command]
+pub fn apply_video_edit(
+    state: State<'_, AppState>,
+    asset_id: String,
+    ops: VideoEditOps,
+    mode: SaveMode,
+) -> AppResult<EditResult> {
+    let thumbs = state.paths.thumbs_dir.clone();
+    let result =
+        state.with_db(|conn| video_edit::apply_video_edit(conn, &thumbs, &asset_id, &ops, mode))?;
+    let label = match result.mode {
+        SaveMode::Replace => format!("Edited video “{}”", edit_file_name(&result.asset.path)),
+        SaveMode::Copy => {
+            format!("Saved edited video copy “{}”", edit_file_name(&result.asset.path))
+        }
+    };
+    let _ = state
+        .with_db(|conn| history::record_activity(conn, "edit", &label, Some(&result.asset.id)));
+    state.embedder.kick();
+    state.ocr.kick();
+    state.faces.kick();
     Ok(result)
 }
 

@@ -33,6 +33,8 @@ Repository: [github.com/Anurag-error404/lumora](https://github.com/Anurag-error4
 - Import folders recursively; originals are never moved or rewritten by indexing
 - Watched folders for live add / change / remove
 - Photos and videos in one library (video frame thumbs via system **ffmpeg** when available; soft-fail placeholder otherwise)
+- Full-screen viewer with zoom/pan; photo edit (rotate/crop/exposure); video trim/crop via ffmpeg
+- Multi-select lossless optimize (PNG/WebP re-pack, JPEG via jpegtran when available, video remux) — keeps results only when smaller
 - Albums, tags, favourites, 1–5 ratings, colour labels
 - Timeline by year / month; recently added and recently viewed
 - Smart collections: Videos, RAW, Screenshots, Selfies, Panoramas, Documents, Receipts
@@ -56,7 +58,7 @@ Install from **Settings → AI**. The app works fully with zero models.
 | Auto-tags | MobileNetV4 | Apache-2.0 · shown in info panel + searchable |
 | Image captions | Florence-2 Base | MIT · optional on-device captions + searchable |
 
-Switch backends in the **model library**, then re-run processing if needed. Derived data (embeddings, faces, OCR, labels) is clearable without touching originals.
+Switch backends in the **model library**, then re-run processing if needed. You can also **import a local ONNX** for Auto-tags or Semantic search after a compatibility check (Hugging Face browse is not included yet). Derived data (embeddings, faces, OCR, labels) is clearable without touching originals.
 
 ### Cleanup
 
@@ -79,7 +81,8 @@ Switch backends in the **model library**, then re-run processing if needed. Deri
 - [Bun](https://bun.sh)
 - [Rust](https://www.rust-lang.org/tools/install) (stable) — ensure `~/.cargo/bin` is on `PATH`
 - macOS: Xcode Command Line Tools
-- Optional: [`ffmpeg`](https://ffmpeg.org/) / `ffprobe` on `PATH` for video thumbnails
+- Optional: [`ffmpeg`](https://ffmpeg.org/) / `ffprobe` on `PATH` for video thumbnails, video edit, and video remux optimize
+- Optional: `jpegtran` on `PATH` for lossless JPEG optimize
 
 ### Run
 

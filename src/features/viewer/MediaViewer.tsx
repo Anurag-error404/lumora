@@ -1,12 +1,12 @@
 import {
   useEffect,
-  useRef,
   useState,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Icon } from "../../components/icons";
 import { SafeImage } from "../../components/SafeImage";
 import { LABEL_COLORS } from "../../lib/constants";
+import { useViewerZoom } from "../../hooks/useViewerZoom";
 import {
   api,
   fileSrc,
@@ -16,11 +16,13 @@ import {
 } from "../../lib/tauri";
 import { ImageEditor } from "./ImageEditor";
 import { MissingFileState } from "./MissingFileState";
+import { VideoEditor } from "./VideoEditor";
 
 /**
  * Full-screen media viewer: images render inline, videos use the platform
  * player. Pages through the surrounding grid with arrows, keys, or the wheel.
- * Images can open a basic editor (rotate / crop / exposure).
+ * Supports zoom/pan for photos and videos. Images can open a basic editor
+ * (rotate / crop / exposure).
  */
 export function MediaViewer({
   asset,
@@ -56,10 +58,10 @@ export function MediaViewer({
   onTrash?: (asset: AssetSummary) => void | Promise<void>;
   isTrashView?: boolean;
 }) {
-  const wheelLockRef = useRef(0);
   const [editing, setEditing] = useState(false);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const zoom = useViewerZoom(asset.id);
   const hasPrev = index > 0;
   const hasNext = index >= 0 && index < total - 1;
   const fileName = asset.path.split("/").pop() ?? asset.path;
@@ -89,32 +91,60 @@ export function MediaViewer({
     };
   }, [asset.id, isVideo, editing]);
 
-  function onWheel(e: ReactWheelEvent<HTMLDivElement>) {
+  useEffect(() => {
     if (editing) return;
-    const delta =
-      Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-    if (Math.abs(delta) < 12) return;
-    const now = Date.now();
-    if (now - wheelLockRef.current < 260) return;
-    wheelLockRef.current = now;
-    if (delta > 0) onNext();
-    else onPrev();
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        zoom.zoomIn();
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoom.zoomOut();
+      } else if (e.key === "0" && zoom.isZoomed) {
+        // Prefer reset-zoom over clear-rating while zoomed.
+        e.preventDefault();
+        e.stopPropagation();
+        zoom.reset();
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [editing, zoom.isZoomed, zoom.zoomIn, zoom.zoomOut, zoom.reset]);
+
+  function onViewerWheel(e: ReactWheelEvent<HTMLDivElement>) {
+    if (editing) return;
+    zoom.onWheel(e, { onPageNext: onNext, onPagePrev: onPrev });
   }
 
-  if (editing && !isVideo) {
+  if (editing) {
     return (
       <div className="viewer viewer-editing" role="presentation">
-        <ImageEditor
-          asset={asset}
-          onCancel={() => setEditing(false)}
-          onSaved={(result) => {
-            setEditing(false);
-            onEdited(result);
-          }}
-        />
+        {isVideo ? (
+          <VideoEditor
+            asset={asset}
+            onCancel={() => setEditing(false)}
+            onSaved={(result) => {
+              setEditing(false);
+              onEdited(result);
+            }}
+          />
+        ) : (
+          <ImageEditor
+            asset={asset}
+            onCancel={() => setEditing(false)}
+            onSaved={(result) => {
+              setEditing(false);
+              onEdited(result);
+            }}
+          />
+        )}
       </div>
     );
   }
+
+  const zoomPct = Math.round(zoom.scale * 100);
 
   return (
     <div
@@ -123,7 +153,7 @@ export function MediaViewer({
       aria-modal="true"
       aria-label={`Media viewer: ${fileName}`}
       onClick={onClose}
-      onWheel={onWheel}
+      onWheel={onViewerWheel}
     >
       <header className="viewer-bar" onClick={(e) => e.stopPropagation()}>
         <div className="viewer-title">
@@ -142,17 +172,46 @@ export function MediaViewer({
           )}
         </div>
         <div className="viewer-bar-actions">
-          {!isVideo && (
+          <div className="viewer-zoom-controls" role="group" aria-label="Zoom">
             <button
               type="button"
-              className="viewer-icon-btn viewer-text-btn"
-              title="Edit photo"
-              aria-label="Edit photo"
-              onClick={() => setEditing(true)}
+              className="viewer-icon-btn"
+              title="Zoom out (−)"
+              aria-label="Zoom out"
+              disabled={zoom.scale <= 1}
+              onClick={zoom.zoomOut}
             >
-              Edit
+              −
             </button>
-          )}
+            <button
+              type="button"
+              className="viewer-icon-btn viewer-text-btn viewer-zoom-pct"
+              title="Reset zoom (0)"
+              aria-label={`Zoom ${zoomPct} percent. Click to reset`}
+              onClick={zoom.reset}
+            >
+              {zoomPct}%
+            </button>
+            <button
+              type="button"
+              className="viewer-icon-btn"
+              title="Zoom in (=)"
+              aria-label="Zoom in"
+              disabled={zoom.scale >= 8}
+              onClick={zoom.zoomIn}
+            >
+              +
+            </button>
+          </div>
+          <button
+            type="button"
+            className="viewer-icon-btn viewer-text-btn"
+            title={isVideo ? "Edit video" : "Edit photo"}
+            aria-label={isVideo ? "Edit video" : "Edit photo"}
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </button>
           {!isTrashView && onTrash && (
             <button
               type="button"
@@ -199,30 +258,40 @@ export function MediaViewer({
         <Icon name="chevronLeft" />
       </button>
 
-      <div className="viewer-stage">
-        {isVideo ? (
-          <ViewerVideo
-            key={`${asset.id}:${retryKey}`}
-            asset={asset}
-            onRetry={() => setRetryKey((n) => n + 1)}
-            onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
-          />
-        ) : (
-          <SafeImage
-            key={`${asset.id}:${asset.hash}:${retryKey}`}
-            src={fileSrc(asset.path)}
-            alt={fileName}
-            fallback={
-              <MissingFileState
-                path={asset.path}
-                mediaType="image"
-                onRetry={() => setRetryKey((n) => n + 1)}
-                onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
-              />
-            }
-            onClick={(e) => e.stopPropagation()}
-          />
-        )}
+      <div
+        className={`viewer-stage${zoom.isZoomed ? " is-zoomed" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={zoom.onDoubleClick}
+        onPointerDown={zoom.onPointerDown}
+        onPointerMove={zoom.onPointerMove}
+        onPointerUp={zoom.onPointerUp}
+        onPointerCancel={zoom.onPointerUp}
+      >
+        <div className="viewer-zoom-layer" style={zoom.transformStyle}>
+          {isVideo ? (
+            <ViewerVideo
+              key={`${asset.id}:${retryKey}`}
+              asset={asset}
+              onRetry={() => setRetryKey((n) => n + 1)}
+              onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
+            />
+          ) : (
+            <SafeImage
+              key={`${asset.id}:${asset.hash}:${retryKey}`}
+              src={fileSrc(asset.path)}
+              alt={fileName}
+              fallback={
+                <MissingFileState
+                  path={asset.path}
+                  mediaType="image"
+                  onRetry={() => setRetryKey((n) => n + 1)}
+                  onRemoveFromLibrary={() => void onRemoveFromLibrary(asset)}
+                />
+              }
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
+        </div>
       </div>
 
       <button

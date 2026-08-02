@@ -1,9 +1,12 @@
 //! Image edits: non-destructive ops history plus optional bake to disk.
+//! Video trim/crop lives in [`video`].
 //!
 //! **Save edits** appends JSON ops to `asset_edits` without touching pixels.
 //! **Bake** (`apply_edit` replace/copy) rewrites pixels, then clears that
 //! asset's revision rows. After bake we re-upsert so hash/thumbs/metadata stay
 //! correct, drop CLIP/OCR/faces/tags derived data, and kick workers to rebuild.
+
+pub mod video;
 
 use std::path::{Path, PathBuf};
 

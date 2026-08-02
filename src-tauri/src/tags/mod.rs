@@ -44,10 +44,23 @@ pub fn active_option(app_data: &std::path::Path) -> &'static ml::library::ModelO
     let preferred = crate::preferences::load(app_data)
         .map(|p| p.ai.tags_model)
         .unwrap_or_else(|_| "mobilenetv4-small".into());
+    if ml::user::is_user_option_id(&preferred) {
+        return ml::library::default_option(ml::library::Capability::AutoTags);
+    }
     ml::library::resolve_active(ml::library::Capability::AutoTags, &preferred)
 }
 
+pub fn active_tags_model_id(app_data: &std::path::Path) -> String {
+    crate::preferences::load(app_data)
+        .map(|p| p.ai.tags_model)
+        .unwrap_or_else(|_| "mobilenetv4-small".into())
+}
+
 pub fn active_bundle(app_data: &std::path::Path) -> String {
+    let preferred = active_tags_model_id(app_data);
+    if ml::user::is_user_option_id(&preferred) {
+        return preferred;
+    }
     active_option(app_data)
         .bundle
         .unwrap_or(ml::catalog::TAGS_BUNDLE)

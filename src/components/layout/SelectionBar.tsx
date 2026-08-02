@@ -19,6 +19,7 @@ export function SelectionBar({
   onFavorite,
   onOpenTagModal,
   onExportZip,
+  onOptimize,
   onOpenMoveAlbum,
   onMoveToLocked,
   onDelete,
@@ -38,6 +39,7 @@ export function SelectionBar({
   onFavorite: (favorite: boolean) => void;
   onOpenTagModal: () => void;
   onExportZip: () => void;
+  onOptimize: () => void;
   onOpenMoveAlbum: () => void;
   onMoveToLocked: () => void;
   onDelete: () => void;
@@ -106,6 +108,12 @@ export function SelectionBar({
             icon="download"
             label="Export as ZIP…"
             onClick={onExportZip}
+            disabled={busy}
+          />
+          <IconButton
+            icon="compress"
+            label="Lossless optimize…"
+            onClick={onOptimize}
             disabled={busy}
           />
           <IconButton

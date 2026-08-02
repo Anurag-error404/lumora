@@ -395,6 +395,18 @@ export type LibraryOptionStatus = {
   inputSize: number | null;
 };
 
+export type EvalReport = {
+  compatible: boolean;
+  capability: string;
+  profile: string;
+  reasons: string[];
+  warnings: string[];
+  inputSize: number | null;
+  embeddingDim: number | null;
+  inputNames: string[];
+  outputNames: string[];
+};
+
 
 export type Person = {
   id: string;
@@ -842,6 +854,36 @@ export type EditRevisionSummary = {
   createdAt: string;
 };
 
+export type OptimizeBatchResult = {
+  optimized: number;
+  skipped: number;
+  failed: number;
+  bytesSaved: number;
+  items: {
+    assetId: string;
+    status: string;
+    reason: string | null;
+    bytesBefore: number;
+    bytesAfter: number;
+    bytesSaved: number;
+    newAssetId: string | null;
+  }[];
+};
+
+export type VideoEditOps = {
+  trimStart: number;
+  trimEnd: number;
+  crop?: CropRect | null;
+  accurate?: boolean;
+};
+
+export type VideoProbeInfo = {
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  ffmpegAvailable: boolean;
+};
+
 /** True when ops leave pixels unchanged (UI “edited” badge). */
 export function isIdentityEditOps(ops: EditOps): boolean {
   const rotate = ((ops.rotateDegrees % 360) + 360) % 360;
@@ -1037,6 +1079,57 @@ export const api = {
       option_id: optionId,
       reprocess,
     }),
+  evaluateLocalAutotags: (modelPath: string, labelsPath: string) =>
+    invoke<EvalReport>("evaluate_local_autotags", {
+      modelPath,
+      model_path: modelPath,
+      labelsPath,
+      labels_path: labelsPath,
+    }),
+  evaluateLocalClip: (
+    visionPath: string,
+    textPath: string,
+    tokenizerPath: string,
+  ) =>
+    invoke<EvalReport>("evaluate_local_clip", {
+      visionPath,
+      vision_path: visionPath,
+      textPath,
+      text_path: textPath,
+      tokenizerPath,
+      tokenizer_path: tokenizerPath,
+    }),
+  importLocalAutotags: (
+    modelPath: string,
+    labelsPath: string,
+    name?: string | null,
+    activate = true,
+  ) =>
+    invoke<LibraryOptionStatus>("import_local_autotags", {
+      modelPath,
+      model_path: modelPath,
+      labelsPath,
+      labels_path: labelsPath,
+      name: name ?? null,
+      activate,
+    }),
+  importLocalClip: (
+    visionPath: string,
+    textPath: string,
+    tokenizerPath: string,
+    name?: string | null,
+    activate = true,
+  ) =>
+    invoke<LibraryOptionStatus>("import_local_clip", {
+      visionPath,
+      vision_path: visionPath,
+      textPath,
+      text_path: textPath,
+      tokenizerPath,
+      tokenizer_path: tokenizerPath,
+      name: name ?? null,
+      activate,
+    }),
   listPeople: () => invoke<Person[]>("list_people"),
   listIgnoredPeople: () => invoke<Person[]>("list_ignored_people"),
   setPersonIgnored: (personId: string, ignored: boolean) =>
@@ -1140,6 +1233,20 @@ export const api = {
     }),
   exportAssetsZip: (ids: string[], dest: string) =>
     invoke<ExportResult>("export_assets_zip", { ids, dest }),
+  optimizeAssets: (ids: string[], mode: EditSaveMode) =>
+    invoke<OptimizeBatchResult>("optimize_assets", { ids, mode }),
+  probeVideoAsset: (assetId: string) =>
+    invoke<VideoProbeInfo>("probe_video_asset", {
+      assetId,
+      asset_id: assetId,
+    }),
+  applyVideoEdit: (assetId: string, ops: VideoEditOps, mode: EditSaveMode) =>
+    invoke<EditResult>("apply_video_edit", {
+      assetId,
+      asset_id: assetId,
+      ops,
+      mode,
+    }),
   applyImageEdit: (assetId: string, ops: EditOps, mode: EditSaveMode) =>
     invoke<EditResult>("apply_image_edit", {
       assetId,

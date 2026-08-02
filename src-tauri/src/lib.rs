@@ -20,6 +20,7 @@ mod memories;
 mod ml;
 mod models;
 mod ocr;
+mod optimize;
 mod places;
 mod plugins;
 mod preferences;
@@ -332,6 +333,10 @@ pub fn run() {
             model_library,
             install_model_option,
             set_active_model,
+            evaluate_local_autotags,
+            evaluate_local_clip,
+            import_local_autotags,
+            import_local_clip,
             reprocess_ai,
             list_people,
             list_ignored_people,
@@ -368,6 +373,9 @@ pub fn run() {
             empty_trash,
             permanently_delete_assets,
             export_assets_zip,
+            optimize_assets,
+            probe_video_asset,
+            apply_video_edit,
             apply_image_edit,
             save_edit_ops,
             get_edit_ops,

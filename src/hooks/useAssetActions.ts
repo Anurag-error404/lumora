@@ -453,6 +453,43 @@ export function useAssetActions({
     }
   }
 
+  async function optimizeSelected() {
+    if (!selectedIds.length) return;
+    const asCopy = window.confirm(
+      `Lossless-optimize ${selectedIds.length} item(s)?\n\n` +
+        `OK = replace originals when smaller\n` +
+        `Cancel = choose save-as-copies instead, or abort`,
+    );
+    let mode: "replace" | "copy" = "replace";
+    if (!asCopy) {
+      const copies = window.confirm(
+        "Save optimized copies beside the originals instead?\n\nOK = copies · Cancel = abort",
+      );
+      if (!copies) return;
+      mode = "copy";
+    } else {
+      const ok = window.confirm(
+        "Replace originals only when the optimized file is smaller. Continue?",
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.optimizeAssets(selectedIds, mode);
+      const mb = (result.bytesSaved / (1024 * 1024)).toFixed(2);
+      setError(
+        `Optimized ${result.optimized} · skipped ${result.skipped} · failed ${result.failed} · saved ${mb} MB`,
+      );
+      await refreshHistory();
+      await loadAssets();
+      await refreshStats();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function undo() {
     const ok = await api.undoLast();
     if (!ok) {
@@ -492,6 +529,7 @@ export function useAssetActions({
     openExportInFolder,
     openLocalPath,
     exportSelectedZip,
+    optimizeSelected,
     undo,
     redo,
   };

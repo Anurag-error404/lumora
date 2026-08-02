@@ -126,7 +126,7 @@ impl EmbedWorker {
             paused: self.paused.load(Ordering::Relaxed),
             last_path: self.last_path.lock().clone(),
             last_error: runtime_error.or(failures.last_error),
-            model_ready: ml::semantic_ready(&conn)?,
+            model_ready: ml::semantic_ready_for(&conn, Some(&self.app_data))?,
         })
     }
 
@@ -209,10 +209,10 @@ impl EmbedWorker {
         }
 
         let conn = open_db(&self.db_path)?;
-        if !ml::semantic_ready(&conn)? {
+        if !ml::semantic_ready_for(&conn, Some(&self.app_data))? {
             return Ok(None);
         }
-        let paths = semantic::model_paths(&conn)?;
+        let paths = semantic::model_paths_for(&conn, Some(&self.app_data))?;
         tracing::info!("loading CLIP engine for background embedding");
         let engine = Arc::new(ClipEngine::load(&paths)?);
         *self.engine.lock() = Some(Arc::clone(&engine));

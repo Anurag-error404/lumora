@@ -220,14 +220,26 @@ impl TagsWorker {
         }
 
         let conn = open_db(&self.db_path)?;
-        let opt = tags::active_option(&self.app_data);
-        let bundle = opt.bundle.unwrap_or(crate::ml::catalog::TAGS_BUNDLE);
-        if !tags::tags_ready_bundle(&conn, bundle)? {
-            return Ok(None);
-        }
-        let input_size = opt.input_size.unwrap_or(224);
-        let paths = tags::model_paths_for(&conn, bundle, input_size)?;
-        tracing::info!(bundle, input_size, "loading MobileNetV4 for auto-tags");
+        let preferred = tags::active_tags_model_id(&self.app_data);
+        let paths = if crate::ml::user::is_user_option_id(&preferred) {
+            let Some(uopt) = crate::ml::user::get(&conn, &preferred)? else {
+                return Ok(None);
+            };
+            crate::ml::user::tags_paths(&uopt)?
+        } else {
+            let opt = tags::active_option(&self.app_data);
+            let bundle = opt.bundle.unwrap_or(crate::ml::catalog::TAGS_BUNDLE);
+            if !tags::tags_ready_bundle(&conn, bundle)? {
+                return Ok(None);
+            }
+            let input_size = opt.input_size.unwrap_or(224);
+            tags::model_paths_for(&conn, bundle, input_size)?
+        };
+        tracing::info!(
+            model = preferred.as_str(),
+            input_size = paths.input_size,
+            "loading auto-tags classifier"
+        );
         let engine = Arc::new(TagsEngine::load(&paths)?);
         *self.engine.lock() = Some(Arc::clone(&engine));
         Ok(Some(engine))

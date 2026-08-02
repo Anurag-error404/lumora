@@ -2890,6 +2890,19 @@ button .nav-icon {
   display: flex;
   gap: 0.35rem;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.viewer-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-right: 0.25rem;
+}
+
+.viewer-zoom-pct {
+  min-width: 3.25rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .viewer-icon-btn {
@@ -2940,8 +2953,29 @@ button .nav-icon {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  touch-action: none;
 }
 
+.viewer-stage.is-zoomed {
+  cursor: grab;
+}
+
+.viewer-stage.is-zoomed:active {
+  cursor: grabbing;
+}
+
+.viewer-zoom-layer {
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.viewer-zoom-layer img,
+.viewer-zoom-layer .viewer-video,
 .viewer-stage img,
 .viewer-video {
   max-width: 100%;
@@ -2950,6 +2984,13 @@ button .nav-icon {
   height: auto;
   object-fit: contain;
   display: block;
+}
+
+.viewer-zoom-layer img,
+.viewer-zoom-layer .viewer-video {
+  /* Layer already constrains size; keep media from escaping fit box. */
+  max-width: min(100vw, 100%);
+  max-height: min(100vh, 100%);
 }
 
 .viewer-video {
@@ -3406,6 +3447,266 @@ button .nav-icon {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.video-editor-controls {
+  grid-template-columns: 1fr;
+  align-items: start;
+  justify-items: center;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.video-editor-trim-section {
+  width: 100%;
+  max-width: min(820px, 100%);
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.video-editor-trim-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.video-editor-trim-head h3 {
+  margin: 0;
+}
+
+.video-editor-trim-head button {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.video-editor .image-editor-preview video,
+.video-editor .viewer-video {
+  display: block;
+  max-width: min(70vw, 820px);
+  max-height: min(42vh, 420px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-trim-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.video-trim-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.video-trim-meta strong {
+  font-weight: 600;
+}
+
+.video-trim-track {
+  position: relative;
+  height: 64px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #1a1c1b;
+  border: 1px solid var(--border);
+  user-select: none;
+  touch-action: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.video-trim-track.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.video-trim-filmstrip {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.video-trim-frame {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.video-trim-filmstrip-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.65);
+  background: #1a1c1b;
+}
+
+.video-trim-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(8, 10, 9, 0.62);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.video-trim-shade-left {
+  left: 0;
+}
+
+.video-trim-shade-right {
+  right: 0;
+}
+
+.video-trim-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.video-trim-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -20%);
+  background: #fff;
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.video-trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border-top: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  cursor: grab;
+}
+
+.video-trim-selection:active {
+  cursor: grabbing;
+}
+
+.video-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--accent);
+  color: transparent;
+  min-height: 0;
+  width: 14px;
+  cursor: ew-resize;
+  z-index: 3;
+}
+
+.video-trim-handle:hover:not(:disabled),
+.video-trim-handle:focus-visible {
+  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  outline: none;
+  box-shadow: none;
+}
+
+.video-trim-handle-start {
+  left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.video-trim-handle-end {
+  right: 0;
+  border-radius: 0 3px 3px 0;
+}
+
+.video-trim-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 1px;
+  box-shadow: 3px 0 0 rgba(255, 255, 255, 0.9);
+}
+
+.video-editor-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.video-editor-check input {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.video-editor-check:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.video-editor-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.image-editor-actions {
+  align-items: center;
+}
+
+.image-editor-actions button {
+  flex: 0 0 auto;
+  align-self: center;
+  height: auto;
+  min-height: 2.25rem;
+  padding: 0.45rem 1rem;
+  white-space: nowrap;
 }
 
 .image-editor-slider input[type="range"] {
@@ -4746,8 +5047,16 @@ button .nav-icon {
   margin-top: 1.25rem;
 }
 
+.model-library-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
 .model-library-group h4 {
-  margin: 0 0 0.65rem;
+  margin: 0;
   font-size: 0.95rem;
 }
 
