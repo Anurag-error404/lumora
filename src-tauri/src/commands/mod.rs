@@ -1532,7 +1532,7 @@ pub fn pause_embedding(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
-/// Download the RapidOCR PP-OCRv4 bundle (det + rec + dict).
+/// Download the active/default OCR bundle (PaddleOCR PP-OCRv5 mobile).
 #[tauri::command]
 pub async fn install_ocr_models(app: AppHandle) -> AppResult<ml::MlStatus> {
     let (db_path, models_dir, app_data) = {

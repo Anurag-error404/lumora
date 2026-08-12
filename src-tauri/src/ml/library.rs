@@ -7,7 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::catalog::{
-    CAPTIONS_BUNDLE, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, PROSE_BUNDLE,
+    CAPTIONS_BUNDLE, FACES_BUNDLE, FACES_BUNDLE_S, OCR_BUNDLE, OCR_BUNDLE_V3, OCR_BUNDLE_V4,
+    OCR_BUNDLE_V6, PROSE_BUNDLE,
     SEMANTIC_BUNDLE, TAGS_BUNDLE, TAGS_BUNDLE_MEDIUM,
 };
 
@@ -106,15 +107,37 @@ pub const LIBRARY: &[ModelOption] = &[
         default: true,
     },
     ModelOption {
-        id: "rapidocr-ppv4",
+        id: "paddleocr-ppv5",
         capability: Capability::Ocr,
         bundle: Some(OCR_BUNDLE),
-        name: "RapidOCR PP-OCRv4",
-        summary: "Current default. Strong general OCR on screenshots and documents.",
+        name: "PaddleOCR PP-OCRv5",
+        summary: "Default. Official PaddleOCR mobile ONNX — stronger multilingual OCR than v4.",
         runtime: RuntimeKind::Onnx,
         license: "Apache-2.0",
         input_size: None,
         default: true,
+    },
+    ModelOption {
+        id: "paddleocr-ppv6-small",
+        capability: Capability::Ocr,
+        bundle: Some(OCR_BUNDLE_V6),
+        name: "PaddleOCR PP-OCRv6 Small",
+        summary: "Newest PaddleOCR small tier. Higher accuracy; larger download than v5.",
+        runtime: RuntimeKind::Onnx,
+        license: "Apache-2.0",
+        input_size: None,
+        default: false,
+    },
+    ModelOption {
+        id: "rapidocr-ppv4",
+        capability: Capability::Ocr,
+        bundle: Some(OCR_BUNDLE_V4),
+        name: "RapidOCR PP-OCRv4",
+        summary: "Previous default. Solid general OCR; smaller than v5/v6.",
+        runtime: RuntimeKind::Onnx,
+        license: "Apache-2.0",
+        input_size: None,
+        default: false,
     },
     ModelOption {
         id: "rapidocr-ppv3",
@@ -276,7 +299,8 @@ mod tests {
     #[test]
     fn faces_and_ocr_and_tags_have_alternates() {
         assert!(options_for(Capability::Faces).count() >= 2);
-        assert!(options_for(Capability::Ocr).count() >= 2);
+        assert!(options_for(Capability::Ocr).count() >= 4);
         assert!(options_for(Capability::AutoTags).count() >= 2);
+        assert_eq!(default_option(Capability::Ocr).id, "paddleocr-ppv5");
     }
 }

@@ -4151,6 +4151,10 @@ button .nav-icon {
 .memory-cover-open {
   display: flex;
   flex-direction: column;
+  /* The UA stylesheet centres a button's flex items, which sizes the text block
+     to its own content instead of the card, so long titles spill over the
+     neighbouring card. */
+  align-items: stretch;
   gap: 0.55rem;
   width: 100%;
   min-width: 0;
@@ -4234,13 +4238,16 @@ button .nav-icon {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  min-width: 0;
 }
 
 .person-cover-open {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 0.55rem;
   width: 100%;
+  min-width: 0;
   padding: 0;
   border: none;
   background: transparent;

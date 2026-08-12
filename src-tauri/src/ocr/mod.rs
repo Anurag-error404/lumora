@@ -1,7 +1,13 @@
-//! On-device OCR: RapidOCR PP-OCRv4 via ONNX Runtime.
+//! On-device OCR: PaddleOCR / RapidOCR PP-OCR via ONNX Runtime.
 //!
 //! Detects text boxes, recognizes each line, stores the joined text in
 //! `asset_text`, and refreshes FTS so plain search finds OCR words.
+//!
+//! Default backend is official PaddleOCR PP-OCRv5 mobile. Older RapidOCR
+//! PP-OCRv3/v4 and newer PP-OCRv6 small remain selectable in the model library.
+//!
+//! Baidu Unlimited-OCR (VLM / PyTorch / vLLM) is intentionally not wired in —
+//! it does not fit the local ONNX Runtime pipeline.
 
 pub mod engine;
 pub mod worker;
@@ -42,7 +48,7 @@ pub struct OcrCoverage {
 pub fn active_bundle(app_data: &std::path::Path) -> String {
     let preferred = crate::preferences::load(app_data)
         .map(|p| p.ai.ocr_model)
-        .unwrap_or_else(|_| "rapidocr-ppv4".into());
+        .unwrap_or_else(|_| "paddleocr-ppv5".into());
     let opt = ml::library::resolve_active(ml::library::Capability::Ocr, &preferred);
     opt.bundle.unwrap_or(ml::catalog::OCR_BUNDLE).to_string()
 }

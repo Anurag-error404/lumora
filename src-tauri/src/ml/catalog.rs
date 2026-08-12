@@ -98,8 +98,11 @@ pub struct CatalogEntry {
 /// 512-dimensional shared image/text space, MIT licensed.
 pub const SEMANTIC_BUNDLE: &str = "clip-vit-b32";
 
-/// On-device OCR bundle: RapidOCR's PP-OCRv4 mobile det+rec + charset.
-pub const OCR_BUNDLE: &str = "rapidocr-ppv4";
+/// Default on-device OCR: official PaddleOCR PP-OCRv5 mobile det+rec + charset.
+pub const OCR_BUNDLE: &str = "paddleocr-ppv5";
+
+/// RapidOCR PP-OCRv4 mobile (previous default).
+pub const OCR_BUNDLE_V4: &str = "rapidocr-ppv4";
 
 /// On-device faces bundle: InsightFace buffalo_l (SCRFD-10G + ArcFace w600k_r50).
 /// Non-commercial research licence — see InsightFace model zoo.
@@ -119,6 +122,17 @@ pub const FACES_BUNDLE_S: &str = "insightface-buffalo-s";
 
 /// RapidOCR PP-OCRv3 mobile (smaller than v4).
 pub const OCR_BUNDLE_V3: &str = "rapidocr-ppv3";
+
+/// PaddleOCR PP-OCRv6 small — higher accuracy, larger download.
+pub const OCR_BUNDLE_V6: &str = "paddleocr-ppv6-small";
+
+/// True when `bundle` is any known OCR det+rec pack.
+pub fn is_ocr_bundle(bundle: &str) -> bool {
+    matches!(
+        bundle,
+        OCR_BUNDLE | OCR_BUNDLE_V3 | OCR_BUNDLE_V4 | OCR_BUNDLE_V6
+    )
+}
 
 /// ImageNet auto-tags: MobileNetV4-Conv-Medium at 256².
 pub const TAGS_BUNDLE_MEDIUM: &str = "mobilenetv4-medium-in1k";
@@ -160,9 +174,47 @@ pub const CATALOG: &[CatalogEntry] = &[
         dim: None,
         license: "MIT",
     },
+    // —— PaddleOCR PP-OCRv5 mobile (default) ——
+    CatalogEntry {
+        id: "ocr-ppv5-det",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrDetect,
+        version: "1",
+        file_name: "PP-OCRv5_mobile_det.onnx",
+        url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/main/inference.onnx",
+        sha256: "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+        size_bytes: 4_826_518,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv5-rec",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "PP-OCRv5_mobile_rec.onnx",
+        url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx/resolve/main/inference.onnx",
+        sha256: "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092",
+        size_bytes: 16_534_782,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv5-dict",
+        bundle: OCR_BUNDLE,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ppocr_keys_v5.txt",
+        url: "embedded://ppocr_keys_v5.txt",
+        sha256: "e5f8ca61ba03d3a247d06b013119982fa6de2bd48a846018b67bca57ffc56de1",
+        size_bytes: 74_014,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    // —— RapidOCR PP-OCRv4 (previous default) ——
     CatalogEntry {
         id: "ocr-ppv4-det",
-        bundle: OCR_BUNDLE,
+        bundle: OCR_BUNDLE_V4,
         kind: ModelKind::OcrDetect,
         version: "1",
         file_name: "ch_PP-OCRv4_det_infer.onnx",
@@ -174,7 +226,7 @@ pub const CATALOG: &[CatalogEntry] = &[
     },
     CatalogEntry {
         id: "ocr-ppv4-rec",
-        bundle: OCR_BUNDLE,
+        bundle: OCR_BUNDLE_V4,
         kind: ModelKind::OcrRecognize,
         version: "1",
         file_name: "ch_PP-OCRv4_rec_infer.onnx",
@@ -186,13 +238,50 @@ pub const CATALOG: &[CatalogEntry] = &[
     },
     CatalogEntry {
         id: "ocr-ppv4-dict",
-        bundle: OCR_BUNDLE,
+        bundle: OCR_BUNDLE_V4,
         kind: ModelKind::OcrRecognize,
         version: "1",
         file_name: "ppocr_keys_v1.txt",
         url: "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/release/2.7/ppocr/utils/ppocr_keys_v1.txt",
         sha256: "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7",
         size_bytes: 26_249,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    // —— PaddleOCR PP-OCRv6 small ——
+    CatalogEntry {
+        id: "ocr-ppv6-det",
+        bundle: OCR_BUNDLE_V6,
+        kind: ModelKind::OcrDetect,
+        version: "1",
+        file_name: "PP-OCRv6_small_det.onnx",
+        url: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/main/inference.onnx",
+        sha256: "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+        size_bytes: 9_880_512,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv6-rec",
+        bundle: OCR_BUNDLE_V6,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "PP-OCRv6_small_rec.onnx",
+        url: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/main/inference.onnx",
+        sha256: "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+        size_bytes: 21_159_378,
+        dim: None,
+        license: "Apache-2.0",
+    },
+    CatalogEntry {
+        id: "ocr-ppv6-dict",
+        bundle: OCR_BUNDLE_V6,
+        kind: ModelKind::OcrRecognize,
+        version: "1",
+        file_name: "ppocr_keys_v6.txt",
+        url: "embedded://ppocr_keys_v6.txt",
+        sha256: "d051391881962ec266c4b4ee7b6a493fa2aeabaa2cd9ee369148cf3f6980af99",
+        size_bytes: 74_949,
         dim: None,
         license: "Apache-2.0",
     },
@@ -508,8 +597,8 @@ mod tests {
         assert_eq!(entries.len(), 3);
         assert!(entries.iter().any(|e| e.kind == ModelKind::OcrDetect));
         assert!(entries.iter().any(|e| e.file_name.ends_with(".txt")));
-        assert!(bundle_size(OCR_BUNDLE) > 10_000_000);
-        assert!(bundle_size(OCR_BUNDLE) < 20_000_000);
+        assert!(bundle_size(OCR_BUNDLE) > 15_000_000);
+        assert!(bundle_size(OCR_BUNDLE) < 30_000_000);
     }
 
     #[test]
@@ -544,9 +633,14 @@ mod tests {
     fn alternate_bundles_are_complete() {
         assert_eq!(bundle(FACES_BUNDLE_S).count(), 2);
         assert_eq!(bundle(OCR_BUNDLE_V3).count(), 3);
-        assert_eq!(bundle(TAGS_BUNDLE_MEDIUM).count(), 2);
+        assert_eq!(bundle(OCR_BUNDLE_V4).count(), 3);
+        assert_eq!(bundle(OCR_BUNDLE_V6).count(), 3);
         assert!(bundle_size(FACES_BUNDLE_S) < 20_000_000);
         assert!(bundle_size(TAGS_BUNDLE_MEDIUM) > 30_000_000);
+        assert!(bundle_size(OCR_BUNDLE_V6) > 25_000_000);
+        assert!(is_ocr_bundle(OCR_BUNDLE));
+        assert!(is_ocr_bundle(OCR_BUNDLE_V6));
+        assert!(!is_ocr_bundle(FACES_BUNDLE));
     }
 
     #[test]

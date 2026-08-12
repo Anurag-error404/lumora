@@ -11,7 +11,6 @@ Marketing assets used by the [README](../../README.md) and site pages.
 | `search-bird-on-tree.png` | Semantic search — “Bird on tree” |
 | `search-nature-sunset.png` | Semantic search — “nature sunset” |
 | `info-panel.png` | Viewer details panel — auto-tags + on-device caption |
-| `memories.png` | Memories (auto-generated trips / on this day) |
 | `duplicates.png` | Duplicate & blurry cleanup |
 | `places.png` | Offline Places map |
 | `timeline.png` | Timeline by capture date |

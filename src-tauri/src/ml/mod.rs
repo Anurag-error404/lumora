@@ -443,6 +443,8 @@ pub fn download_and_install(
             "imagenet_labels.txt" => {
                 include_bytes!("../../resources/imagenet_labels.txt")
             }
+            "ppocr_keys_v5.txt" => include_bytes!("../../resources/ppocr_keys_v5.txt"),
+            "ppocr_keys_v6.txt" => include_bytes!("../../resources/ppocr_keys_v6.txt"),
             other => {
                 return Err(AppError::msg(format!(
                     "unknown embedded model resource '{other}' for '{}'",
@@ -572,7 +574,7 @@ pub fn remove(conn: &Connection, models_dir: &Path, id: &str) -> AppResult<()> {
             }
         }
         // Removing any OCR bundle file makes the pipeline unusable — drop text.
-        if entry.bundle == catalog::OCR_BUNDLE || entry.bundle == catalog::OCR_BUNDLE_V3 {
+        if catalog::is_ocr_bundle(entry.bundle) {
             let ids: Vec<String> = {
                 let mut stmt = conn.prepare("SELECT asset_id FROM asset_text")?;
                 let rows = stmt.query_map([], |r| r.get(0))?;

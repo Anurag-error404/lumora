@@ -72,10 +72,6 @@ Filters like `camera:iphone` and `rating>3` still work for metadata. Auto-tags a
 
 Stories assembled locally from your dates, people, and places — ranked with on-device CLIP.
 
-<p align="center">
-  <img src="docs/screenshots/memories.png" alt="Memories view with auto-generated trips and on this day stories" width="900" />
-</p>
-
 ### Duplicate & blurry cleanup
 
 Exact matches (SHA-256), near-duplicates, and blurry shots grouped for review — everything soft-trashes with undo.
@@ -166,7 +162,7 @@ Ensure `~/.cargo/bin` is on your `PATH`.
 | Capability | Default backend | Licence notes |
 | --- | --- | --- |
 | Semantic search | CLIP ViT-B/32 | MIT |
-| OCR | RapidOCR PP-OCRv4 | Apache-2.0 |
+| OCR | PaddleOCR PP-OCRv5 (default) · PP-OCRv6 / RapidOCR v4/v3 | Apache-2.0 |
 | Faces / People | InsightFace buffalo_l | Non-commercial research |
 | Auto-tags | MobileNetV4 | Apache-2.0 |
 | Image captions | Florence-2 Base | MIT |

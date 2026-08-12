@@ -14,7 +14,7 @@ import {
 import type { PrefsUpdater } from "./settingsUi";
 
 const SEMANTIC_BUNDLE = "clip-vit-b32";
-const OCR_BUNDLE = "rapidocr-ppv4";
+const OCR_BUNDLE = "paddleocr-ppv5";
 const FACES_BUNDLE = "insightface-buffalo-l";
 const TAGS_BUNDLE = "mobilenetv4-in1k";
 const CAPTIONS_BUNDLE = "florence-2-base-ft";
@@ -693,7 +693,7 @@ export function AiModelsPanel({ updatePrefs }: { updatePrefs: PrefsUpdater }) {
           modelLabel="Text recognition (OCR)"
           modelName={
             ocrReady
-              ? "RapidOCR PP-OCRv4"
+              ? "PaddleOCR PP-OCRv5"
               : formatBytes(status?.ocrDownloadBytes ?? 0)
           }
           license="Apache-2.0"

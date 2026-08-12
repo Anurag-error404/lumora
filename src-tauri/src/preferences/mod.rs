@@ -172,7 +172,7 @@ fn default_semantic_model() -> String {
     "clip-vit-b32".into()
 }
 fn default_ocr_model() -> String {
-    "rapidocr-ppv4".into()
+    "paddleocr-ppv5".into()
 }
 fn default_faces_model() -> String {
     "insightface-buffalo-l".into()
