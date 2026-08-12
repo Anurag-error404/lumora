@@ -1,6 +1,6 @@
 [package]
 name = "photovault-ai"
-version = "0.10.0"
+version = "0.11.0"
 description = "Local-first photo & video library manager"
 authors = ["you"]
 edition = "2021"
