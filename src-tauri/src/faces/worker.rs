@@ -221,7 +221,10 @@ impl FaceWorker {
         prefs: &preferences::Preferences,
     ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
-        let pending = faces::pending_assets(&conn, BATCH)?;
+        let pending = faces::pending_assets(
+            &conn,
+            prefs_runtime::scaled_batch(BATCH, &prefs.performance),
+        )?;
         if pending.is_empty() {
             return Ok(0);
         }
@@ -255,14 +258,18 @@ impl FaceWorker {
                     let _ = faces::mark_job(&conn, &id, "failed", Some(&e.to_string()));
                 }
             }
-            thread::sleep(Duration::from_millis(
-                prefs_runtime::throttle(&prefs.performance).between_ms,
-            ));
         }
         if done > 0 {
             if let Err(e) = faces::cluster::consolidate_similar_people(&conn) {
                 tracing::debug!(error = %e, "face consolidate skipped");
             }
+            // Face crops share disk with thumbs; trim oldest when over budget.
+            let budget = prefs
+                .performance
+                .thumbnail_cache_mb
+                .saturating_div(2)
+                .max(256);
+            crate::thumbnails::enforce_cache_budget(&self.faces_dir, budget);
         }
         Ok(done)
     }

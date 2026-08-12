@@ -159,6 +159,10 @@ fn spawn_wal_checkpoint(db_path: std::path::PathBuf) {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "wal checkpoint skipped"),
         }
+        // Same idle tick: drop rotated logs older than a week.
+        if let Some(parent) = db_path.parent() {
+            crate::logging::prune_old_logs(&parent.join("logs"), 7);
+        }
     });
 }
 

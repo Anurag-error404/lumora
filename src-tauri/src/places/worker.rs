@@ -128,7 +128,10 @@ impl PlacesWorker {
 
     fn drain_batch(&self, prefs: &preferences::Preferences) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
-        let pending = places::pending_assets(&conn, BATCH)?;
+        let pending = places::pending_assets(
+            &conn,
+            prefs_runtime::scaled_batch(BATCH, &prefs.performance),
+        )?;
         if pending.is_empty() {
             return Ok(0);
         }
@@ -162,7 +165,7 @@ impl PlacesWorker {
                     } else {
                         if prefs.ai.auto_albums {
                             if let Some(label) = label.as_deref() {
-                                albums::ensure_named_album_with_asset(&conn, label, &id)?;
+                                let _ = albums::ensure_named_album_with_asset(&conn, label, &id);
                             }
                         }
                         done += 1;
@@ -174,9 +177,6 @@ impl PlacesWorker {
                     done += 1;
                 }
             }
-            thread::sleep(Duration::from_millis(
-                prefs_runtime::throttle(&prefs.performance).between_ms,
-            ));
         }
         Ok(done)
     }

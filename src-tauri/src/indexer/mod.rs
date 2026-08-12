@@ -587,7 +587,7 @@ fn fill_external_image_meta(
         } else {
             match write_thumb(path, &dest, thumbnails::THUMB_MAX_EDGE) {
                 Ok(()) => {
-                    thumbnails::enforce_cache_budget(thumbs_dir, options.thumbnail_cache_mb);
+                    thumbnails::note_thumb_written(thumbs_dir, options.thumbnail_cache_mb);
                     true
                 }
                 Err(e) => {
@@ -728,7 +728,7 @@ fn read_media_meta(
                         .is_ok()
                         {
                             meta.thumbnail_path = Some(dest);
-                            thumbnails::enforce_cache_budget(
+                            thumbnails::note_thumb_written(
                                 thumbs_dir,
                                 options.thumbnail_cache_mb,
                             );

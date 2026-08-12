@@ -39,7 +39,7 @@ export const MONTHS = [
   "Dec",
 ];
 
-export const PAGE_SIZE = 500;
+export const PAGE_SIZE = 150;
 
 export const LABEL_COLORS = [
   { id: "red", hex: "#ea4335" },

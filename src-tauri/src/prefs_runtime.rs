@@ -78,7 +78,6 @@ pub struct Throttle {
     /// Suggested ONNX intra-op threads.
     pub intra_threads: usize,
     /// Suggested batch size multiplier vs the worker default (1 = default).
-    #[allow(dead_code)]
     pub batch_scale: f32,
 }
 
@@ -104,6 +103,12 @@ pub fn throttle(perf: &PerformancePrefs) -> Throttle {
             batch_scale: 1.0,
         },
     }
+}
+
+/// Scale a worker's base batch by the CPU profile (eco smaller, aggressive larger).
+pub fn scaled_batch(base: u32, perf: &PerformancePrefs) -> u32 {
+    let scaled = (base as f32) * throttle(perf).batch_scale;
+    scaled.round().clamp(1.0, 64.0) as u32
 }
 
 /// Resolve intra-op threads from device preference + CPU profile.
@@ -296,5 +301,19 @@ mod tests {
         mark_process_start();
         assert!(!past_ml_cold_start(60));
         assert!(past_ml_cold_start(0));
+    }
+
+    #[test]
+    fn scaled_batch_honours_cpu_profile() {
+        let mut eco = Preferences::default();
+        eco.performance.cpu_profile = "eco".into();
+        assert_eq!(scaled_batch(8, &eco.performance), 4);
+
+        let mut agressive = Preferences::default();
+        agressive.performance.cpu_profile = "aggressive".into();
+        assert_eq!(scaled_batch(8, &agressive.performance), 12);
+
+        let balanced = Preferences::default();
+        assert_eq!(scaled_batch(8, &balanced.performance), 8);
     }
 }

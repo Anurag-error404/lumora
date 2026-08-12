@@ -244,7 +244,8 @@ impl EmbedWorker {
         prefs: &preferences::Preferences,
     ) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
-        let pending = semantic::pending_assets(&conn, BATCH)?;
+        let batch = prefs_runtime::scaled_batch(BATCH, &prefs.performance);
+        let pending = semantic::pending_assets(&conn, batch)?;
         if pending.is_empty() {
             return Ok(0);
         }
@@ -289,9 +290,6 @@ impl EmbedWorker {
                     );
                 }
             }
-            thread::sleep(Duration::from_millis(
-                prefs_runtime::throttle(&prefs.performance).between_ms,
-            ));
         }
         Ok(done)
     }

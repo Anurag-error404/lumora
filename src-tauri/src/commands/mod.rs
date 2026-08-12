@@ -231,8 +231,12 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
     // New photos can form new memories; the builder regroups them off the UI path.
     memories::cache::mark_dirty();
 
-    // Newly imported photos may need CLIP embeddings / OCR / faces / places / tags.
     if let Some(state) = app.try_state::<AppState>() {
+        let prefs = preferences::load(&state.paths.app_data).unwrap_or_default();
+        thumbnails::flush_cache_budget(
+            &state.paths.thumbs_dir,
+            prefs.performance.thumbnail_cache_mb,
+        );
         state.embedder.kick();
         state.ocr.kick();
         state.faces.kick();

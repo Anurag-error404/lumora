@@ -165,7 +165,10 @@ impl CaptionsWorker {
 
     fn drain_batch(&self, engine: &CaptionsEngine, prefs: &preferences::Preferences) -> AppResult<usize> {
         let conn = open_db(&self.db_path)?;
-        let pending = captions::pending_assets(&conn, BATCH)?;
+        let pending = captions::pending_assets(
+            &conn,
+            prefs_runtime::scaled_batch(BATCH, &prefs.performance),
+        )?;
         if pending.is_empty() { return Ok(0); }
         self.running.store(true, Ordering::Relaxed);
         let mut done = 0;
@@ -179,7 +182,6 @@ impl CaptionsWorker {
                 },
                 Err(e) => { tracing::debug!(asset=%id, error=%e, "caption skipped"); *self.last_error.lock() = Some(format!("{path}: {e}")); let _ = captions::mark_job(&conn, &id, "failed", Some(&e.to_string())); }
             }
-            thread::sleep(Duration::from_millis(prefs_runtime::throttle(&prefs.performance).between_ms));
         }
         Ok(done)
     }

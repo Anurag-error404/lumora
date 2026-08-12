@@ -293,6 +293,27 @@ pub fn enforce_cache_budget(thumbs_dir: &Path, budget_mb: u32) {
     }
 }
 
+/// How many new thumbs since the last full WalkDir. Import writes hundreds of
+/// thumbs; walking the cache after each one dominated scan time.
+static THUMBS_SINCE_ENFORCE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+const ENFORCE_EVERY_N_THUMBS: u32 = 64;
+
+/// Record a newly written thumb; WalkDir only every [`ENFORCE_EVERY_N_THUMBS`].
+pub fn note_thumb_written(thumbs_dir: &Path, budget_mb: u32) {
+    let n = THUMBS_SINCE_ENFORCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n >= ENFORCE_EVERY_N_THUMBS {
+        flush_cache_budget(thumbs_dir, budget_mb);
+    }
+}
+
+/// Force a budget pass (call at end of import / explicit cache clear).
+pub fn flush_cache_budget(thumbs_dir: &Path, budget_mb: u32) {
+    THUMBS_SINCE_ENFORCE.store(0, std::sync::atomic::Ordering::Relaxed);
+    enforce_cache_budget(thumbs_dir, budget_mb);
+}
+
 /// Encode a thumbnail entirely in memory. Used by the privacy vault, where
 /// writing a plaintext preview to the thumbnail cache would defeat the point.
 pub fn thumbnail_bytes(source: &Path) -> AppResult<Vec<u8>> {
