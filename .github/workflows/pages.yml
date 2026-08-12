@@ -81,8 +81,17 @@ jobs:
             lumora-icon-tp.png \
             .nojekyll \
             _site/
-          cp -R docs/screenshots _site/docs/screenshots
+          mkdir -p _site/docs/screenshots
+          cp docs/screenshots/*.webp _site/docs/screenshots/
           cp -R blog/. _site/blog/
+
+      - name: Check referenced screenshots exist
+        run: |
+          missing=0
+          for ref in $(grep -rhoE 'docs/screenshots/[A-Za-z0-9_.-]+\.(webp|png|gif)' _site --include='*.html' --include='*.js' | sort -u); do
+            [ -f "_site/$ref" ] || { echo "missing asset: $ref"; missing=1; }
+          done
+          exit $missing
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

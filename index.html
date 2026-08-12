@@ -84,8 +84,10 @@
               rel="noopener noreferrer"
               >View on GitHub</a
             >
-            <a class="btn btn-ghost" href="guide.html">Read Documentation</a>
           </div>
+          <p class="hero-aside">
+            <a href="guide.html">Read the documentation →</a>
+          </p>
           <ul class="proof-strip" id="github-proof" aria-label="GitHub stats">
             <li>
               <a
@@ -121,14 +123,15 @@
         <div class="hero-stage hero-shot-stage">
           <img
             class="hero-shot-img"
-            src="docs/screenshots/search-black-dog.png"
+            data-hero-img
+            src="docs/screenshots/hero_search_black_dog.webp"
             width="1440"
             height="900"
-            alt="LUMORA search results for a natural-language query across a local photo grid"
+            alt="LUMORA search results for “black dog” — a grid of dog photos from a local library"
           />
           <div class="hero-veil"></div>
           <p class="hero-query-caption">
-            Example search: <em>golden retriever at the beach</em>
+            Search results for <em data-hero-query>black dog</em>
           </p>
         </div>
       </section>
@@ -152,13 +155,13 @@
           <ol class="demo-flow">
             <li>Import Folder</li>
             <li>Index Photos</li>
-            <li>Search: <code>family vacation beach</code></li>
+            <li>Search: <code>mountain hike</code></li>
             <li>Results Instantly Appear</li>
           </ol>
           <div class="demo-stage" data-demo-stage>
             <img
               data-demo-img
-              src="docs/screenshots/home.png"
+              src="docs/screenshots/home.webp"
               width="1200"
               height="750"
               alt="LUMORA home library grid"
@@ -216,7 +219,7 @@
           </div>
           <figure class="memories-pitch-visual">
             <img
-              src="docs/screenshots/timeline.png"
+              src="docs/screenshots/timeline.webp"
               width="1200"
               height="750"
               alt="LUMORA timeline browsing photos by capture date"
@@ -229,44 +232,44 @@
         <header class="section-head">
           <h2 id="playground-heading">Try a search</h2>
           <p>
-            Click an example. See how natural-language search looks in LUMORA —
-            screenshots from a real local library.
+            Click an example. Every result below is a real screenshot of that
+            exact query running against a local library.
           </p>
         </header>
         <div class="playground-panel reveal">
           <div class="playground-chips" role="group" aria-label="Example searches">
-            <button type="button" class="play-chip is-active" data-query="dog on a beach" data-img="docs/screenshots/search-black-dog.png">
-              dog on a beach
+            <button type="button" class="play-chip is-active" data-query="black dog" data-img="docs/screenshots/search-black-dog.webp">
+              black dog
             </button>
-            <button type="button" class="play-chip" data-query="family christmas" data-img="docs/screenshots/search-nature-sunset.png">
-              family christmas
+            <button type="button" class="play-chip" data-query="nature sunset" data-img="docs/screenshots/search-nature-sunset.webp">
+              nature sunset
             </button>
-            <button type="button" class="play-chip" data-query="mountain hike" data-img="docs/screenshots/search-nature-sunset.png">
+            <button type="button" class="play-chip" data-query="Bird on tree" data-img="docs/screenshots/search-bird-on-tree.webp">
+              Bird on tree
+            </button>
+            <button type="button" class="play-chip" data-query="mountain hike" data-img="docs/screenshots/search_mountain_hike.webp">
               mountain hike
             </button>
-            <button type="button" class="play-chip" data-query="receipt from 2022" data-img="docs/screenshots/info-panel.png">
-              receipt from 2022
+            <button type="button" class="play-chip" data-query="receipt from 2026" data-img="docs/screenshots/search_reciept_from_2026.webp">
+              receipt from 2026
             </button>
-            <button type="button" class="play-chip" data-query="red sports car" data-img="docs/screenshots/search-bird-on-tree.png">
-              red sports car
-            </button>
-            <button type="button" class="play-chip" data-query="birthday party" data-img="docs/screenshots/home.png">
-              birthday party
+            <button type="button" class="play-chip" data-query="sports car" data-img="docs/screenshots/search_sports_car.webp">
+              sports car
             </button>
           </div>
           <div class="playground-result">
             <p class="playground-query" aria-live="polite">
-              Search: <strong data-play-query>dog on a beach</strong>
+              Search: <strong data-play-query>black dog</strong>
             </p>
             <img
               data-play-img
-              src="docs/screenshots/search-black-dog.png"
+              src="docs/screenshots/search-black-dog.webp"
               width="1200"
               height="750"
-              alt="Example search results in LUMORA"
+              alt="LUMORA search results for “black dog”"
             />
             <p class="playground-note">
-              Illustrative screenshot — query text updates; image is the closest matching demo capture.
+              Captured on a local library with CLIP installed — no cloud query.
             </p>
           </div>
         </div>
@@ -413,7 +416,7 @@
           <div class="feature-visual reveal">
             <img
               class="shot-inline"
-              src="docs/screenshots/home.png"
+              src="docs/screenshots/home.webp"
               width="900"
               height="560"
               alt="LUMORA home library"
@@ -435,10 +438,10 @@
           <div class="feature-visual reveal">
             <img
               class="shot-inline"
-              src="docs/screenshots/search-nature-sunset.png"
+              src="docs/screenshots/search-nature-sunset.webp"
               width="900"
               height="560"
-              alt="Semantic search for nature sunset"
+              alt="LUMORA search results for “nature sunset”"
             />
           </div>
         </div>
@@ -457,7 +460,7 @@
           <div class="feature-visual reveal">
             <img
               class="shot-inline"
-              src="docs/screenshots/ai-settings.png"
+              src="docs/screenshots/ai-settings.webp"
               width="900"
               height="560"
               alt="LUMORA AI features settings"
@@ -479,7 +482,7 @@
           <div class="feature-visual reveal">
             <img
               class="shot-inline"
-              src="docs/screenshots/duplicates.png"
+              src="docs/screenshots/duplicates.webp"
               width="900"
               height="560"
               alt="Duplicate cleanup in LUMORA"
@@ -498,12 +501,14 @@
               hosted escrow.
             </p>
           </div>
-          <div class="feature-visual reveal" aria-hidden="true">
-            <div class="visual-panel visual-vault">
-              <span class="visual-label">Privacy vault</span>
-              <span class="visual-line">Argon2id · XChaCha20</span>
-              <span class="visual-line muted">Recovery code · on-device unlock</span>
-            </div>
+          <div class="feature-visual reveal">
+            <img
+              class="shot-inline"
+              src="docs/screenshots/locked_folder.webp"
+              width="900"
+              height="527"
+              alt="LUMORA Locked folder unlock screen with password and recovery code"
+            />
           </div>
         </div>
       </section>
@@ -524,7 +529,7 @@
           <div class="feature-visual reveal">
             <img
               class="shot-inline"
-              src="docs/screenshots/plugins.png"
+              src="docs/screenshots/plugins.webp"
               width="900"
               height="560"
               alt="LUMORA plugins gallery"

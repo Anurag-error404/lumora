@@ -42,7 +42,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="LUMORA home screen — local photo library with quick access and recently added" width="900" />
+  <img src="docs/screenshots/home.webp" alt="LUMORA home screen — local photo library with quick access and recently added" width="900" />
 </p>
 
 ---
@@ -56,21 +56,21 @@ Search a whole library by meaning, relive curated Memories, and clean up — all
 Type natural language — CLIP finds matching photos on-device. No cloud, no upload.
 
 <p align="center">
-  <img src="docs/screenshots/search-black-dog.png" alt="Semantic search results for “black dog”" width="900" />
+  <img src="docs/screenshots/search-black-dog.webp" alt="Semantic search results for “black dog”" width="900" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/search-bird-on-tree.png" alt="Semantic search results for “Bird on tree”" width="900" />
+  <img src="docs/screenshots/search-bird-on-tree.webp" alt="Semantic search results for “Bird on tree”" width="900" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/search-nature-sunset.png" alt="Semantic search results for “nature sunset”" width="900" />
+  <img src="docs/screenshots/search-nature-sunset.webp" alt="Semantic search results for “nature sunset”" width="900" />
 </p>
 
 Filters like `camera:iphone` and `rating>3` still work for metadata. Auto-tags and on-device captions (Florence-2) make every photo searchable — the info panel shows what the models found.
 
 <p align="center">
-  <img src="docs/screenshots/info-panel.png" alt="Media viewer with details panel showing auto-tags and an on-device caption" width="900" />
+  <img src="docs/screenshots/info-panel.webp" alt="Media viewer with details panel showing auto-tags and an on-device caption" width="900" />
 </p>
 
 ### Memories
@@ -82,7 +82,7 @@ Stories assembled locally from your dates, people, and places — ranked with on
 Exact matches (SHA-256), near-duplicates, and blurry shots grouped for review — everything soft-trashes with undo.
 
 <p align="center">
-  <img src="docs/screenshots/duplicates.png" alt="Duplicates view with exact, near, and blurry groups" width="900" />
+  <img src="docs/screenshots/duplicates.webp" alt="Duplicates view with exact, near, and blurry groups" width="900" />
 </p>
 
 ### Places (offline map)
@@ -90,7 +90,15 @@ Exact matches (SHA-256), near-duplicates, and blurry shots grouped for review �
 GPS-tagged photos grouped by location on an offline map — no coordinate or tile request leaves your machine.
 
 <p align="center">
-  <img src="docs/screenshots/places.png" alt="Places view with an offline map and location clusters" width="900" />
+  <img src="docs/screenshots/places.webp" alt="Places view with an offline map and location clusters" width="900" />
+</p>
+
+### Locked folder (encrypted vault)
+
+Move private items into an encrypted Locked folder — keys derived on-device (Argon2id + XChaCha20), unlock by password or recovery code. No cloud unlock.
+
+<p align="center">
+  <img src="docs/screenshots/locked_folder.webp" alt="LUMORA Locked folder unlock screen with password and recovery code" width="900" />
 </p>
 
 <details>
@@ -98,19 +106,19 @@ GPS-tagged photos grouped by location on an offline map — no coordinate or til
 
 **Timeline** — browse by capture date with a year/month scale.
 
-![Timeline](docs/screenshots/timeline.png)
+![Timeline](docs/screenshots/timeline.webp)
 
 **Edit photo** — rotate, crop, and exposure without touching the original until you save.
 
-![Edit photo](docs/screenshots/edit-photo.png)
+![Edit photo](docs/screenshots/edit-photo.webp)
 
 **Settings → AI** — toggle Semantic search, OCR, faces, auto-tags, captions; pick CPU/GPU.
 
-![AI settings](docs/screenshots/ai-settings.png)
+![AI settings](docs/screenshots/ai-settings.webp)
 
 **Plugins** — sandboxed JavaScript actions for your selection (no network by default).
 
-![Plugins](docs/screenshots/plugins.png)
+![Plugins](docs/screenshots/plugins.webp)
 
 </details>
 

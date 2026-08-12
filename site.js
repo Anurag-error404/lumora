@@ -20,17 +20,54 @@
     nodes.forEach((el) => observer.observe(el));
   }
 
+  // —— Hero search-result rotation ——
+  const heroImg = document.querySelector("[data-hero-img]");
+  const heroQuery = document.querySelector("[data-hero-query]");
+  const heroFrames = [
+    { src: "docs/screenshots/hero_search_black_dog.webp", query: "black dog" },
+    { src: "docs/screenshots/hero_search_sunset.webp", query: "sunset" },
+    { src: "docs/screenshots/hero_search_mountain_trail.webp", query: "mountain trail" },
+  ];
+  if (heroImg && !prefersReduced) {
+    const applyHeroFrame = (frame) => {
+      heroImg.src = frame.src;
+      heroImg.alt = `LUMORA search results for “${frame.query}” from a local photo library`;
+      if (heroQuery) heroQuery.textContent = frame.query;
+    };
+    const showHeroFrame = (frame, instant) => {
+      // Decode first so a swap never paints a half-loaded frame.
+      const next = new Image();
+      next.src = frame.src;
+      const paint = () => {
+        if (instant) return applyHeroFrame(frame);
+        heroImg.classList.add("is-swapping");
+        setTimeout(() => {
+          applyHeroFrame(frame);
+          heroImg.classList.remove("is-swapping");
+        }, 260);
+      };
+      next.decode ? next.decode().then(paint).catch(paint) : (next.onload = paint);
+    };
+    // Random start so repeat visitors don't always land on the same shot.
+    let h = Math.floor(Math.random() * heroFrames.length);
+    if (h > 0) showHeroFrame(heroFrames[h], true);
+    setInterval(() => {
+      h = (h + 1) % heroFrames.length;
+      showHeroFrame(heroFrames[h]);
+    }, 5200);
+  }
+
   // —— Product demo screenshot cycle ——
   const demoImg = document.querySelector("[data-demo-img]");
   const demoFrames = [
-    { src: "docs/screenshots/home.png", alt: "LUMORA home library grid" },
+    { src: "docs/screenshots/home.webp", alt: "LUMORA home library grid" },
     {
-      src: "docs/screenshots/search-nature-sunset.png",
-      alt: "Search results for a vacation-style query",
+      src: "docs/screenshots/search_mountain_hike.webp",
+      alt: "LUMORA search results for “mountain hike”",
     },
     {
-      src: "docs/screenshots/search-black-dog.png",
-      alt: "Natural-language search results in LUMORA",
+      src: "docs/screenshots/search-black-dog.webp",
+      alt: "LUMORA search results for “black dog”",
     },
   ];
   if (demoImg && demoFrames.length && !prefersReduced) {

@@ -49,6 +49,7 @@ body {
 
 img {
   max-width: 100%;
+  height: auto;
   display: block;
 }
 
@@ -819,12 +820,6 @@ code {
   border-left-color: var(--glow-warm);
 }
 
-.visual-vault {
-  background:
-    radial-gradient(circle at 80% 20%, rgba(232, 196, 138, 0.3), transparent 40%),
-    linear-gradient(200deg, #0e1210, #1f4f43 60%, #3d6b5c);
-}
-
 @keyframes panel-glow {
   from {
     filter: saturate(1) brightness(1);
@@ -1166,12 +1161,11 @@ code {
 /* —— Footer —— */
 
 .site-footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem 2rem;
-  padding: 2rem var(--space) 2.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  align-items: start;
+  gap: 2rem 3rem;
+  padding: clamp(3.5rem, 7vw, 5rem) var(--space) clamp(3rem, 6vw, 4.5rem);
   max-width: var(--max);
   margin: 0 auto;
   border-top: 1px solid var(--border);
@@ -1179,9 +1173,13 @@ code {
 
 .footer-brand {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.65rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.footer-brand .brand-name {
+  font-size: 1.15rem;
 }
 
 .footer-tag {
@@ -1193,7 +1191,10 @@ code {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.9rem;
-  line-height: 1.6;
+  line-height: 2.1;
+  justify-self: end;
+  text-align: right;
+  max-width: 34rem;
 }
 
 .footer-meta a {
@@ -1513,9 +1514,14 @@ code {
   }
 
   .site-footer {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .footer-meta {
+    justify-self: start;
+    text-align: left;
+    line-height: 2;
   }
 
   .guide-layout {
@@ -2041,13 +2047,46 @@ code {
 /* —— Hero screenshot —— */
 
 .hero-shot .hero-copy {
-  max-width: 36rem;
+  max-width: 34rem;
+}
+
+/* Wordmark leads; the tagline is a supporting line under it. Capped so LUMORA
+   never outgrows the 34rem copy column. */
+.hero-shot .hero-brand {
+  font-size: clamp(2.75rem, 5.5vw + 1rem, 5.25rem);
+  letter-spacing: 0.08em;
+  margin-bottom: 0.6rem;
 }
 
 .hero-shot .hero-tagline {
-  max-width: 14ch;
-  color: var(--ink);
-  font-size: clamp(1.55rem, 3.2vw + 0.7rem, 2.75rem);
+  max-width: 26ch;
+  font-size: clamp(1.05rem, 0.9vw + 0.8rem, 1.5rem);
+  font-weight: 600;
+}
+
+.hero-aside {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* Stops track the 34rem copy column but stay percentage-capped, so the veil
+   covers the headline on narrow desktops without bleaching a wide monitor. */
+.hero-shot .hero-veil {
+  background:
+    linear-gradient(
+      100deg,
+      rgba(238, 243, 240, 0.97) 0,
+      rgba(238, 243, 240, 0.95) min(30rem, 34%),
+      rgba(238, 243, 240, 0.6) min(40rem, 50%),
+      transparent min(52rem, 64%)
+    ),
+    linear-gradient(
+      0deg,
+      rgba(238, 243, 240, 0.85) 0%,
+      rgba(238, 243, 240, 0.2) 18%,
+      transparent 34%
+    );
 }
 
 .hero-shot .hero-lede {
@@ -2068,6 +2107,11 @@ code {
   height: 100%;
   object-fit: cover;
   object-position: right center;
+  transition: opacity 0.26s ease;
+}
+
+.hero-shot-img.is-swapping {
+  opacity: 0;
 }
 
 .hero-query-caption {
@@ -2640,6 +2684,7 @@ code {
   display: grid;
   gap: 1.5rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1.5rem;
 }
 
 .plugin-card {
@@ -2649,7 +2694,7 @@ code {
 }
 
 .plugin-card h3 {
-  margin: 0.85rem 0 0.35rem;
+  margin: 0 0 0.35rem;
   font-family: var(--font-display);
   font-size: 1.15rem;
 }
@@ -2666,11 +2711,6 @@ code {
   gap: 0.65rem 1rem;
   font-size: 0.92rem;
   font-weight: 600;
-}
-
-.plugin-card img {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
 }
 
 .workflow-flow {
@@ -2821,6 +2861,7 @@ code {
   }
 
   .hero-shot-stage {
+    display: block;
     position: relative;
     min-height: 42vw;
     margin-top: -1rem;
