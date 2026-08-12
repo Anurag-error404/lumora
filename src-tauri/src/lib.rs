@@ -225,13 +225,27 @@ pub fn run() {
             // claim their connections — racing them caused "database is locked".
             let repair_db = paths.db_path.clone();
             let repair_thumbs = paths.thumbs_dir.clone();
+            let repair_app_data = paths.app_data.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(2));
+                // Stay out of the way of first paint + ML cold start.
+                while !prefs_runtime::past_ml_cold_start(60) {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                let prefs = preferences::load(&repair_app_data).unwrap_or_default();
+                if !prefs_runtime::should_run_background(&prefs) {
+                    tracing::info!("thumbnail repair deferred (background AI paused)");
+                    return;
+                }
+                const STARTUP_THUMB_CAP: usize = 64;
                 for attempt in 1u32..=5 {
                     let Ok(conn) = state::open_db(&repair_db) else {
                         return;
                     };
-                    match thumbnails::repair_missing_thumbnails(&conn, &repair_thumbs) {
+                    match thumbnails::repair_missing_thumbnails_capped(
+                        &conn,
+                        &repair_thumbs,
+                        STARTUP_THUMB_CAP,
+                    ) {
                         Ok(n) if n > 0 => {
                             tracing::info!(repaired = n, "regenerated missing thumbnails");
                             break;

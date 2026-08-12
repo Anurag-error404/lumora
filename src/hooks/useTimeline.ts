@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import { api, type AssetSummary, type TimelineMonth } from "../lib/tauri";
-import { MONTHS } from "../lib/constants";
+import { MONTHS, PAGE_SIZE } from "../lib/constants";
 import type { TimelineYearGroup, View } from "../types/app";
 
 /** Timeline months, lazily loaded month assets, and infinite scroll. */
@@ -59,7 +59,7 @@ export function useTimeline({
     void Promise.all(
       missing.map(async (month) => ({
         key: timelineKey(month),
-        rows: await api.listAssetsForMonth(month.year, month.month, 5000, 0),
+        rows: await api.listAssetsForMonth(month.year, month.month, PAGE_SIZE, 0),
       })),
     )
       .then((groups) => {
@@ -176,7 +176,7 @@ export function useTimeline({
       const key = timelineKey(m);
       const rows =
         timelineAssets[key] ??
-        (await api.listAssetsForMonth(m.year, m.month, 5000, 0));
+        (await api.listAssetsForMonth(m.year, m.month, PAGE_SIZE, 0));
       setTimelineAssets((current) => ({ ...current, [key]: rows }));
       const ids = rows.map((row) => row.id);
       const monthLabel = `${MONTHS[m.month - 1]} ${m.year}`;

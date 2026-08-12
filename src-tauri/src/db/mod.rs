@@ -24,6 +24,7 @@ const MIGRATION_018: &str = include_str!("../../migrations/018_memory_prose.sql"
 const MIGRATION_019: &str = include_str!("../../migrations/019_dismissed_memories.sql");
 const MIGRATION_020: &str = include_str!("../../migrations/020_user_models.sql");
 const MIGRATION_021: &str = include_str!("../../migrations/021_memory_cache.sql");
+const MIGRATION_022: &str = include_str!("../../migrations/022_captured_date_parts.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -370,6 +371,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         tracing::info!("applied migration 021_memory_cache");
     }
 
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 22 {
+        conn.execute_batch(MIGRATION_022)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (22)", [])?;
+        tracing::info!("applied migration 022_captured_date_parts");
+    }
+
     Ok(())
 }
 
@@ -529,7 +544,7 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 21);
+        assert_eq!(version, 22);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -550,6 +565,14 @@ mod tests {
         assert!(tables.iter().any(|t| t == "ml_user_options"));
         assert!(tables.iter().any(|t| t == "memory_cards"));
         assert!(tables.iter().any(|t| t == "memory_cache_state"));
+        let has_ym: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('assets') WHERE name = 'captured_ym'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_ym, 1);
 
         let has_blur_score: i64 = conn
             .query_row(
@@ -565,6 +588,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 21);
+        assert_eq!(version2, 22);
     }
 }

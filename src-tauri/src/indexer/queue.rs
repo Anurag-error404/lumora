@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -20,7 +21,7 @@ pub enum IndexJob {
 }
 
 pub struct IndexerQueue {
-    queue: Mutex<Vec<IndexJob>>,
+    queue: Mutex<VecDeque<IndexJob>>,
     processed: AtomicU64,
     running: AtomicBool,
     last_path: Mutex<Option<String>>,
@@ -31,7 +32,7 @@ pub struct IndexerQueue {
 impl IndexerQueue {
     pub fn new(db_path: PathBuf, thumbs_dir: PathBuf) -> Arc<Self> {
         let q = Arc::new(Self {
-            queue: Mutex::new(Vec::new()),
+            queue: Mutex::new(VecDeque::new()),
             processed: AtomicU64::new(0),
             running: AtomicBool::new(false),
             last_path: Mutex::new(None),
@@ -44,7 +45,45 @@ impl IndexerQueue {
     }
 
     pub fn enqueue(&self, job: IndexJob) {
-        self.queue.lock().push(job);
+        let mut q = self.queue.lock();
+        match &job {
+            IndexJob::Upsert {
+                path,
+                generate_thumb,
+            } => {
+                let mut want_thumb = *generate_thumb;
+                q.retain(|existing| match existing {
+                    IndexJob::Upsert {
+                        path: p,
+                        generate_thumb: t,
+                    } if p == path => {
+                        want_thumb |= *t;
+                        false
+                    }
+                    IndexJob::SoftRemove { path: p } if p == path => false,
+                    _ => true,
+                });
+                q.push_back(IndexJob::Upsert {
+                    path: path.clone(),
+                    generate_thumb: want_thumb,
+                });
+            }
+            IndexJob::SoftRemove { path } => {
+                q.retain(|existing| match existing {
+                    IndexJob::Upsert { path: p, .. } | IndexJob::SoftRemove { path: p }
+                        if p == path =>
+                    {
+                        false
+                    }
+                    _ => true,
+                });
+                q.push_back(job);
+            }
+        }
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.queue.lock().len()
     }
 
     pub fn progress(&self) -> IndexProgress {
@@ -58,7 +97,7 @@ impl IndexerQueue {
 
     fn run_loop(self: Arc<Self>) {
         loop {
-            let job = { self.queue.lock().pop() };
+            let job = { self.queue.lock().pop_front() };
             match job {
                 Some(job) => {
                     self.running.store(true, Ordering::Relaxed);
@@ -97,5 +136,57 @@ impl IndexerQueue {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn enqueue_is_fifo_and_dedupes_path() {
+        let q = IndexerQueue {
+            queue: Mutex::new(VecDeque::new()),
+            processed: AtomicU64::new(0),
+            running: AtomicBool::new(false),
+            last_path: Mutex::new(None),
+            db_path: PathBuf::from("/tmp"),
+            thumbs_dir: PathBuf::from("/tmp"),
+        };
+        q.enqueue(IndexJob::Upsert {
+            path: PathBuf::from("/a.jpg"),
+            generate_thumb: false,
+        });
+        q.enqueue(IndexJob::Upsert {
+            path: PathBuf::from("/b.jpg"),
+            generate_thumb: false,
+        });
+        q.enqueue(IndexJob::Upsert {
+            path: PathBuf::from("/a.jpg"),
+            generate_thumb: true,
+        });
+        let locked = q.queue.lock();
+        assert_eq!(locked.len(), 2);
+        match &locked[0] {
+            IndexJob::Upsert {
+                path,
+                generate_thumb,
+            } => {
+                assert_eq!(path, &PathBuf::from("/b.jpg"));
+                assert!(!generate_thumb);
+            }
+            _ => panic!("expected upsert"),
+        }
+        match &locked[1] {
+            IndexJob::Upsert {
+                path,
+                generate_thumb,
+            } => {
+                assert_eq!(path, &PathBuf::from("/a.jpg"));
+                assert!(generate_thumb, "thumb flag must survive dedupe");
+            }
+            _ => panic!("expected upsert"),
+        }
     }
 }

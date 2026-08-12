@@ -306,13 +306,23 @@ pub fn thumbnail_bytes(source: &Path) -> AppResult<Vec<u8>> {
 /// Recreate thumbnail files that are missing or still on the pre-orientation naming.
 /// Videos use ffmpeg frame extraction when available.
 pub fn repair_missing_thumbnails(conn: &rusqlite::Connection, thumbs_dir: &Path) -> AppResult<u32> {
-    repair_missing_thumbnails_with_progress(conn, thumbs_dir, |_| {})
+    repair_missing_thumbnails_capped(conn, thumbs_dir, usize::MAX)
+}
+
+/// Regen at most `limit` missing thumbs (startup uses a small cap so boot stays light).
+pub fn repair_missing_thumbnails_capped(
+    conn: &rusqlite::Connection,
+    thumbs_dir: &Path,
+    limit: usize,
+) -> AppResult<u32> {
+    repair_missing_thumbnails_with_progress(conn, thumbs_dir, limit, |_| {})
 }
 
 /// Same as [`repair_missing_thumbnails`], with a progress callback after each attempt.
 pub fn repair_missing_thumbnails_with_progress(
     conn: &rusqlite::Connection,
     thumbs_dir: &Path,
+    limit: usize,
     mut on_progress: impl FnMut(crate::models::ThumbnailRepairProgress),
 ) -> AppResult<u32> {
     use crate::models::ThumbnailRepairProgress;
@@ -355,6 +365,9 @@ pub fn repair_missing_thumbnails_with_progress(
             continue;
         }
         work.push((id, path, hash, thumb_path, media_type));
+        if work.len() >= limit {
+            break;
+        }
     }
 
     let total = work.len() as u32;

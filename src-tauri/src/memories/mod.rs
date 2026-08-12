@@ -20,7 +20,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Album, AssetSummary};
 use crate::search::map_asset;
 
-use self::rank::{diversify, load_embeddings, pick_quote, RankCandidate, MAX_CANDIDATES};
+use self::rank::{pick_quote, MAX_CANDIDATES};
 
 const MIN_ON_THIS_DAY: i64 = 3;
 const MIN_WEEKEND: i64 = 5;
@@ -76,58 +76,11 @@ pub struct MemoryDetail {
     pub assets: Vec<AssetSummary>,
 }
 
-struct MetaRow {
-    id: String,
-    favorite: bool,
-    rating: i64,
-    thumbnail_path: Option<String>,
-}
-
-/// Load candidate metadata (base-ranked, capped), attach CLIP vectors, diversify.
-fn diversified_ids(
-    conn: &Connection,
-    where_sql: &str,
-    params: &[&dyn ToSql],
-    take: usize,
-) -> AppResult<Vec<String>> {
-    let sql = format!(
-        "SELECT a.id, a.favorite, a.rating, a.thumbnail_path
-         FROM assets a
-         WHERE a.deleted_at IS NULL AND ({where_sql})
-         ORDER BY {RANK_ORDER}
-         LIMIT {MAX_CANDIDATES}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params, |r| {
-        Ok(MetaRow {
-            id: r.get(0)?,
-            favorite: r.get::<_, i64>(1)? != 0,
-            rating: r.get(2)?,
-            thumbnail_path: r.get(3)?,
-        })
-    })?;
-    let metas: Vec<MetaRow> = rows.filter_map(|r| r.ok()).collect();
-    let ids: Vec<String> = metas.iter().map(|m| m.id.clone()).collect();
-    let embeds = load_embeddings(conn, &ids).unwrap_or_default();
-    let candidates: Vec<RankCandidate> = metas
-        .into_iter()
-        .map(|m| RankCandidate {
-            id: m.id.clone(),
-            favorite: m.favorite,
-            rating: m.rating,
-            has_thumb: m.thumbnail_path.is_some(),
-            embedding: embeds.get(&m.id).cloned(),
-        })
-        .collect();
-    Ok(diversify(candidates, take.max(1)))
-}
-
 /// Highest-ranked ids, without the CLIP pass.
 ///
 /// Building a card only needs a cover and a quote, so it must not pay for
-/// diversification: that loads an embedding per candidate and compares every
-/// candidate against every pick. `list_memory_assets` still diversifies the
-/// grid the card opens into, which is where the ordering is actually visible.
+/// diversification. Opening a memory grid also uses ranking only — CLIP
+/// re-rank was loading ≤400 embeddings per open.
 ///
 /// Screenshots are held back: they make a dull cover and their captions read
 /// as nonsense quotes ("a screenshot of a website with a list of names"). A
@@ -592,7 +545,7 @@ fn on_this_day_for_month_day(
         "SELECT DISTINCT CAST(strftime('%Y', COALESCE(captured_at, created_at)) AS INTEGER)
          FROM assets
          WHERE deleted_at IS NULL
-           AND strftime('%m-%d', COALESCE(captured_at, created_at)) = ?1
+           AND captured_md = ?1
            AND CAST(strftime('%Y', COALESCE(captured_at, created_at)) AS INTEGER) < ?2",
     )?;
     let years: Vec<i32> = year_stmt
@@ -606,7 +559,7 @@ fn on_this_day_for_month_day(
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM assets
          WHERE deleted_at IS NULL
-           AND strftime('%m-%d', COALESCE(captured_at, created_at)) = ?1
+           AND captured_md = ?1
            AND CAST(strftime('%Y', COALESCE(captured_at, created_at)) AS INTEGER) < ?2",
         params![month_day, this_year],
         |r| r.get(0),
@@ -617,7 +570,7 @@ fn on_this_day_for_month_day(
 
     let ordered = top_ranked_ids(
         conn,
-        "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
+        "a.captured_md = ?1
            AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
         &[&month_day, &this_year],
         SUMMARY_CANDIDATES,
@@ -656,10 +609,13 @@ fn assets_for_on_this_day(
     let take = (offset as usize)
         .saturating_add(limit as usize)
         .clamp(1, MAX_CANDIDATES);
-    let ordered = diversified_ids(
+    // Grid open path: rank only. CLIP diversify was for cover picking and
+    // blocked the UI for hundreds of ms on large memories.
+    let ordered = ranked_ids(
         conn,
-        "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
+        "a.captured_md = ?1
            AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
+        None,
         &[&month_day, &this_year],
         take,
     )?;
@@ -888,10 +844,11 @@ fn assets_for_weekend(
     let take = (offset as usize)
         .saturating_add(limit as usize)
         .clamp(1, MAX_CANDIDATES);
-    let ordered = diversified_ids(
+    let ordered = ranked_ids(
         conn,
         "strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
            AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2",
+        None,
         &[&start_s, &end_s],
         take,
     )?;
@@ -1008,13 +965,14 @@ fn assets_for_person_place(
     let take = (offset as usize)
         .saturating_add(limit as usize)
         .clamp(1, MAX_CANDIDATES);
-    let ordered = diversified_ids(
+    let ordered = ranked_ids(
         conn,
         "EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1)
            AND EXISTS (
              SELECT 1 FROM asset_places ap
              WHERE ap.asset_id = a.id AND ap.place_label = ?2
            )",
+        None,
         &[&person_id, &place],
         take,
     )?;
@@ -1034,8 +992,10 @@ mod tests {
 
     fn insert_asset(conn: &Connection, id: &str, captured_at: &str, favorite: bool) {
         conn.execute(
-            "INSERT INTO assets (id, path, hash, media_type, created_at, captured_at, indexed_at, favorite)
-             VALUES (?1, ?2, ?3, 'image', ?4, ?4, ?4, ?5)",
+            "INSERT INTO assets (id, path, hash, media_type, created_at, captured_at, indexed_at, favorite,
+                                 captured_ym, captured_md)
+             VALUES (?1, ?2, ?3, 'image', ?4, ?4, ?4, ?5,
+                     strftime('%Y-%m', ?4), strftime('%m-%d', ?4))",
             params![
                 id,
                 format!("/tmp/{id}.jpg"),
@@ -1232,43 +1192,8 @@ mod tests {
     }
 
     #[test]
-    fn clip_diversity_prefers_orthogonal_cover_set() {
-        let conn = setup();
-        let today = Utc::now().date_naive();
-        let md = format!("{:02}-{:02}", today.month(), today.day());
-        let y = today.year();
-        for (id, fav) in [("d0", true), ("d1", true), ("d2", false)] {
-            insert_asset(
-                &conn,
-                id,
-                &format!("{}-{md}T12:00:00Z", y - 1),
-                fav,
-            );
-        }
-        // d0 and d1 nearly identical; d2 orthogonal.
-        let mut a = vec![1.0f32, 0.0];
-        crate::ml::vector::normalize(&mut a);
-        let mut b = vec![0.99f32, 0.14];
-        crate::ml::vector::normalize(&mut b);
-        let mut c = vec![0.0f32, 1.0];
-        crate::ml::vector::normalize(&mut c);
-        for (id, v) in [("d0", a), ("d1", b), ("d2", c)] {
-            crate::semantic::store(&conn, id, crate::semantic::IMAGE_MODEL_ID, &v).unwrap();
-        }
-
-        let memory_id = format!("on_this_day:{md}");
-        let assets = list_memory_assets(&conn, &memory_id, 3, 0).unwrap();
-        assert_eq!(assets.len(), 3);
-        assert_eq!(assets[0].id, "d0");
-        assert_eq!(
-            assets[1].id, "d2",
-            "second slot should be diverse, not the near-duplicate favourite"
-        );
-    }
-
     /// The card path must stay off the CLIP re-ranker: dropping an embedding
-    /// row that `diversified_ids` would have loaded must not change the card.
-    #[test]
+    /// row that diversity would have loaded must not change the card.
     fn summary_cover_does_not_depend_on_embeddings() {
         let today = Utc::now().date_naive();
         let md = format!("{:02}-{:02}", today.month(), today.day());

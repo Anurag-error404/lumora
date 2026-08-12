@@ -40,27 +40,35 @@ use crate::vault;
 use crate::views;
 use crate::watcher;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_library_stats(state: State<'_, AppState>) -> AppResult<LibraryStats> {
     state.with_db(|conn| {
+        // One pass over assets + three tiny catalog counts (was 8 separate queries).
+        let (total_assets, total_images, total_videos, favorites, in_trash) = conn.query_row(
+            "SELECT
+                SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN deleted_at IS NULL AND media_type = 'image' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN deleted_at IS NULL AND media_type = 'video' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN deleted_at IS NULL AND favorite = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END)
+             FROM assets",
+            [],
+            |r| {
+                Ok((
+                    r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                    r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                    r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                ))
+            },
+        )?;
         Ok(LibraryStats {
-            total_assets: scalar(conn, "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL")?,
-            total_images: scalar(
-                conn,
-                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND media_type='image'",
-            )?,
-            total_videos: scalar(
-                conn,
-                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND media_type='video'",
-            )?,
-            favorites: scalar(
-                conn,
-                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NULL AND favorite=1",
-            )?,
-            in_trash: scalar(
-                conn,
-                "SELECT COUNT(*) FROM assets WHERE deleted_at IS NOT NULL",
-            )?,
+            total_assets,
+            total_images,
+            total_videos,
+            favorites,
+            in_trash,
             album_count: scalar(conn, "SELECT COUNT(*) FROM albums")?,
             tag_count: scalar(conn, "SELECT COUNT(*) FROM tags")?,
             watched_folders: scalar(conn, "SELECT COUNT(*) FROM watched_folders")?,
@@ -482,10 +490,15 @@ pub async fn rebuild_thumbnail_cache(app: AppHandle) -> AppResult<u32> {
     tauri::async_runtime::spawn_blocking(move || -> AppResult<u32> {
         let _ = clear_thumbs_dir(&thumbs);
         let conn = open_db(&db_path)?;
-        let n = thumbnails::repair_missing_thumbnails_with_progress(&conn, &thumbs, |mut p| {
-            p.op = "rebuild".into();
-            let _ = app_for_job.emit("thumbnail-repair-progress", &p);
-        })?;
+        let n = thumbnails::repair_missing_thumbnails_with_progress(
+            &conn,
+            &thumbs,
+            usize::MAX,
+            |mut p| {
+                p.op = "rebuild".into();
+                let _ = app_for_job.emit("thumbnail-repair-progress", &p);
+            },
+        )?;
         tracing::info!(repaired = n, "rebuilt thumbnail cache");
         Ok(n)
     })
@@ -502,10 +515,15 @@ pub async fn retry_missing_thumbnails(app: AppHandle) -> AppResult<u32> {
     let app_for_job = app.clone();
     tauri::async_runtime::spawn_blocking(move || -> AppResult<u32> {
         let conn = open_db(&db_path)?;
-        let n = thumbnails::repair_missing_thumbnails_with_progress(&conn, &thumbs, |mut p| {
-            p.op = "retry".into();
-            let _ = app_for_job.emit("thumbnail-repair-progress", &p);
-        })?;
+        let n = thumbnails::repair_missing_thumbnails_with_progress(
+            &conn,
+            &thumbs,
+            usize::MAX,
+            |mut p| {
+                p.op = "retry".into();
+                let _ = app_for_job.emit("thumbnail-repair-progress", &p);
+            },
+        )?;
         tracing::info!(repaired = n, "retried missing thumbnails");
         Ok(n)
     })
@@ -1290,17 +1308,17 @@ pub fn list_album_assets(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn timeline_months(state: State<'_, AppState>) -> AppResult<Vec<TimelineMonth>> {
     state.with_db(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT CAST(strftime('%Y', COALESCE(captured_at, created_at)) AS INTEGER) AS y,
-                    CAST(strftime('%m', COALESCE(captured_at, created_at)) AS INTEGER) AS m,
+            "SELECT CAST(substr(captured_ym, 1, 4) AS INTEGER) AS y,
+                    CAST(substr(captured_ym, 6, 2) AS INTEGER) AS m,
                     COUNT(*)
              FROM assets
-             WHERE deleted_at IS NULL
-             GROUP BY y, m
-             ORDER BY y DESC, m DESC",
+             WHERE deleted_at IS NULL AND captured_ym IS NOT NULL
+             GROUP BY captured_ym
+             ORDER BY captured_ym DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(TimelineMonth {
@@ -1313,7 +1331,7 @@ pub fn timeline_months(state: State<'_, AppState>) -> AppResult<Vec<TimelineMont
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_assets_for_month(
     state: State<'_, AppState>,
     year: i32,
@@ -1329,7 +1347,7 @@ pub fn list_assets_for_month(
                     thumbnail_path, camera, lens, deleted_at
              FROM assets
              WHERE deleted_at IS NULL
-               AND strftime('%Y-%m', COALESCE(captured_at, created_at)) = ?1
+               AND captured_ym = ?1
              ORDER BY COALESCE(captured_at, created_at) DESC
              LIMIT ?2 OFFSET ?3",
         )?;
@@ -1386,7 +1404,7 @@ pub fn list_smart_collection(
 }
 
 /// Item counts for every smart collection, keyed by collection id.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn smart_collection_counts(state: State<'_, AppState>) -> AppResult<SmartCounts> {
     state.with_db(|conn| {
         let mut counts = SmartCounts::new();

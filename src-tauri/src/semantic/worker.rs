@@ -84,7 +84,6 @@ impl EmbedWorker {
     /// Drop the resident ONNX sessions without re-waking the loop.
     pub fn unload_engine(&self) {
         *self.engine.lock() = None;
-        super::ann::drop_resident();
     }
 
     pub fn kick(&self) {
@@ -208,8 +207,12 @@ impl EmbedWorker {
                 ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
-                // CLIP alone is ~600 MB on disk; keeping it warm after the queue
-                // drains is what pushes LUMORA past 2 GB RSS.
+                // Warm ANN while the DB is quiet, then free CLIP (~600 MB).
+                if let Ok(conn) = open_db(&self.db_path) {
+                    if let Err(e) = super::ann::warm(&conn) {
+                        tracing::debug!(error = %e, "ann warm skipped");
+                    }
+                }
                 drop(engine);
                 self.unload_engine();
             }

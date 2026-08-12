@@ -40,6 +40,13 @@ fn cache() -> &'static Mutex<Option<AnnIndex>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
+/// Try to ensure the HNSW index is warm. Safe to call from a background
+/// worker after an embed batch — no-op when the library is too small.
+pub fn warm(conn: &Connection) -> AppResult<()> {
+    let _ = ensure_loaded(conn)?;
+    Ok(())
+}
+
 pub fn invalidate() {
     DIRTY.store(true, Ordering::Release);
     *cache().lock() = None;

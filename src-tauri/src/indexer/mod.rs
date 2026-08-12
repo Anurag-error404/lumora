@@ -201,7 +201,10 @@ pub fn commit_prepared(
         conn.execute(
             "UPDATE assets SET hash=?1, perceptual_hash=?2, media_type=?3, width=?4, height=?5,
              duration_ms=?6, file_size=?7, captured_at=?8, indexed_at=?9, camera=?10, lens=?11,
-             blur_score=?12, deleted_at=NULL WHERE id=?13",
+             blur_score=?12,
+             captured_ym = strftime('%Y-%m', COALESCE(?8, created_at)),
+             captured_md = strftime('%m-%d', COALESCE(?8, created_at)),
+             deleted_at=NULL WHERE id=?13",
             params![
                 hash,
                 meta.perceptual_hash,
@@ -237,8 +240,12 @@ pub fn commit_prepared(
         conn.execute(
             "INSERT INTO assets (
                 id, path, hash, perceptual_hash, media_type, width, height, duration_ms, file_size,
-                created_at, captured_at, indexed_at, camera, lens, blur_score
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                created_at, captured_at, indexed_at, camera, lens, blur_score, captured_ym, captured_md
+             ) VALUES (
+                ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,
+                strftime('%Y-%m', COALESCE(?11, ?10)),
+                strftime('%m-%d', COALESCE(?11, ?10))
+             )",
             params![
                 id,
                 path_str,
