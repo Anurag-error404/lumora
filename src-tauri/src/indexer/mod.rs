@@ -5,7 +5,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use image::GenericImageView;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -14,6 +14,78 @@ use crate::models::ImportResult;
 use crate::thumbnails;
 
 pub use scan::{is_indexable_media, is_supported_media, media_type_for_path, MediaKind};
+
+/// True when the on-disk file matches the indexed row's size and was not
+/// modified after `indexed_at`. Avoids SHA256 + decode for unchanged files.
+pub fn asset_looks_unchanged(conn: &Connection, path: &Path) -> AppResult<bool> {
+    let path_str = path.to_string_lossy();
+    let row: Option<(Option<i64>, String)> = conn
+        .query_row(
+            "SELECT file_size, indexed_at FROM assets
+             WHERE path = ?1 AND deleted_at IS NULL",
+            params![path_str.as_ref()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((size, indexed_at)) = row else {
+        return Ok(false);
+    };
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return Ok(false),
+    };
+    if size.map(|s| s as u64) != Some(meta.len()) {
+        return Ok(false);
+    }
+    let Ok(modified) = meta.modified() else {
+        return Ok(false);
+    };
+    let Ok(indexed) = DateTime::parse_from_rfc3339(&indexed_at) else {
+        return Ok(false);
+    };
+    let indexed: std::time::SystemTime = indexed.with_timezone(&Utc).into();
+    Ok(modified <= indexed)
+}
+
+/// Path → (file_size, indexed_at) for auto-scan skip checks.
+pub fn indexed_file_fingerprints(
+    conn: &Connection,
+) -> AppResult<std::collections::HashMap<String, (Option<i64>, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT path, file_size, indexed_at FROM assets WHERE deleted_at IS NULL",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?))
+    })?;
+    let mut out = std::collections::HashMap::new();
+    for row in rows {
+        let (path, size, indexed_at) = row?;
+        out.insert(path, (size, indexed_at));
+    }
+    Ok(out)
+}
+
+/// Same check as [`asset_looks_unchanged`] without a DB round-trip.
+pub fn fingerprint_matches_disk(
+    path: &Path,
+    size: Option<i64>,
+    indexed_at: &str,
+) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if size.map(|s| s as u64) != Some(meta.len()) {
+        return false;
+    }
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
+    let Ok(indexed) = DateTime::parse_from_rfc3339(indexed_at) else {
+        return false;
+    };
+    let indexed: std::time::SystemTime = indexed.with_timezone(&Utc).into();
+    modified <= indexed
+}
 
 /// Options applied while scanning / preparing assets for import.
 #[derive(Debug, Clone)]
@@ -64,6 +136,9 @@ pub fn upsert_asset(
     thumbs_dir: &Path,
     generate_thumb: bool,
 ) -> AppResult<UpsertOutcome> {
+    if asset_looks_unchanged(conn, path)? {
+        return Ok(UpsertOutcome::Skipped);
+    }
     let Some(prepared) =
         prepare_asset(path, thumbs_dir, generate_thumb, &ImportOptions::default())?
     else {
@@ -837,6 +912,29 @@ mod import_tests {
             .query_row("SELECT COUNT(*) FROM assets", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn upsert_skips_unchanged_file_without_rehash() {
+        let dir = tempdir().unwrap();
+        let media = dir.path().join("media");
+        let thumbs = dir.path().join("thumbs");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = media.join("same.png");
+        RgbImage::from_pixel(16, 16, Rgb([4, 5, 6]))
+            .save(&file)
+            .unwrap();
+
+        let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
+        assert!(matches!(
+            upsert_asset(&conn, &file, &thumbs, true).unwrap(),
+            UpsertOutcome::Inserted
+        ));
+        assert!(asset_looks_unchanged(&conn, &file).unwrap());
+        assert!(matches!(
+            upsert_asset(&conn, &file, &thumbs, true).unwrap(),
+            UpsertOutcome::Skipped
+        ));
     }
 
     #[test]

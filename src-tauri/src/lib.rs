@@ -68,6 +68,10 @@ fn enqueue_auto_scan(
     let Some(interval_secs) = interval_secs else {
         return;
     };
+    // Periodic rescans yield to the UI when the user is active / battery-paused.
+    if !force_launch && !prefs_runtime::should_run_background(&prefs) {
+        return;
+    }
     let stamp = app_data.join(".last_auto_scan");
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -86,20 +90,35 @@ fn enqueue_auto_scan(
     let Ok(roots) = watcher::load_watched_paths(&conn) else {
         return;
     };
+    let known = indexer::indexed_file_fingerprints(&conn).unwrap_or_default();
+    let mut enqueued = 0u64;
+    let mut skipped = 0u64;
     for root in roots {
         for entry in walkdir::WalkDir::new(root)
             .into_iter()
             .filter_map(|entry| entry.ok())
         {
             let path = entry.path();
-            if path.is_file() && indexer::is_indexable_media(path, &prefs.library.ignore_patterns) {
-                indexer.enqueue(indexer::queue::IndexJob::Upsert {
-                    path: path.to_path_buf(),
-                    generate_thumb: true,
-                });
+            if !(path.is_file()
+                && indexer::is_indexable_media(path, &prefs.library.ignore_patterns))
+            {
+                continue;
             }
+            let key = path.to_string_lossy();
+            if let Some((size, indexed_at)) = known.get(key.as_ref()) {
+                if indexer::fingerprint_matches_disk(path, *size, indexed_at) {
+                    skipped += 1;
+                    continue;
+                }
+            }
+            indexer.enqueue(indexer::queue::IndexJob::Upsert {
+                path: path.to_path_buf(),
+                generate_thumb: true,
+            });
+            enqueued += 1;
         }
     }
+    tracing::info!(enqueued, skipped, "auto-scan enqueue finished");
     let _ = std::fs::write(stamp, now.to_string());
 }
 
@@ -159,6 +178,7 @@ pub fn run() {
             let paths = AppPaths::from_app_data(app_data)?;
             preferences::set_app_data_dir(paths.app_data.clone());
             logging::init_logging(&paths.logs_dir)?;
+            prefs_runtime::mark_process_start();
             tracing::info!(app_data = %paths.app_data.display(), "app data directory");
 
             let conn = db::open_and_migrate(&paths.db_path)?;

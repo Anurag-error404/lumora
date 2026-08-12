@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import {
-  api,
-  type LockedAlbum,
-  type LockedAsset,
-  type VaultStatus,
-  type VaultSummary,
-} from "../lib/tauri";
+import { api, type LockedAlbum, type LockedAsset, type VaultStatus, type VaultSummary } from "../lib/tauri";
+import { idleDefer } from "../lib/idleDefer";
 import type { View } from "../types/app";
 
 /**
@@ -67,8 +62,13 @@ export function useVault({
   }, [openAlbumId, setError]);
 
   useEffect(() => {
-    void refreshStatus();
-  }, [refreshStatus]);
+    if (view === "locked") {
+      void refreshStatus();
+      return;
+    }
+    // Sidebar locked-count only — don't compete with first paint.
+    return idleDefer(() => void refreshStatus(), 4000);
+  }, [view, refreshStatus]);
 
   // Load contents whenever a vault is unlocked on the Locked view.
   useEffect(() => {

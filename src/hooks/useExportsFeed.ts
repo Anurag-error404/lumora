@@ -27,10 +27,9 @@ export function useExportsFeed({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refreshExports()), [refreshExports]);
-
   useEffect(() => {
-    if (view === "exports") void refreshExports();
+    if (view !== "exports") return;
+    return idleDefer(() => void refreshExports());
   }, [view, refreshExports]);
 
   return { exports, refreshExports };

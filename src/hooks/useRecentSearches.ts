@@ -27,11 +27,10 @@ export function useRecentSearches({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refresh()), [refresh]);
-
   useEffect(() => {
-    if (view === "savedSearches" || view === "home") void refresh();
-  }, [refresh, view]);
+    if (view !== "savedSearches" && view !== "home") return;
+    return idleDefer(() => void refresh());
+  }, [view, refresh]);
 
   async function record(query: string) {
     const q = query.trim();

@@ -80,8 +80,12 @@ export default function App() {
   const [pluginBusy, setPluginBusy] = useState(false);
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
 
-  // Load enabled plugins once on mount (and whenever user navigates to plugins view)
+  // Toolbar actions need the list; Plugins view refreshes after installs.
   useEffect(() => {
+    api.listPlugins().then(setPlugins).catch(() => setPlugins([]));
+  }, []);
+  useEffect(() => {
+    if (view !== "plugins") return;
     api.listPlugins().then(setPlugins).catch(() => setPlugins([]));
   }, [view]);
   const [homeRecent, setHomeRecent] = useState<AssetSummary[]>([]);
@@ -108,11 +112,9 @@ export default function App() {
     };
     window.addEventListener("pointerdown", ping);
     window.addEventListener("keydown", ping);
-    window.addEventListener("mousemove", ping);
     return () => {
       window.removeEventListener("pointerdown", ping);
       window.removeEventListener("keydown", ping);
-      window.removeEventListener("mousemove", ping);
     };
   }, []);
 
@@ -312,8 +314,8 @@ export default function App() {
     await loadAssets();
   }
 
-  // Live search already reloads on query change; debounce a recent-history
-  // write so typing doesn't spam the DB, but settled queries are remembered.
+  // Live search reloads after SEARCH_DEBOUNCE_MS; debounce recent-history
+  // writes a bit longer so typing doesn't spam the DB.
   useEffect(() => {
     const q = query.trim();
     if (!q) return;

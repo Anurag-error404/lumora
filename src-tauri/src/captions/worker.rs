@@ -16,6 +16,7 @@ use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 4;
+const COLD_START_GRACE_SECS: u64 = 42;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +48,7 @@ impl CaptionsWorker {
         let worker = Arc::new(Self {
             db_path, app_data, engine: Mutex::new(None), running: AtomicBool::new(false),
             paused: AtomicBool::new(false), last_path: Mutex::new(None), last_error: Mutex::new(None),
-            wake: AtomicBool::new(true),
+            wake: AtomicBool::new(false),
         });
         let thread_worker = Arc::clone(&worker);
         thread::spawn(move || thread_worker.run_loop());
@@ -89,7 +90,11 @@ impl CaptionsWorker {
             let throttle = prefs_runtime::throttle(&prefs.performance);
             if !self.wake.swap(false, Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(throttle.idle_ms));
-                if !self.paused.load(Ordering::Relaxed) { self.wake.store(true, Ordering::Relaxed); }
+                if !self.paused.load(Ordering::Relaxed)
+                    && prefs_runtime::past_ml_cold_start(COLD_START_GRACE_SECS)
+                {
+                    self.wake.store(true, Ordering::Relaxed);
+                }
                 continue;
             }
             if self.paused.load(Ordering::Relaxed) {

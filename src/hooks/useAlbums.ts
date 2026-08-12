@@ -28,10 +28,9 @@ export function useAlbums({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refreshAlbums()), [refreshAlbums]);
-
   useEffect(() => {
-    if (view === "albums") void refreshAlbums();
+    if (view !== "albums") return;
+    return idleDefer(() => void refreshAlbums());
   }, [view, refreshAlbums]);
 
   return { albums, activeAlbum, setActiveAlbum, refreshAlbums };

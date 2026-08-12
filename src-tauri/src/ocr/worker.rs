@@ -19,6 +19,7 @@ use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 4;
+const COLD_START_GRACE_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +57,7 @@ impl OcrWorker {
             paused: AtomicBool::new(false),
             last_path: Mutex::new(None),
             last_error: Mutex::new(None),
-            wake: AtomicBool::new(true),
+            wake: AtomicBool::new(false),
         });
         let thread_worker = Arc::clone(&worker);
         thread::spawn(move || thread_worker.run_loop());
@@ -119,7 +120,9 @@ impl OcrWorker {
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
                 ));
-                if !self.paused.load(Ordering::Relaxed) {
+                if !self.paused.load(Ordering::Relaxed)
+                    && prefs_runtime::past_ml_cold_start(COLD_START_GRACE_SECS)
+                {
                     self.wake.store(true, Ordering::Relaxed);
                 }
                 continue;

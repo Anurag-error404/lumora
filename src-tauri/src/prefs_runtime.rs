@@ -5,7 +5,8 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::preferences::{PerformancePrefs, Preferences};
 
@@ -14,6 +15,22 @@ pub const IDLE_THRESHOLD_SECS: u64 = 60;
 
 /// Last user activity (unix seconds). Updated from the UI via `ping_user_activity`.
 static LAST_USER_ACTIVITY_SECS: AtomicU64 = AtomicU64::new(0);
+
+/// Process start — ML workers stay asleep until past a staggered grace so cold
+/// launch doesn't load five ONNX engines at once.
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+
+pub fn mark_process_start() {
+    let _ = PROCESS_START.get_or_init(Instant::now);
+}
+
+/// True once `grace_secs` have elapsed since [`mark_process_start`].
+pub fn past_ml_cold_start(grace_secs: u64) -> bool {
+    PROCESS_START
+        .get()
+        .map(|t| t.elapsed().as_secs() >= grace_secs)
+        .unwrap_or(false)
+}
 
 pub fn touch_user_activity() {
     LAST_USER_ACTIVITY_SECS.store(now_secs(), Ordering::Relaxed);
@@ -272,5 +289,12 @@ mod tests {
             Ordering::Relaxed,
         );
         assert!(background_allowed(&prefs));
+    }
+
+    #[test]
+    fn ml_cold_start_gates_until_grace_elapses() {
+        mark_process_start();
+        assert!(!past_ml_cold_start(60));
+        assert!(past_ml_cold_start(0));
     }
 }

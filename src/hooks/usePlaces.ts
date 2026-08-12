@@ -21,10 +21,9 @@ export function usePlaces({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refreshPlaces()), [refreshPlaces]);
-
   useEffect(() => {
-    if (view === "places") void refreshPlaces();
+    if (view !== "places") return;
+    return idleDefer(() => void refreshPlaces());
   }, [view, refreshPlaces]);
 
   return {

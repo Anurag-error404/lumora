@@ -28,10 +28,9 @@ export function useHistoryFeed({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refreshHistory()), [refreshHistory]);
-
   useEffect(() => {
-    if (view === "activity") void refreshHistory();
+    if (view !== "activity") return;
+    return idleDefer(() => void refreshHistory());
   }, [view, refreshHistory]);
 
   return { history, refreshHistory };

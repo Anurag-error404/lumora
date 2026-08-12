@@ -20,6 +20,10 @@ import { mergeSearchResults } from "../features/search/merge-search-results";
 
 /** Smaller first paint for memory detail (CLIP diversity is O(n²)). */
 const MEMORY_PAGE_SIZE = 72;
+/** Settling time before FTS/CLIP search runs — typing must not fire per key. */
+const SEARCH_DEBOUNCE_MS = 350;
+/** CLIP text embed is wasted on 1–2 character stubs. */
+const SEMANTIC_MIN_CHARS = 3;
 
 /** Tokens that mean the query is FTS/filter syntax, not natural language. */
 function hasStructuredFilters(query: string): boolean {
@@ -64,6 +68,16 @@ export function useLibraryAssets({
   const [smartCounts, setSmartCounts] = useState<SmartCounts | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const loadingMoreRef = useRef(false);
+  // Clear immediately; debounce non-empty typing so each keystroke isn't an IPC.
+  const [searchQuery, setSearchQuery] = useState(query);
+  useEffect(() => {
+    if (!query.trim()) {
+      setSearchQuery("");
+      return;
+    }
+    const id = window.setTimeout(() => setSearchQuery(query), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [query]);
 
   const refreshStats = useCallback(async () => {
     try {
@@ -120,14 +134,15 @@ export function useLibraryAssets({
           ? api.listTagBrowseAssets(tagBrowse, PAGE_SIZE, offset)
           : [];
       }
-      if (query.trim()) {
-        const q = query.trim();
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim();
         // Structured filters stay on FTS. Plain language blends CLIP recall with
         // FTS (filename / tags / OCR text / people / auto-tags) so a keyword that
         // appears in an image is never dropped just because CLIP returned hits.
         if (
           semanticSearchEnabled &&
           !hasStructuredFilters(q) &&
+          q.length >= SEMANTIC_MIN_CHARS &&
           offset === 0
         ) {
           const ftsPromise = api.searchAssets(q, PAGE_SIZE, 0);
@@ -147,7 +162,7 @@ export function useLibraryAssets({
     },
     [
       view,
-      query,
+      searchQuery,
       activeAlbum,
       activePerson,
       activePlace,

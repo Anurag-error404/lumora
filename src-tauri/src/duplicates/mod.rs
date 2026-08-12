@@ -57,6 +57,18 @@ fn hamming(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
 
+/// Four 16-bit bands. With [`NEAR_DUP_HAMMING_THRESHOLD`] ≤ 2, at least two bands
+/// of any near-dupe pair are identical (pigeonhole), so inverted indexes over
+/// bands find every pair without a full O(n²) pass.
+fn phash_bands(bits: u64) -> [u16; 4] {
+    [
+        bits as u16,
+        (bits >> 16) as u16,
+        (bits >> 32) as u16,
+        (bits >> 48) as u16,
+    ]
+}
+
 /// Reject near-solid aHashes (all black / all white / decode junk). Those collide
 /// across unrelated photos and create huge false near-dupe groups.
 fn phash_is_discriminative(bits: u64) -> bool {
@@ -134,8 +146,30 @@ fn cluster_near_duplicates(
         }
     }
 
+    // Banding index: (band, value) → entry indices.
+    let mut inverted: HashMap<(u8, u16), Vec<usize>> = HashMap::new();
+    for (i, entry) in entries.iter().enumerate() {
+        for (b, key) in phash_bands(entry.2).into_iter().enumerate() {
+            inverted.entry((b as u8, key)).or_default().push(i);
+        }
+    }
+
+    let mut seen_pairs: HashSet<(usize, usize)> = HashSet::new();
     for i in 0..n {
-        for j in (i + 1)..n {
+        let mut candidates: HashSet<usize> = HashSet::new();
+        for (b, key) in phash_bands(entries[i].2).into_iter().enumerate() {
+            if let Some(ids) = inverted.get(&(b as u8, key)) {
+                for &j in ids {
+                    if j > i {
+                        candidates.insert(j);
+                    }
+                }
+            }
+        }
+        for j in candidates {
+            if !seen_pairs.insert((i, j)) {
+                continue;
+            }
             // Skip identical-file pairs — those belong in exact-dupe groups.
             if entries[i].1 == entries[j].1 {
                 continue;

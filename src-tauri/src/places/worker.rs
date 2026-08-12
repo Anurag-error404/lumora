@@ -23,6 +23,7 @@ use crate::prefs_runtime;
 use crate::state::open_db;
 
 const BATCH: u32 = 32;
+const COLD_START_GRACE_SECS: u64 = 12;
 
 /// Process-wide reverse geocoder. Built once on first use (loads the bundled
 /// GeoNames data and a k-d tree), then shared read-only.
@@ -57,7 +58,7 @@ impl PlacesWorker {
             app_data,
             running: AtomicBool::new(false),
             last_path: Mutex::new(None),
-            wake: AtomicBool::new(true),
+            wake: AtomicBool::new(false),
         });
         let thread_worker = Arc::clone(&worker);
         thread::spawn(move || thread_worker.run_loop());
@@ -88,7 +89,9 @@ impl PlacesWorker {
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
                 ));
-                self.wake.store(true, Ordering::Relaxed);
+                if prefs_runtime::past_ml_cold_start(COLD_START_GRACE_SECS) {
+                    self.wake.store(true, Ordering::Relaxed);
+                }
                 continue;
             }
 

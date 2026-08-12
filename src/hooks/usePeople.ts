@@ -42,10 +42,9 @@ export function usePeople({
     [refreshPeople, setError],
   );
 
-  useEffect(() => idleDefer(() => void refreshPeople()), [refreshPeople]);
-
   useEffect(() => {
-    if (view === "people") void refreshPeople();
+    if (view !== "people") return;
+    return idleDefer(() => void refreshPeople());
   }, [view, refreshPeople]);
 
   return {

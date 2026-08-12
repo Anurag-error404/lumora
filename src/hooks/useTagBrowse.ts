@@ -53,10 +53,9 @@ export function useTagBrowse({
     }
   }, [setError]);
 
-  useEffect(() => idleDefer(() => void refreshTags()), [refreshTags]);
-
   useEffect(() => {
-    if (view === "tags") void refreshTags();
+    if (view !== "tags") return;
+    return idleDefer(() => void refreshTags());
   }, [view, refreshTags]);
 
   const toggleTagFilter = useCallback(

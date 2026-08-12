@@ -21,6 +21,8 @@ use crate::semantic::{self, IMAGE_MODEL_ID};
 use crate::state::open_db;
 
 const BATCH: u32 = 8;
+/// Staggered cold-start — CLIP after places, before faces.
+const COLD_START_GRACE_SECS: u64 = 18;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,7 +140,9 @@ impl EmbedWorker {
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
                 ));
                 // Periodically re-check for newly indexed photos even without a kick.
-                if !self.paused.load(Ordering::Relaxed) {
+                if !self.paused.load(Ordering::Relaxed)
+                    && prefs_runtime::past_ml_cold_start(COLD_START_GRACE_SECS)
+                {
                     self.wake.store(true, Ordering::Relaxed);
                 }
                 continue;
