@@ -1884,3 +1884,127 @@ code {
     width: 100%;
   }
 }
+
+/* —— Install / Get started —— */
+
+.install-page .site-header .nav a[aria-current="page"] {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.install-hero {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: calc(var(--header-h) + 2.5rem) var(--space) 2.5rem;
+}
+
+.install-kicker {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.install-hero h1 {
+  margin: 0 0 1rem;
+  max-width: 22ch;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 3.15rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.install-lede {
+  margin: 0 0 1.5rem;
+  max-width: 42rem;
+  font-size: 1.125rem;
+  color: var(--text-muted);
+}
+
+.install-cards {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.install-card {
+  padding: 1.35rem 1.4rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.install-card h3 {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.install-card > p {
+  margin: 0 0 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.98rem;
+}
+
+.install-card ol,
+.install-card ul {
+  margin: 0 0 0.85rem;
+  padding-left: 1.2rem;
+}
+
+.install-card li {
+  margin-bottom: 0.45rem;
+  color: var(--text);
+}
+
+.install-card .guide-code {
+  margin: 0.75rem 0 1rem;
+}
+
+.install-note {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+
+.usage-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.usage-grid article {
+  padding: 1.15rem 1.2rem 1.25rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent-soft));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.usage-grid h3 {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.usage-grid p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 899px) {
+  .install-cards,
+  .usage-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .install-hero h1 {
+    max-width: none;
+  }
+}

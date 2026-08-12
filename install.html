@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Install LUMORA and start using it — download a release or build from source, import a folder, search offline, and optionally turn on on-device AI."
+    />
+    <meta name="theme-color" content="#2f6f5e" />
+    <link rel="icon" href="favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="Lumora-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Install &amp; usage — LUMORA</title>
+  </head>
+  <body class="install-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="LUMORA home">
+        <img
+          class="brand-mark"
+          src="lumora-icon-tp.png"
+          width="28"
+          height="28"
+          alt=""
+        />
+        <span class="brand-name">LUMORA</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="download.html">Download</a>
+        <a href="install.html" aria-current="page">Get started</a>
+        <a href="guide.html">Guide</a>
+        <a href="plugins-guide.html">Plugins</a>
+        <a
+          class="nav-cta"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+        >
+          <svg class="nav-cta-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="install-hero" aria-labelledby="install-title">
+        <p class="install-kicker">Get started</p>
+        <h1 id="install-title">Install LUMORA. Keep every photo on your machine.</h1>
+        <p class="install-lede">
+          Google Photos-style search for a local library — download a desktop
+          build, import a folder, and search offline. No account. No upload.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="download.html">Download latest release</a>
+          <a class="btn btn-ghost" href="#first-run">First 5 minutes</a>
+          <a class="btn btn-ghost" href="#from-source">Build from source</a>
+        </div>
+      </section>
+
+      <section
+        class="section install-path"
+        id="install"
+        aria-labelledby="install-heading"
+      >
+        <header class="section-head">
+          <h2 id="install-heading">1. Install</h2>
+          <p>Pick a release build, or compile if you’re developing.</p>
+        </header>
+
+        <div class="install-cards reveal">
+          <article class="install-card">
+            <h3>Release installer</h3>
+            <p>Fastest path for everyday use.</p>
+            <ol>
+              <li>
+                Open the
+                <a
+                  href="https://github.com/Anurag-error404/lumora/releases/latest"
+                  rel="noopener noreferrer"
+                  >latest GitHub Release</a
+                >
+                (or use <a href="download.html">Download</a> to auto-pick your OS).
+              </li>
+              <li>
+                Choose your platform:
+                <ul>
+                  <li><strong>macOS</strong> — <code>LUMORA_*_aarch64.dmg</code> (Apple silicon)</li>
+                  <li><strong>Windows</strong> — <code>*_x64-setup.exe</code> or <code>.msi</code></li>
+                  <li><strong>Linux</strong> — <code>.AppImage</code>, <code>.deb</code>, or <code>.rpm</code></li>
+                </ul>
+              </li>
+              <li>Install, then launch LUMORA from Applications / Start Menu / your AppImage.</li>
+            </ol>
+            <p class="install-note">
+              On Mac, if Gatekeeper blocks the app: System Settings → Privacy &amp;
+              Security → <strong>Open Anyway</strong>.
+            </p>
+          </article>
+
+          <article class="install-card" id="from-source">
+            <h3>Build from source</h3>
+            <p>For contributors and anyone who wants a local debug build.</p>
+            <p><strong>Need:</strong> Bun, Rust (stable), macOS Xcode CLT. Optional: ffmpeg, jpegtran.</p>
+            <pre class="guide-code"><code>bun install
+bun run tauri dev
+bun run tauri build</code></pre>
+            <ul>
+              <li>Put <code>~/.cargo/bin</code> on your <code>PATH</code>.</li>
+              <li>Dev UI also serves at <code>http://localhost:1420</code>.</li>
+              <li>See <a href="https://github.com/Anurag-error404/lumora/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section
+        class="section"
+        id="first-run"
+        aria-labelledby="first-run-heading"
+      >
+        <header class="section-head">
+          <h2 id="first-run-heading">2. First five minutes</h2>
+          <p>One folder is enough to feel the product.</p>
+        </header>
+
+        <ol class="install-steps reveal">
+          <li>
+            <strong>Import photos</strong>
+            <span
+              >Home → <em>Import photos</em>, or drop a folder on the window.
+              Originals stay where they are; LUMORA only indexes.</span
+            >
+          </li>
+          <li>
+            <strong>Browse the library</strong>
+            <span
+              >Use the grid, Timeline, Albums, and smart collections (Videos, RAW,
+              Screenshots, Documents…).</span
+            >
+          </li>
+          <li>
+            <strong>Try search</strong>
+            <span
+              >Filename and metadata work immediately. Filters like
+              <code>camera:iphone</code> or <code>rating&gt;3</code> help narrow
+              results.</span
+            >
+          </li>
+          <li>
+            <strong>Optional: on-device AI</strong>
+            <span
+              >Settings → AI — install CLIP for “dog on beach” search, OCR for
+              text in images, faces for People. Downloads are checksum-verified
+              and stay offline after install.</span
+            >
+          </li>
+          <li>
+            <strong>Optional: watched folders</strong>
+            <span
+              >Keep a camera roll or Downloads folder in sync so new files appear
+              automatically.</span
+            >
+          </li>
+        </ol>
+      </section>
+
+      <section
+        class="section install-usage"
+        id="usage"
+        aria-labelledby="usage-heading"
+      >
+        <header class="section-head">
+          <h2 id="usage-heading">3. Everyday usage</h2>
+          <p>The loops you’ll use most. Deep detail lives in the full guide.</p>
+        </header>
+
+        <div class="usage-grid reveal">
+          <article>
+            <h3>Search</h3>
+            <p>
+              Toolbar search mixes full-text and (when installed) semantic
+              results. Recent queries show up as hints and under Discover.
+            </p>
+          </article>
+          <article>
+            <h3>Organise</h3>
+            <p>
+              Albums, tags, favourites, 1–5 ratings, colour labels. Multi-select
+              from the grid; edit in the viewer.
+            </p>
+          </article>
+          <article>
+            <h3>Clean up</h3>
+            <p>
+              Duplicates sidebar: exact (bulk keep-one), near (review groups),
+              blurry (Laplacian). Everything soft-deletes first — undo with ⌘Z /
+              Ctrl+Z.
+            </p>
+          </article>
+          <article>
+            <h3>People &amp; Places</h3>
+            <p>
+              Face clusters become searchable names. Places uses GPS + offline
+              GeoNames — no map tile network.
+            </p>
+          </article>
+          <article>
+            <h3>Vault</h3>
+            <p>
+              Move sensitive shots into the Locked folder (Argon2id +
+              XChaCha20-Poly1305). Store the recovery code somewhere safe.
+            </p>
+          </article>
+          <article>
+            <h3>Privacy</h3>
+            <p>
+              No telemetry. Network only for models you choose and optional
+              update checks. Logs stay on disk.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section
+        class="section"
+        id="shortcuts"
+        aria-labelledby="shortcuts-heading"
+      >
+        <header class="section-head">
+          <h2 id="shortcuts-heading">Handy shortcuts</h2>
+          <p>Full list in the <a href="guide.html#shortcuts">guide</a>.</p>
+        </header>
+        <div class="guide-table-wrap reveal">
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Space</td>
+                <td>Toggle / close viewer</td>
+              </tr>
+              <tr>
+                <td>← / →</td>
+                <td>Previous / next</td>
+              </tr>
+              <tr>
+                <td>F</td>
+                <td>Favourite</td>
+              </tr>
+              <tr>
+                <td>0–5</td>
+                <td>Rate</td>
+              </tr>
+              <tr>
+                <td>Delete</td>
+                <td>Soft-delete (restore from Trash)</td>
+              </tr>
+              <tr>
+                <td>⌘Z / Ctrl+Z</td>
+                <td>Undo</td>
+              </tr>
+              <tr>
+                <td>Esc</td>
+                <td>Close viewer / clear selection</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section cta-band" aria-labelledby="next-heading">
+        <h2 id="next-heading">Need more depth?</h2>
+        <p>
+          The full guide covers AI backends, duplicate edge cases, Places, vault
+          recovery, and privacy defaults.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="guide.html">Open the full guide</a>
+          <a class="btn btn-ghost" href="download.html">Download again</a>
+          <a class="btn btn-ghost" href="plugins-guide.html">Plugins</a>
+          <a
+            class="btn btn-ghost"
+            href="https://github.com/Anurag-error404/lumora/discussions"
+            rel="noopener noreferrer"
+            >Discussions</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <span class="brand-name">LUMORA</span>
+        <span class="footer-tag">your memories your machine.</span>
+      </div>
+      <p class="footer-meta">
+        MIT License ·
+        <a href="index.html">Home</a>
+        ·
+        <a href="download.html">Download</a>
+        ·
+        <a href="install.html" aria-current="page">Get started</a>
+        ·
+        <a href="guide.html">Guide</a>
+        ·
+        <a href="plugins-guide.html">Plugins</a>
+        ·
+        <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
+          >GitHub</a
+        >
+        ·
+        <a href="https://ko-fi.com/anuragerror404" rel="noopener noreferrer"
+          >Ko-fi</a
+        >
+      </p>
+    </footer>
+
+    <script src="site.js" defer></script>
+  </body>
+</html>
