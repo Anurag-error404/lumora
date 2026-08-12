@@ -156,6 +156,8 @@ impl AppState {
 ///
 /// WAL allows readers alongside a writer; `busy_timeout` makes competing
 /// writers wait instead of immediately failing with "database is locked".
+/// `journal_size_limit` caps growth after a successful checkpoint; the idle
+/// thread in `lib::spawn_wal_checkpoint` periodically runs `TRUNCATE`.
 pub fn open_db(path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(30))?;
@@ -163,7 +165,8 @@ pub fn open_db(path: &Path) -> AppResult<Connection> {
         "PRAGMA foreign_keys = ON;
          PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
-         PRAGMA temp_store = MEMORY;",
+         PRAGMA temp_store = MEMORY;
+         PRAGMA journal_size_limit = 67108864;",
     )?;
     Ok(conn)
 }
@@ -182,5 +185,24 @@ mod tests {
         assert!(paths.logs_dir.exists());
         assert!(paths.models_dir.exists());
         assert_eq!(paths.db_path.file_name().unwrap(), "library.db");
+    }
+
+    #[test]
+    fn wal_checkpoint_truncate_succeeds() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let conn = open_db(&path).unwrap();
+        conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1);")
+            .unwrap();
+        let (busy, _log, _ckpt): (i64, i64, i64) = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(busy, 0);
+        let limit: i64 = conn
+            .query_row("PRAGMA journal_size_limit", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(limit, 67_108_864);
     }
 }

@@ -266,7 +266,7 @@ pub fn list_assets(
     state.with_db(|conn| search::list_assets(conn, limit.min(500), offset, false))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_assets(
     state: State<'_, AppState>,
     query: String,
@@ -448,7 +448,7 @@ pub fn ping_user_activity() {
     prefs_runtime::touch_user_activity();
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_storage_summary(state: State<'_, AppState>) -> AppResult<StorageSummary> {
     state.with_db(|conn| {
         preferences::storage_summary(
@@ -464,7 +464,7 @@ pub fn get_storage_summary(state: State<'_, AppState>) -> AppResult<StorageSumma
 
 /// Delete thumbnail cache files. Library entries stay intact; previews regenerate
 /// on demand / via rebuild.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_thumbnail_cache(state: State<'_, AppState>) -> AppResult<u64> {
     Ok(clear_thumbs_dir(&state.paths.thumbs_dir))
 }
@@ -510,10 +510,10 @@ pub async fn retry_missing_thumbnails(app: AppHandle) -> AppResult<u32> {
     .map_err(|e| AppError::msg(format!("thumbnail retry task failed: {e}")))?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn optimize_database(state: State<'_, AppState>) -> AppResult<()> {
     state.with_db(|conn| {
-        conn.execute_batch("PRAGMA optimize; VACUUM;")?;
+        conn.execute_batch("PRAGMA optimize; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")?;
         Ok(())
     })
 }
@@ -786,7 +786,7 @@ pub fn list_tag_assets(
 }
 
 /// Rating and colour-label facet counts for the Tags browsing page.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_library_facets(state: State<'_, AppState>) -> AppResult<LibraryFacets> {
     state.with_db(|conn| {
         let (ratings, color_labels) = search::facet_counts(conn)?;
@@ -2170,7 +2170,7 @@ pub async fn set_active_model(
 }
 
 /// Probe a local AutoTags ONNX + labels file without installing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn evaluate_local_autotags(
     model_path: String,
     labels_path: String,
@@ -2179,7 +2179,7 @@ pub fn evaluate_local_autotags(
 }
 
 /// Probe a local CLIP vision/text/tokenizer bundle without installing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn evaluate_local_clip(
     vision_path: String,
     text_path: String,
@@ -2193,7 +2193,7 @@ pub fn evaluate_local_clip(
 }
 
 /// Evaluate + import a local AutoTags model, then activate it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_local_autotags(
     state: State<'_, AppState>,
     model_path: String,
@@ -2239,7 +2239,7 @@ pub fn import_local_autotags(
 }
 
 /// Evaluate + import a local CLIP bundle, then activate it (clears embeddings).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_local_clip(
     state: State<'_, AppState>,
     vision_path: String,
@@ -2289,7 +2289,7 @@ pub fn import_local_clip(
 /// Wipe derived AI data for the chosen capabilities and re-queue background work.
 ///
 /// `kinds` accepts any of: `"semantic"`, `"ocr"`, `"faces"`, `"tags"`, `"captions"`, `"all"`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reprocess_ai(state: State<'_, AppState>, kinds: Vec<String>) -> AppResult<ReprocessResult> {
     let mut want_semantic = false;
     let mut want_ocr = false;
@@ -2427,7 +2427,7 @@ pub fn rename_person(state: State<'_, AppState>, person_id: String, name: String
     state.with_db(|conn| faces::cluster::rename(conn, &person_id, &name))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn merge_people(state: State<'_, AppState>, into_id: String, from_id: String) -> AppResult<()> {
     state.with_db(|conn| faces::cluster::merge(conn, &into_id, &from_id))
 }
@@ -2445,7 +2445,7 @@ pub fn list_asset_faces(
     state.with_db(|conn| faces::list_asset_faces(conn, &asset_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recluster_faces(state: State<'_, AppState>) -> AppResult<usize> {
     let n = state.with_db(faces::cluster::recluster_unnamed)?;
     state.faces.kick();
@@ -2470,7 +2470,10 @@ pub fn list_place_assets(
 }
 
 /// Curated Memories v1 cards (On this day / weekend trips / person + place).
-#[tauri::command]
+///
+/// `async` so Tauri runs it off the main thread: a plain command blocks the
+/// event loop, which freezes the window while the cards are assembled.
+#[tauri::command(async)]
 pub fn list_memories(
     state: State<'_, AppState>,
     limit: Option<u32>,
@@ -2548,7 +2551,7 @@ pub async fn list_memory_assets(
 }
 
 /// Persist a memory as a normal album (user-initiated only).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_memory_as_album(
     state: State<'_, AppState>,
     memory_id: String,
@@ -2706,7 +2709,7 @@ fn list_assets_preserving_order(conn: &Connection, ids: &[String]) -> AppResult<
     Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn find_duplicates(state: State<'_, AppState>) -> AppResult<Vec<DuplicateGroup>> {
     state.with_db(duplicates::all_duplicates)
 }
@@ -2736,7 +2739,7 @@ pub async fn scan_duplicates(
 }
 
 /// Soft-focus / out-of-focus images (Laplacian variance ≤ threshold).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_blurry_assets(
     state: State<'_, AppState>,
     limit: Option<u32>,
@@ -2746,7 +2749,7 @@ pub fn list_blurry_assets(
 }
 
 /// Score images that still lack a blur_score (uses thumbnails when present).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_blur_scores(state: State<'_, AppState>, limit: Option<u32>) -> AppResult<usize> {
     state.with_db(|conn| blur::backfill_missing(conn, limit.unwrap_or(500)))
 }
@@ -2780,7 +2783,7 @@ pub fn list_assets_by_ids(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn soft_delete_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
     if ids.is_empty() {
         return Ok(0);
@@ -2799,7 +2802,7 @@ pub fn soft_delete_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppRe
     Ok(count)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
     state.with_db(|conn| trash::restore(conn, &ids))
 }
@@ -2813,7 +2816,7 @@ pub fn list_trash(
     state.with_db(|conn| trash::list_trash(conn, limit, offset))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn purge_trash(state: State<'_, AppState>) -> AppResult<usize> {
     let expired_ids: Vec<String> = state.with_db(|conn| {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(trash::DEFAULT_RETENTION_DAYS))
@@ -2846,7 +2849,7 @@ pub fn purge_trash(state: State<'_, AppState>) -> AppResult<usize> {
     Ok(count)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn empty_trash(state: State<'_, AppState>) -> AppResult<trash::PermanentDeleteResult> {
     let trashed_ids: Vec<String> = state.with_db(|conn| {
         let mut stmt = conn.prepare("SELECT id FROM assets WHERE deleted_at IS NOT NULL")?;
@@ -2878,7 +2881,7 @@ pub fn empty_trash(state: State<'_, AppState>) -> AppResult<trash::PermanentDele
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn permanently_delete_assets(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -2922,7 +2925,7 @@ pub fn permanently_delete_assets(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_assets_zip(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -2976,7 +2979,7 @@ pub fn export_assets_zip(
 }
 
 /// Lossless / bit-preserving optimize for a selection. Keeps results only when smaller.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn optimize_assets(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -3012,7 +3015,7 @@ pub fn optimize_assets(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn probe_video_asset(
     state: State<'_, AppState>,
     asset_id: String,
@@ -3021,7 +3024,7 @@ pub fn probe_video_asset(
 }
 
 /// Trim / crop a video via system ffmpeg (replace or sibling copy).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_video_edit(
     state: State<'_, AppState>,
     asset_id: String,
@@ -3048,7 +3051,7 @@ pub fn apply_video_edit(
 /// Apply rotate / crop / exposure, then save over the original or as a sibling copy.
 /// Clears CLIP embeddings for the resulting asset and resumes background embedding.
 /// Also clears non-destructive edit revisions for the source asset after bake.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_image_edit(
     state: State<'_, AppState>,
     asset_id: String,
@@ -3102,7 +3105,7 @@ pub fn list_edit_revisions(
 }
 
 /// Re-apply an older revision as the new latest (append-only).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn revert_edit_revision(
     state: State<'_, AppState>,
     asset_id: String,
@@ -3265,7 +3268,7 @@ pub fn list_vaults(state: State<'_, AppState>) -> AppResult<Vec<VaultSummary>> {
     state.with_db(|conn| vault::list_vaults(conn, active.as_deref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn setup_vault(
     state: State<'_, AppState>,
     name: String,
@@ -3292,7 +3295,7 @@ pub fn setup_vault(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unlock_vault(
     state: State<'_, AppState>,
     vault_id: String,
@@ -3307,7 +3310,7 @@ pub fn unlock_vault(
 }
 
 /// Reset a forgotten password using the one-time recovery code, then unlock.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recover_vault(
     state: State<'_, AppState>,
     vault_id: String,
@@ -3332,7 +3335,7 @@ pub fn recover_vault(
 }
 
 /// Add a recovery code to a vault created before this feature existed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn enable_vault_recovery(state: State<'_, AppState>) -> AppResult<String> {
     let (vault_id, key) = state.vault_session()?;
     let code = state.with_db(|conn| vault::enable_recovery(conn, &vault_id, &key))?;
@@ -3354,7 +3357,7 @@ pub fn lock_vault(state: State<'_, AppState>) -> AppResult<VaultStatus> {
     vault_status_snapshot(&state)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lock_assets_to_vault(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -3380,7 +3383,7 @@ pub fn lock_assets_to_vault(
 }
 
 /// Move an entire library album into the vault, keeping it grouped.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lock_album_to_vault(
     state: State<'_, AppState>,
     album_id: String,
@@ -3417,7 +3420,7 @@ pub fn lock_album_to_vault(
 }
 
 /// Move an entire folder from disk into the vault, keeping it grouped.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lock_folder_to_vault(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -3469,19 +3472,19 @@ pub fn list_locked_assets(
     state.with_db(|conn| vault::list_locked(conn, &vault_id, &key, album_id.as_deref()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_thumb(state: State<'_, AppState>, id: String) -> AppResult<Option<String>> {
     let (vault_id, key) = state.vault_session()?;
     state.with_db(|conn| vault::decrypt_thumb(conn, &vault_id, &key, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_media(state: State<'_, AppState>, id: String) -> AppResult<String> {
     let (vault_id, key) = state.vault_session()?;
     state.with_db(|conn| vault::decrypt_media(conn, &vault_id, &key, &id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_out_locked_assets(
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -3506,7 +3509,7 @@ pub fn move_out_locked_assets(
 }
 
 /// Move an entire locked group out, recreating its folder structure at `dest`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_out_locked_album(
     state: State<'_, AppState>,
     album_id: String,
@@ -3531,7 +3534,7 @@ pub fn move_out_locked_album(
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_locked_album(state: State<'_, AppState>, album_id: String) -> AppResult<usize> {
     let (vault_id, key) = state.vault_session()?;
     let removed =
@@ -3549,7 +3552,7 @@ pub fn delete_locked_album(state: State<'_, AppState>, album_id: String) -> AppR
     Ok(removed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_locked_assets(state: State<'_, AppState>, ids: Vec<String>) -> AppResult<usize> {
     if ids.is_empty() {
         return Err(AppError::msg("no items selected"));
@@ -3612,7 +3615,7 @@ pub fn set_plugin_enabled(
 /// into the plugins directory.  Returns the list of installed plugin ids.
 /// If the chosen directory has no manifest but contains valid plugin sub-folders,
 /// all of them are installed as a batch.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn install_plugin_dir(
     state: State<'_, AppState>,
     source_dir: String,
@@ -3628,7 +3631,7 @@ pub fn get_plugins_dir(state: State<'_, AppState>) -> AppResult<String> {
 }
 
 /// Create a new plugin folder with manifest, main.js, and README.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_plugin(
     state: State<'_, AppState>,
     spec: plugins::CreatePluginSpec,
@@ -3641,13 +3644,13 @@ pub fn create_plugin(
 }
 
 /// Analyze plugin JavaScript for structure issues and inferred permissions.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn analyze_plugin_source(main_js: String) -> AppResult<plugins::PluginAnalysis> {
     Ok(plugins::analyze_main_js(&main_js))
 }
 
 /// Read installed plugin source files for editing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_plugin_sources(
     state: State<'_, AppState>,
     plugin_id: String,
@@ -3656,7 +3659,7 @@ pub fn read_plugin_sources(
 }
 
 /// Read plugin sources from any folder (e.g. first-party examples before install).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_plugin_sources_from_dir(source_dir: String) -> AppResult<plugins::PluginSources> {
     let path = std::path::PathBuf::from(source_dir);
     plugins::read_sources_from_dir(&path, None)
@@ -3672,7 +3675,7 @@ pub fn save_plugin_draft(
 }
 
 /// Copy an installed or example plugin into a new personal fork.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fork_plugin(
     state: State<'_, AppState>,
     spec: plugins::ForkPluginSpec,
@@ -3745,7 +3748,7 @@ pub fn list_available_plugins(state: State<'_, AppState>) -> AppResult<Vec<Avail
 }
 
 /// Delete the plugin folder and remove its enabled-state entry from preferences.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_plugin(state: State<'_, AppState>, plugin_id: String) -> AppResult<()> {
     plugins::remove_plugin_dir(&plugin_id, &state.paths.plugins_dir)?;
     let mut prefs = preferences::load(&state.paths.app_data).unwrap_or_default();

@@ -115,6 +115,34 @@ fn spawn_auto_scan(
     });
 }
 
+/// Shrink the WAL while the UI is idle so long indexing sessions can't leave a
+/// multi-GB journal behind. Skips when the user was recently active.
+fn spawn_wal_checkpoint(db_path: std::path::PathBuf) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(5 * 60));
+        let last = prefs_runtime::last_user_activity_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if last != 0 && now.saturating_sub(last) < prefs_runtime::IDLE_THRESHOLD_SECS {
+            continue;
+        }
+        let Ok(conn) = state::open_db(&db_path) else {
+            continue;
+        };
+        match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        }) {
+            Ok((busy, log, checkpointed)) if log > 0 || checkpointed > 0 || busy != 0 => {
+                tracing::info!(busy, log, checkpointed, "wal checkpoint");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "wal checkpoint skipped"),
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -226,6 +254,7 @@ pub fn run() {
                 state.paths.app_data.clone(),
                 Arc::clone(&indexer),
             );
+            spawn_wal_checkpoint(state.paths.db_path.clone());
 
             let watch_service =
                 Arc::new(watcher::WatcherService::new(state.paths.app_data.clone()));

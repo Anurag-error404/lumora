@@ -26,6 +26,8 @@ const MIN_PERSON_PLACE: i64 = 5;
 const MAX_WEEKEND_MEMORIES: usize = 12;
 const MAX_PERSON_PLACE_MEMORIES: usize = 20;
 const MAX_ASSETS_PER_MEMORY: u32 = 200;
+/// A card shows one cover and one quote, and `pick_quote` scans 16 rows.
+const SUMMARY_CANDIDATES: usize = 16;
 
 const SELECT_COLUMNS: &str = "a.id, a.path, a.hash, a.perceptual_hash, a.media_type, a.width,
      a.height, a.duration_ms, a.created_at, a.captured_at, a.indexed_at, a.favorite,
@@ -116,6 +118,30 @@ fn diversified_ids(
         })
         .collect();
     Ok(diversify(candidates, take.max(1)))
+}
+
+/// Highest-ranked ids, without the CLIP pass.
+///
+/// Building a card only needs a cover and a quote, so it must not pay for
+/// diversification: that loads an embedding per candidate and compares every
+/// candidate against every pick. `list_memory_assets` still diversifies the
+/// grid the card opens into, which is where the ordering is actually visible.
+fn top_ranked_ids(
+    conn: &Connection,
+    where_sql: &str,
+    params: &[&dyn ToSql],
+    take: usize,
+) -> AppResult<Vec<String>> {
+    let sql = format!(
+        "SELECT a.id
+         FROM assets a
+         WHERE a.deleted_at IS NULL AND ({where_sql})
+         ORDER BY {RANK_ORDER}
+         LIMIT {take}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params, |r| r.get(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 fn assets_for_ordered_ids(
@@ -554,12 +580,12 @@ fn on_this_day_for_month_day(
         return Ok(None);
     }
 
-    let ordered = diversified_ids(
+    let ordered = top_ranked_ids(
         conn,
         "strftime('%m-%d', COALESCE(a.captured_at, a.created_at)) = ?1
            AND CAST(strftime('%Y', COALESCE(a.captured_at, a.created_at)) AS INTEGER) < ?2",
         &[&month_day, &this_year],
-        32,
+        SUMMARY_CANDIDATES,
     )?;
     let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_on_this_day(years.len(), count);
@@ -710,12 +736,12 @@ fn build_weekend_summary(
     let place = dominant_place_in_range(conn, start, end)?;
     let start_s = start.format("%Y-%m-%d").to_string();
     let end_s = end.format("%Y-%m-%d").to_string();
-    let ordered = diversified_ids(
+    let ordered = top_ranked_ids(
         conn,
         "strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) >= ?1
            AND strftime('%Y-%m-%d', COALESCE(a.captured_at, a.created_at)) <= ?2",
         &[&start_s, &end_s],
-        32,
+        SUMMARY_CANDIDATES,
     )?;
     let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_weekend(place.as_deref(), start, end, total);
@@ -903,7 +929,7 @@ fn person_place_summary(
     place: &str,
     count: i64,
 ) -> AppResult<Option<MemorySummary>> {
-    let ordered = diversified_ids(
+    let ordered = top_ranked_ids(
         conn,
         "EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = ?1)
            AND EXISTS (
@@ -911,7 +937,7 @@ fn person_place_summary(
              WHERE ap.asset_id = a.id AND ap.place_label = ?2
            )",
         &[&person_id, &place],
-        32,
+        SUMMARY_CANDIDATES,
     )?;
     let (cover_asset_id, cover_thumbnail_path) = cover_from_ids(conn, &ordered)?;
     let (title, subtitle) = template_person_place(person_name, place, count);
@@ -1203,6 +1229,42 @@ mod tests {
             assets[1].id, "d2",
             "second slot should be diverse, not the near-duplicate favourite"
         );
+    }
+
+    /// The card path must stay off the CLIP re-ranker: dropping an embedding
+    /// row that `diversified_ids` would have loaded must not change the card.
+    #[test]
+    fn summary_cover_does_not_depend_on_embeddings() {
+        let today = Utc::now().date_naive();
+        let md = format!("{:02}-{:02}", today.month(), today.day());
+        let y = today.year();
+
+        let cover_of = |with_embeddings: bool| {
+            let conn = setup();
+            // "s1" is the near-duplicate favourite that diversity would demote.
+            for (id, fav) in [("s0", true), ("s1", true), ("s2", false)] {
+                insert_asset(&conn, id, &format!("{}-{md}T12:00:00Z", y - 1), fav);
+            }
+            if with_embeddings {
+                for (id, raw) in [
+                    ("s0", vec![1.0f32, 0.0]),
+                    ("s1", vec![0.99f32, 0.14]),
+                    ("s2", vec![0.0f32, 1.0]),
+                ] {
+                    let mut v = raw;
+                    crate::ml::vector::normalize(&mut v);
+                    crate::semantic::store(&conn, id, crate::semantic::IMAGE_MODEL_ID, &v).unwrap();
+                }
+            }
+            let list = list_memories(&conn, 10).unwrap();
+            list.into_iter()
+                .find(|m| m.kind == MemoryKind::OnThisDay)
+                .expect("on this day")
+                .cover_asset_id
+        };
+
+        assert_eq!(cover_of(true), cover_of(false));
+        assert_eq!(cover_of(false).as_deref(), Some("s0"));
     }
 
     #[test]
