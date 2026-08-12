@@ -15,19 +15,28 @@ static FFMPEG: OnceLock<Option<PathBuf>> = OnceLock::new();
 static FFPROBE: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 fn which(bin: &str) -> Option<PathBuf> {
-    Command::new("which")
+    // GUI apps on macOS get a stripped PATH (no Homebrew). Prefer PATH, then
+    // well-known locations.
+    if let Some(p) = Command::new("which")
         .arg(bin)
         .output()
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(s))
-            }
+            (!s.is_empty()).then(|| PathBuf::from(s))
         })
+    {
+        return Some(p);
+    }
+    // Apple Silicon Homebrew, Intel Homebrew, then /usr/local fallbacks.
+    for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        let p = PathBuf::from(dir).join(bin);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 pub fn ffmpeg_path() -> Option<&'static Path> {
@@ -182,5 +191,20 @@ mod tests {
     fn which_finds_or_misses_without_panic() {
         let _ = ffmpeg_available();
         let _ = ffprobe_path();
+    }
+
+    #[test]
+    fn which_falls_back_to_homebrew_when_path_empty() {
+        // ponytail: only asserts the fallback lookup itself; skips if ffmpeg isn't installed.
+        let homebrew = PathBuf::from("/opt/homebrew/bin/ffmpeg");
+        let intel = PathBuf::from("/usr/local/bin/ffmpeg");
+        if !homebrew.is_file() && !intel.is_file() {
+            return;
+        }
+        let found = which("ffmpeg");
+        assert!(found.is_some());
+        let p = found.unwrap();
+        assert!(p.ends_with("ffmpeg"));
+        assert!(p.is_file());
     }
 }
