@@ -71,6 +71,10 @@ impl FaceWorker {
         self.wake.store(true, Ordering::Relaxed);
     }
 
+    pub fn unload_engine(&self) {
+        *self.engine.lock() = None;
+    }
+
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
         if let Ok(conn) = open_db(&self.db_path) {
@@ -134,6 +138,7 @@ impl FaceWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 let prefs = preferences::load(&self.app_data).unwrap_or_default();
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
@@ -147,6 +152,7 @@ impl FaceWorker {
             };
             if !prefs.ai.face_recognition || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
                 ));
@@ -183,6 +189,8 @@ impl FaceWorker {
                 ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
+                drop(engine);
+                self.unload_engine();
             }
         }
     }

@@ -1303,28 +1303,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn tmp_time_real_library() {
-        let conn = crate::state::open_db(std::path::Path::new(
-            "/tmp/lumora-perf/library.db",
-        ))
-        .unwrap();
-        crate::db::migrate(&conn).unwrap();
-        let t = std::time::Instant::now();
-        let n = cache::rebuild(&conn).unwrap();
-        println!("rebuild: {} cards in {:?}", n, t.elapsed());
-        let t = std::time::Instant::now();
-        let cards = cache::list(&conn, 30).unwrap();
-        println!("list: {} cards in {:?}", cards.len(), t.elapsed());
-        let t = std::time::Instant::now();
-        let built = list_memories(&conn, 30).unwrap();
-        println!("uncached build: {} cards in {:?}", built.len(), t.elapsed());
-        for c in cards.iter().take(4) {
-            println!("  {} | {} | {:?}", c.title, c.insight, c.cover_asset_id);
-        }
-    }
-
-    #[test]
     fn cover_skips_screenshots_unless_thats_all_there_is() {
         let today = Utc::now().date_naive();
         let md = format!("{:02}-{:02}", today.month(), today.day());

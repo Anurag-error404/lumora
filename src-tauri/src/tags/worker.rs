@@ -66,6 +66,10 @@ impl TagsWorker {
         self.wake.store(true, Ordering::Relaxed);
     }
 
+    pub fn unload_engine(&self) {
+        *self.engine.lock() = None;
+    }
+
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
         if let Ok(conn) = open_db(&self.db_path) {
@@ -147,6 +151,7 @@ impl TagsWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 let prefs = preferences::load(&self.app_data).unwrap_or_default();
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
@@ -160,6 +165,7 @@ impl TagsWorker {
             };
             if !prefs.ai.object_detection || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 if !prefs.ai.object_detection {
                     *self.last_error.lock() =
                         Some("Object detection is turned off in Settings → AI Features.".into());
@@ -210,6 +216,8 @@ impl TagsWorker {
                 ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
+                drop(engine);
+                self.unload_engine();
             }
         }
     }

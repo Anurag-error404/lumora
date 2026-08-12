@@ -2547,6 +2547,8 @@ pub async fn enrich_memory_prose(
         Ok(p) => detail.summary.prose = p,
         Err(e) => tracing::warn!(error = %e, memory_id = %memory_id, "memory prose failed"),
     }
+    // Prose sessions are ~260 MB — don't keep them after a one-shot enrich.
+    memories::prose::invalidate_engine();
     detail.summary.insight = memories::compose_insight(&detail.summary);
     Ok(detail.summary)
 }

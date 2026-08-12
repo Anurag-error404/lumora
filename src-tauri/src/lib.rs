@@ -165,11 +165,15 @@ fn spawn_wal_checkpoint(db_path: std::path::PathBuf) {
 /// Regroup memory cards off the UI path.
 ///
 /// Grouping scans the library and takes seconds, so it never runs inside a
-/// command. This thread owns that work: it wakes on a queued rebuild (launch,
-/// import, or the Refresh button) and re-checks once every ~5 minutes for the
-/// day rollover that retires the "on this day" card.
+/// command. This thread owns that work: it waits out the ML cold-start grace so
+/// it doesn't fight first paint / model loads, then wakes on a queued rebuild
+/// (launch, import, or Refresh) and re-checks ~every 5 minutes for the day
+/// rollover that retires the "on this day" card.
 fn spawn_memories_builder(db_path: std::path::PathBuf) {
     std::thread::spawn(move || {
+        while !prefs_runtime::past_ml_cold_start(MEMORIES_COLD_START_SECS) {
+            std::thread::sleep(Duration::from_secs(1));
+        }
         let Ok(conn) = state::open_db(&db_path) else {
             tracing::warn!("memories builder could not open the database");
             return;
@@ -192,6 +196,7 @@ fn spawn_memories_builder(db_path: std::path::PathBuf) {
     });
 }
 
+const MEMORIES_COLD_START_SECS: u64 = 45;
 const MEMORIES_BUILD_TICK: Duration = Duration::from_secs(2);
 /// ~5 minutes of ticks.
 const MEMORIES_DAY_CHECK_TICKS: u64 = 150;

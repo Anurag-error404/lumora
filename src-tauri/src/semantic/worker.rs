@@ -81,6 +81,12 @@ impl EmbedWorker {
         super::ann::mark_dirty();
     }
 
+    /// Drop the resident ONNX sessions without re-waking the loop.
+    pub fn unload_engine(&self) {
+        *self.engine.lock() = None;
+        super::ann::drop_resident();
+    }
+
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
         // Permanently-failed assets are excluded from the queue — reset them so
@@ -150,6 +156,7 @@ impl EmbedWorker {
 
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 let prefs = preferences::load(&self.app_data).unwrap_or_default();
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
@@ -163,6 +170,7 @@ impl EmbedWorker {
             };
             if !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 thread::sleep(Duration::from_millis(
                     prefs_runtime::throttle(&prefs.performance).idle_ms,
                 ));
@@ -200,6 +208,10 @@ impl EmbedWorker {
                 ));
             } else {
                 self.running.store(false, Ordering::Relaxed);
+                // CLIP alone is ~600 MB on disk; keeping it warm after the queue
+                // drains is what pushes LUMORA past 2 GB RSS.
+                drop(engine);
+                self.unload_engine();
             }
         }
     }

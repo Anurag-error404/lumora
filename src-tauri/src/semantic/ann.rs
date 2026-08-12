@@ -45,6 +45,11 @@ pub fn invalidate() {
     *cache().lock() = None;
 }
 
+/// Free the in-memory HNSW without forcing a rebuild on next search.
+pub fn drop_resident() {
+    *cache().lock() = None;
+}
+
 pub fn invalidate_and_remove(_app_data: &std::path::Path) {
     invalidate();
 }

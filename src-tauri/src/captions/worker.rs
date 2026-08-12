@@ -55,8 +55,19 @@ impl CaptionsWorker {
         worker
     }
 
-    pub fn invalidate(&self) { *self.engine.lock() = None; self.wake.store(true, Ordering::Relaxed); }
-    pub fn pause(&self) { self.paused.store(true, Ordering::Relaxed); self.running.store(false, Ordering::Relaxed); }
+    pub fn invalidate(&self) {
+        *self.engine.lock() = None;
+        self.wake.store(true, Ordering::Relaxed);
+    }
+
+    pub fn unload_engine(&self) {
+        *self.engine.lock() = None;
+    }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+        self.running.store(false, Ordering::Relaxed);
+    }
     pub fn kick(&self) {
         self.paused.store(false, Ordering::Relaxed);
         if let Ok(conn) = open_db(&self.db_path) {
@@ -99,14 +110,18 @@ impl CaptionsWorker {
             }
             if self.paused.load(Ordering::Relaxed) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 thread::sleep(Duration::from_millis(throttle.idle_ms));
                 continue;
             }
             if !prefs.ai.captions || !prefs_runtime::should_run_background(&prefs) {
                 self.running.store(false, Ordering::Relaxed);
+                self.unload_engine();
                 *self.last_error.lock() = Some(if prefs.ai.captions {
                     "Background AI processing is paused.".into()
-                } else { "Image captions are turned off in Settings → AI Features.".into() });
+                } else {
+                    "Image captions are turned off in Settings → AI Features.".into()
+                });
                 thread::sleep(Duration::from_millis(throttle.idle_ms));
                 continue;
             }
@@ -116,9 +131,23 @@ impl CaptionsWorker {
                 Err(e) => { self.running.store(false, Ordering::Relaxed); tracing::warn!(error=%e, "captions engine unavailable"); *self.last_error.lock() = Some(e.to_string()); thread::sleep(Duration::from_millis(throttle.idle_ms)); continue; }
             };
             match self.drain_batch(&engine, &prefs) {
-                Ok(n) if n > 0 => { self.wake.store(true, Ordering::Relaxed); thread::sleep(Duration::from_millis(throttle.between_ms)); }
-                Ok(_) => self.running.store(false, Ordering::Relaxed),
-                Err(e) => { tracing::warn!(error=%e, "captions batch failed"); *self.last_error.lock() = Some(e.to_string()); self.running.store(false, Ordering::Relaxed); }
+                Ok(n) if n > 0 => {
+                    self.wake.store(true, Ordering::Relaxed);
+                    thread::sleep(Duration::from_millis(throttle.between_ms));
+                }
+                Ok(_) => {
+                    self.running.store(false, Ordering::Relaxed);
+                    // Florence-2 is ~260 MB of sessions — free it between queues.
+                    drop(engine);
+                    self.unload_engine();
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "captions batch failed");
+                    *self.last_error.lock() = Some(e.to_string());
+                    self.running.store(false, Ordering::Relaxed);
+                    drop(engine);
+                    self.unload_engine();
+                }
             }
         }
     }
