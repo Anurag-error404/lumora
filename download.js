@@ -99,7 +99,100 @@
     stepsList: document.getElementById("install-steps-list"),
     stepsIntro: document.getElementById("steps-intro"),
     platformList: document.getElementById("platform-list"),
+    checksumRow: document.getElementById("checksum-row"),
+    checksumValue: document.getElementById("checksum-value"),
+    checksumCopy: document.getElementById("checksum-copy"),
+    checksumFallback: document.getElementById("checksum-fallback"),
+    releaseNotes: document.getElementById("release-notes"),
+    releaseNotesEmpty: document.getElementById("release-notes-empty"),
+    whatsNewHeading: document.getElementById("whats-new-heading"),
+    whatsNewSub: document.getElementById("whats-new-sub"),
+    statLatest: document.getElementById("stat-latest"),
+    statDate: document.getElementById("stat-date"),
+    statDownloads: document.getElementById("stat-downloads"),
+    statNotesLink: document.getElementById("stat-notes-link"),
   };
+
+  function sha256FromDigest(digest) {
+    if (!digest || typeof digest !== "string") return "";
+    const m = /^(?:sha256:)?([a-f0-9]{64})$/i.exec(digest.trim());
+    return m ? m[1].toLowerCase() : "";
+  }
+
+  function setChecksum(asset) {
+    const hash = asset ? sha256FromDigest(asset.digest) : "";
+    if (hash && el.checksumRow && el.checksumValue) {
+      el.checksumRow.hidden = false;
+      el.checksumValue.textContent = hash;
+      if (el.checksumFallback) el.checksumFallback.hidden = true;
+    } else {
+      if (el.checksumRow) el.checksumRow.hidden = true;
+      if (el.checksumFallback) el.checksumFallback.hidden = false;
+    }
+  }
+
+  function stripMd(text) {
+    return String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .trim();
+  }
+
+  function setReleaseNotes(data) {
+    const tag = data.tag_name || data.name || "";
+    const body = stripMd(data.body || "");
+    if (el.whatsNewHeading && tag) {
+      el.whatsNewHeading.textContent = `What’s New in ${tag}`;
+    }
+    if (el.releaseNotes && body) {
+      const truncated = body.length > 1800 ? `${body.slice(0, 1800).trim()}…` : body;
+      el.releaseNotes.hidden = false;
+      el.releaseNotes.textContent = truncated;
+      if (el.releaseNotesEmpty) el.releaseNotesEmpty.hidden = true;
+    }
+    if (el.whatsNewSub && data.html_url) {
+      el.whatsNewSub.innerHTML = `From the latest GitHub release · <a href="${data.html_url}" rel="noopener noreferrer">full notes</a>`;
+    }
+  }
+
+  function setStats(data, downloadTotal) {
+    const tag = data.tag_name || data.name || "—";
+    if (el.statLatest) el.statLatest.textContent = tag;
+    if (el.statDate && data.published_at) {
+      try {
+        el.statDate.textContent = new Date(data.published_at).toLocaleDateString(
+          undefined,
+          { year: "numeric", month: "short", day: "numeric" }
+        );
+      } catch {
+        el.statDate.textContent = data.published_at.slice(0, 10);
+      }
+    }
+    if (el.statDownloads && typeof downloadTotal === "number" && downloadTotal > 0) {
+      el.statDownloads.textContent = downloadTotal.toLocaleString();
+    }
+    if (el.statNotesLink && data.html_url) {
+      el.statNotesLink.href = data.html_url;
+    }
+  }
+
+  if (el.checksumCopy && el.checksumValue) {
+    el.checksumCopy.addEventListener("click", async () => {
+      const text = el.checksumValue.textContent || "";
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        el.checksumCopy.textContent = "Copied";
+        setTimeout(() => {
+          el.checksumCopy.textContent = "Copy checksum";
+        }, 1500);
+      } catch {
+        el.checksumCopy.textContent = "Copy failed";
+      }
+    });
+  }
 
   function detectPlatform() {
     const ua = navigator.userAgent || "";
@@ -122,7 +215,13 @@
 
   function pickAsset(assets, platform) {
     const names = assets
-      .map((a) => ({ name: a.name, url: a.browser_download_url, size: a.size }))
+      .map((a) => ({
+        name: a.name,
+        url: a.browser_download_url,
+        size: a.size,
+        digest: a.digest || "",
+        download_count: a.download_count || 0,
+      }))
       .filter((a) => !a.name.endsWith(".sig") && a.name !== "latest.json");
 
     const prefs = PREFERRED_EXT[platform] || [];
@@ -219,6 +318,7 @@
         el.stepsIntro.textContent =
           "Install on the computer where you keep your photo library.";
       }
+      setChecksum(null);
       setSteps("mobile");
       return;
     }
@@ -236,6 +336,7 @@
           ? `${asset.name} · ${size}`
           : asset.name;
       }
+      setChecksum(asset);
     } else {
       el.status.textContent = "Choose your system below";
       el.primary.textContent = "Browse all downloads";
@@ -246,6 +347,7 @@
         el.hint.textContent =
           "We couldn’t auto-match an installer — pick Mac, Windows, or Linux below.";
       }
+      setChecksum(null);
     }
 
     if (el.version && versionLabel) {
@@ -281,6 +383,13 @@
       const versionLabel = (data.tag_name || data.name || "").replace(/^v/, "");
       const byPlatform = assetsByPlatform(data.assets || []);
       wirePlatformLinks(byPlatform, versionLabel);
+      setReleaseNotes(data);
+
+      let downloadTotal = 0;
+      for (const asset of data.assets || []) {
+        downloadTotal += asset.download_count || 0;
+      }
+      setStats(data, downloadTotal);
 
       const asset =
         platform === "mobile" || platform === "unknown"

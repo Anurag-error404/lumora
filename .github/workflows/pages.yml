@@ -1,4 +1,5 @@
-# Deploy the static marketing site (index, download, install, guide, plugins-guide, assets) to GitHub Pages.
+# Deploy the static marketing site (index, download, install, guide, plugins,
+# SEO pages, blog, roadmap, screenshots, assets) to GitHub Pages.
 #
 # After merging this workflow, switch the repo to Actions-based Pages:
 #   Settings → Pages → Build and deployment → Source: GitHub Actions
@@ -18,6 +19,16 @@ on:
       - 'install.html'
       - 'guide.html'
       - 'plugins-guide.html'
+      - 'roadmap.html'
+      - 'mylio-alternative.html'
+      - 'google-photos-alternative.html'
+      - 'immich-alternative.html'
+      - 'photoprism-alternative.html'
+      - 'digikam-alternative.html'
+      - 'offline-photo-search.html'
+      - 'open-source-photo-organizer.html'
+      - 'blog/**'
+      - 'docs/screenshots/**'
       - 'styles.css'
       - 'site.js'
       - 'download.js'
@@ -47,13 +58,21 @@ jobs:
 
       - name: Assemble static site
         run: |
-          mkdir -p _site
+          mkdir -p _site/docs _site/blog
           cp \
             index.html \
             download.html \
             install.html \
             guide.html \
             plugins-guide.html \
+            roadmap.html \
+            mylio-alternative.html \
+            google-photos-alternative.html \
+            immich-alternative.html \
+            photoprism-alternative.html \
+            digikam-alternative.html \
+            offline-photo-search.html \
+            open-source-photo-organizer.html \
             styles.css \
             site.js \
             download.js \
@@ -62,6 +81,8 @@ jobs:
             lumora-icon-tp.png \
             .nojekyll \
             _site/
+          cp -R docs/screenshots _site/docs/screenshots
+          cp -R blog/. _site/blog/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

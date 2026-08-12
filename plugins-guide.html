@@ -32,6 +32,8 @@
         <a href="install.html">Get started</a>
         <a href="guide.html">Guide</a>
         <a href="plugins-guide.html" aria-current="page">Plugins</a>
+        <a href="mylio-alternative.html">Compare</a>
+        <a href="blog/index.html">Blog</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
@@ -42,10 +44,20 @@
       </nav>
     </header>
 
+    <a
+      class="star-sticky"
+      href="https://github.com/Anurag-error404/lumora"
+      rel="noopener noreferrer"
+      >★ Star on GitHub</a
+    >
+
     <main id="main" class="guide-layout">
       <aside class="guide-toc" aria-label="On this page">
         <p class="guide-toc-label">On this page</p>
         <ol>
+          <li><a href="#gallery">Plugin gallery</a></li>
+          <li><a href="#templates">Starter templates</a></li>
+          <li><a href="#marketplace">Marketplace roadmap</a></li>
           <li><a href="#overview">Overview</a></li>
           <li><a href="#quickstart">Quick start</a></li>
           <li><a href="#structure">Folder structure</a></li>
@@ -68,6 +80,121 @@
             read and edit.
           </p>
         </header>
+
+        <section id="gallery" class="guide-section">
+          <h2>Plugin gallery</h2>
+          <p>
+            First-party examples you can install from Discover or copy from the
+            repo. Each is a readable folder on disk.
+          </p>
+          <div class="plugin-gallery">
+            <article class="plugin-card">
+              <img
+                src="docs/screenshots/plugins.png"
+                width="900"
+                height="560"
+                alt="LUMORA plugins gallery"
+              />
+              <h3>Organize by template</h3>
+              <p>Automatically sort photos into folders with a year/album template.</p>
+              <div class="plugin-actions">
+                <a
+                  href="https://github.com/Anurag-error404/lumora/tree/master/plugins/examples/com.lumora.example.organize-by-template"
+                  rel="noopener noreferrer"
+                  >Source code</a
+                >
+                <a href="#examples">Install via Discover</a>
+              </div>
+              <pre class="guide-code"><code>// OPTIONS.template
+"${year}/${album}/${filename}"</code></pre>
+            </article>
+            <article class="plugin-card">
+              <img
+                src="docs/screenshots/plugins.png"
+                width="900"
+                height="560"
+                alt=""
+              />
+              <h3>Export web-ready</h3>
+              <p>Export Instagram-ready / web-sized copies from a selection.</p>
+              <div class="plugin-actions">
+                <a
+                  href="https://github.com/Anurag-error404/lumora/tree/master/plugins/examples/com.lumora.example.export-web-ready"
+                  rel="noopener noreferrer"
+                  >Source code</a
+                >
+                <a href="#examples">Install via Discover</a>
+              </div>
+              <pre class="guide-code"><code>lumora.exportAssets({ … })</code></pre>
+            </article>
+            <article class="plugin-card">
+              <img
+                src="docs/screenshots/plugins.png"
+                width="900"
+                height="560"
+                alt=""
+              />
+              <h3>Rename by date</h3>
+              <p>Bulk rename selected files from capture dates — Lightroom-friendly workflows.</p>
+              <div class="plugin-actions">
+                <a
+                  href="https://github.com/Anurag-error404/lumora/tree/master/plugins/examples/com.lumora.example.rename-by-date"
+                  rel="noopener noreferrer"
+                  >Source code</a
+                >
+                <a href="#examples">Install via Discover</a>
+              </div>
+              <pre class="guide-code"><code>lumora.renameAsset(id, name)</code></pre>
+            </article>
+            <article class="plugin-card">
+              <img
+                src="docs/screenshots/plugins.png"
+                width="900"
+                height="560"
+                alt=""
+              />
+              <h3>Hello selection</h3>
+              <p>Minimal starter — log the current selection. Best first template.</p>
+              <div class="plugin-actions">
+                <a
+                  href="https://github.com/Anurag-error404/lumora/tree/master/plugins/examples/com.lumora.example.hello-selection"
+                  rel="noopener noreferrer"
+                  >Source code</a
+                >
+                <a href="#quickstart">Create your own</a>
+              </div>
+              <pre class="guide-code"><code>lumora.getAssets()</code></pre>
+            </article>
+          </div>
+        </section>
+
+        <section id="templates" class="guide-section">
+          <h2>Starter templates</h2>
+          <ul>
+            <li><strong>Selection action</strong> — <code>hello-selection</code></li>
+            <li><strong>Bulk rename</strong> — <code>rename-by-date</code></li>
+            <li><strong>Metadata / folder export</strong> — <code>organize-by-template</code></li>
+            <li><strong>Export workflow</strong> — <code>export-web-ready</code></li>
+            <li><strong>Custom workflow</strong> — fork any example and edit <code>main.js</code></li>
+          </ul>
+        </section>
+
+        <section id="marketplace" class="guide-section">
+          <h2>Plugin marketplace roadmap</h2>
+          <p>Not shipping yet — direction of travel:</p>
+          <ul>
+            <li>Community plugins</li>
+            <li>Plugin ratings</li>
+            <li>One-click install</li>
+            <li>Plugin signing</li>
+            <li>Marketplace</li>
+          </ul>
+          <p>
+            Aspirational ideas (caption generators, advanced duplicate auditors)
+            belong here once community packaging lands — today, ship them as
+            local plugin folders.
+          </p>
+        </section>
 
         <section id="overview" class="guide-section">
           <h2>Overview</h2>
@@ -310,7 +437,7 @@ for (const asset of assets) {
     <footer class="site-footer">
       <div class="footer-brand">
         <span class="brand-name">LUMORA</span>
-        <span class="footer-tag">your memories, your machine.</span>
+        <span class="footer-tag">Your memories. Your machine.</span>
       </div>
       <p class="footer-meta">
         MIT License ·
@@ -324,7 +451,15 @@ for (const asset of assets) {
         ·
         <a href="plugins-guide.html" aria-current="page">Plugins</a>
         ·
+        <a href="mylio-alternative.html">Compare</a>
+        ·
+        <a href="blog/index.html">Blog</a>
+        ·
+        <a href="roadmap.html">Roadmap</a>
+        ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer">GitHub</a>
+        ·
+        <a href="https://ko-fi.com/anuragerror404" rel="noopener noreferrer">Ko-fi</a>
       </p>
     </footer>
 

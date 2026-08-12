@@ -38,6 +38,8 @@
         <a href="install.html" aria-current="page">Get started</a>
         <a href="guide.html">Guide</a>
         <a href="plugins-guide.html">Plugins</a>
+        <a href="mylio-alternative.html">Compare</a>
+        <a href="blog/index.html">Blog</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
@@ -54,12 +56,19 @@
       </nav>
     </header>
 
+    <a
+      class="star-sticky"
+      href="https://github.com/Anurag-error404/lumora"
+      rel="noopener noreferrer"
+      >★ Star on GitHub</a
+    >
+
     <main id="main">
       <section class="install-hero" aria-labelledby="install-title">
         <p class="install-kicker">Get started</p>
         <h1 id="install-title">Install LUMORA. Keep every photo on your machine.</h1>
         <p class="install-lede">
-          Google Photos-style search for a local library — download a desktop
+          The open-source alternative to Mylio Photos — download a desktop
           build, import a folder, and search offline. No account. No upload.
         </p>
         <div class="hero-actions">
@@ -67,6 +76,21 @@
           <a class="btn btn-ghost" href="#first-run">First 5 minutes</a>
           <a class="btn btn-ghost" href="#from-source">Build from source</a>
         </div>
+      </section>
+
+      <section class="section" id="setup-diagram" aria-labelledby="setup-diagram-heading">
+        <header class="section-head">
+          <h2 id="setup-diagram-heading">Setup path</h2>
+          <p>From download to AI search — all on your machine.</p>
+        </header>
+        <ol class="setup-diagram reveal">
+          <li><span>Download</span></li>
+          <li><span>Install</span></li>
+          <li><span>Import Photos</span></li>
+          <li><span>Index Library</span></li>
+          <li><span>Search</span></li>
+          <li><span>Enable AI Features</span></li>
+        </ol>
       </section>
 
       <section
@@ -134,6 +158,14 @@ bun run tauri build</code></pre>
           <h2 id="first-run-heading">2. First five minutes</h2>
           <p>One folder is enough to feel the product.</p>
         </header>
+
+        <ul class="checklist reveal">
+          <li>Install LUMORA</li>
+          <li>Import a folder</li>
+          <li>Run indexing</li>
+          <li>Search first photo</li>
+          <li>Enable AI features</li>
+        </ul>
 
         <ol class="install-steps reveal">
           <li>
@@ -235,6 +267,97 @@ bun run tauri build</code></pre>
 
       <section
         class="section"
+        id="requirements"
+        aria-labelledby="requirements-heading"
+      >
+        <header class="section-head">
+          <h2 id="requirements-heading">System requirements</h2>
+          <p>Recommended resources by feature.</p>
+        </header>
+        <div class="compare-wrap reveal">
+          <table class="req-table">
+            <thead>
+              <tr>
+                <th scope="col">Feature</th>
+                <th scope="col">Recommended</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Basic library</th>
+                <td>Modern CPU</td>
+              </tr>
+              <tr>
+                <th scope="row">OCR</th>
+                <td>8GB RAM</td>
+              </tr>
+              <tr>
+                <th scope="row">Face recognition</th>
+                <td>16GB RAM</td>
+              </tr>
+              <tr>
+                <th scope="row">AI search (CLIP)</th>
+                <td>GPU optional</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        class="section troubleshoot"
+        id="troubleshooting"
+        aria-labelledby="troubleshooting-heading"
+      >
+        <header class="section-head">
+          <h2 id="troubleshooting-heading">Troubleshooting</h2>
+        </header>
+        <div class="reveal">
+          <details>
+            <summary>AI models not downloading</summary>
+            <p>
+              You need a network connection only for the download. Check Settings →
+              AI, retry the model, and confirm disk space. Downloads are
+              SHA-256 verified — a failed verify means retry, not a partial install.
+            </p>
+          </details>
+          <details>
+            <summary>Slow indexing</summary>
+            <p>
+              First import of a large tree is the slowest. Leave the app open;
+              indexing is incremental. Watched folders only process changes after
+              the initial pass.
+            </p>
+          </details>
+          <details>
+            <summary>Missing thumbnails</summary>
+            <p>
+              Photos re-thumb on demand. For videos, install system
+              <code>ffmpeg</code> so frame thumbs can generate; without it, video
+              thumbs may stay blank.
+            </p>
+          </details>
+          <details>
+            <summary>Large libraries</summary>
+            <p>
+              Use a virtualised grid and keep originals on a fast disk when
+              possible. Enable only the AI models you need — embeddings and faces
+              cost CPU/RAM on first run.
+            </p>
+          </details>
+          <details>
+            <summary>Search not returning results</summary>
+            <p>
+              Confirm the library finished indexing. Filename/metadata search works
+              without models; natural-language text-to-image needs CLIP installed
+              and embeddings generated under Settings → AI.
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <section
+        class="section"
         id="shortcuts"
         aria-labelledby="shortcuts-heading"
       >
@@ -307,7 +430,7 @@ bun run tauri build</code></pre>
     <footer class="site-footer">
       <div class="footer-brand">
         <span class="brand-name">LUMORA</span>
-        <span class="footer-tag">your memories your machine.</span>
+        <span class="footer-tag">Your memories. Your machine.</span>
       </div>
       <p class="footer-meta">
         MIT License ·
@@ -320,6 +443,12 @@ bun run tauri build</code></pre>
         <a href="guide.html">Guide</a>
         ·
         <a href="plugins-guide.html">Plugins</a>
+        ·
+        <a href="mylio-alternative.html">Compare</a>
+        ·
+        <a href="blog/index.html">Blog</a>
+        ·
+        <a href="roadmap.html">Roadmap</a>
         ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
           >GitHub</a

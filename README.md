@@ -5,12 +5,13 @@
 </p>
 
 <p align="center">
-  <strong>Google Photos-style search for your local photo library.<br>Private, AI-powered, and fully offline.</strong>
+  <strong>Your memories. Your machine.</strong><br>
+  The open-source alternative to Mylio Photos.<br>
+  Google Photos–style search. Local storage. No subscriptions. No cloud lock-in.
 </p>
 
 <p align="center">
-  Open-source Google Photos alternative that runs entirely on your computer.<br>
-  Search, organise, and clean up massive photo libraries — without uploading anything to the cloud.
+  Search, organise, and rediscover massive photo libraries — without uploading anything to the cloud.
 </p>
 
 <p align="center">
@@ -30,6 +31,10 @@
   <a href="https://anurag-error404.github.io/lumora/install.html">Install &amp; Usage</a>
   ·
   <a href="https://anurag-error404.github.io/lumora/guide.html">Documentation</a>
+  ·
+  <a href="https://anurag-error404.github.io/lumora/mylio-alternative.html">Mylio alternative</a>
+  ·
+  <a href="https://anurag-error404.github.io/lumora/blog/">Blog</a>
   ·
   <a href="https://github.com/Anurag-error404/lumora/issues/new/choose">Report Bug</a>
   ·

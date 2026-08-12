@@ -38,6 +38,8 @@
         <a href="install.html">Get started</a>
         <a href="guide.html">Guide</a>
         <a href="plugins-guide.html">Plugins</a>
+        <a href="mylio-alternative.html">Compare</a>
+        <a href="blog/index.html">Blog</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
@@ -53,6 +55,13 @@
         </a>
       </nav>
     </header>
+
+    <a
+      class="star-sticky"
+      href="https://github.com/Anurag-error404/lumora"
+      rel="noopener noreferrer"
+      >★ Star on GitHub</a
+    >
 
     <main id="main">
       <section class="download-hero" aria-labelledby="download-brand">
@@ -83,8 +92,71 @@
             </a>
             <p class="download-version" id="download-version" hidden></p>
             <p class="download-hint" id="download-hint" hidden></p>
+            <div class="checksum-row" id="checksum-row" hidden>
+              <span>SHA256</span>
+              <code id="checksum-value"></code>
+              <button type="button" class="btn btn-ghost" id="checksum-copy">
+                Copy checksum
+              </button>
+            </div>
+            <p class="download-hint" id="checksum-fallback" hidden>
+              Verify installers on the
+              <a
+                id="checksum-fallback-link"
+                href="https://github.com/Anurag-error404/lumora/releases/latest"
+                rel="noopener noreferrer"
+                >GitHub release</a
+              >
+              — checksums appear in release notes when published.
+            </p>
           </div>
         </div>
+      </section>
+
+      <section class="section" id="whats-new" aria-labelledby="whats-new-heading">
+        <header class="section-head">
+          <h2 id="whats-new-heading">What’s New</h2>
+          <p id="whats-new-sub">Latest release notes from GitHub.</p>
+        </header>
+        <pre class="release-notes reveal" id="release-notes" hidden></pre>
+        <p class="download-fallback" id="release-notes-empty">
+          <a
+            href="https://github.com/Anurag-error404/lumora/releases/latest"
+            rel="noopener noreferrer"
+            >Open GitHub release notes</a
+          >
+        </p>
+      </section>
+
+      <section class="section" id="dl-stats" aria-labelledby="dl-stats-heading">
+        <header class="section-head">
+          <h2 id="dl-stats-heading">Release info</h2>
+        </header>
+        <dl class="dl-stats reveal">
+          <div>
+            <dt>Latest release</dt>
+            <dd id="stat-latest">—</dd>
+          </div>
+          <div>
+            <dt>Release date</dt>
+            <dd id="stat-date">—</dd>
+          </div>
+          <div>
+            <dt>Downloads (recent releases)</dt>
+            <dd id="stat-downloads">—</dd>
+          </div>
+          <div>
+            <dt>Notes</dt>
+            <dd>
+              <a
+                id="stat-notes-link"
+                href="https://github.com/Anurag-error404/lumora/releases/latest"
+                rel="noopener noreferrer"
+                >GitHub release notes</a
+              >
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section
@@ -214,6 +286,33 @@
         </p>
       </section>
 
+      <section class="section" id="package-managers" aria-labelledby="pkg-heading">
+        <header class="section-head">
+          <h2 id="pkg-heading">Package managers</h2>
+          <p>
+            Direct downloads above are the supported path today. Package-manager
+            installs are on the roadmap — commands below are not live yet.
+          </p>
+        </header>
+        <div class="pkg-soon reveal">
+          <div>
+            <strong>macOS</strong>
+            <span class="coming">Coming soon</span>
+            <pre><code>brew install lumora</code></pre>
+          </div>
+          <div>
+            <strong>Windows</strong>
+            <span class="coming">Coming soon</span>
+            <pre><code>winget install lumora</code></pre>
+          </div>
+          <div>
+            <strong>Linux</strong>
+            <span class="coming">Coming soon</span>
+            <pre><code>flatpak install lumora</code></pre>
+          </div>
+        </div>
+      </section>
+
       <section
         class="section download-help"
         aria-labelledby="help-heading"
@@ -275,7 +374,7 @@
     <footer class="site-footer">
       <div class="footer-brand">
         <span class="brand-name">LUMORA</span>
-        <span class="footer-tag">your memories your machine.</span>
+        <span class="footer-tag">Your memories. Your machine.</span>
       </div>
       <p class="footer-meta">
         MIT License ·
@@ -288,6 +387,12 @@
         <a href="guide.html">Guide</a>
         ·
         <a href="plugins-guide.html">Plugins</a>
+        ·
+        <a href="mylio-alternative.html">Compare</a>
+        ·
+        <a href="blog/index.html">Blog</a>
+        ·
+        <a href="roadmap.html">Roadmap</a>
         ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
           >GitHub</a

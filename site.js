@@ -1,27 +1,128 @@
 (() => {
   const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (prefersReduced) {
-    document.querySelectorAll(".reveal").forEach((el) => el.classList.add("is-visible"));
-    return;
-  }
 
+  // —— Reveal on scroll ——
   const nodes = document.querySelectorAll(".reveal");
-  if (!("IntersectionObserver" in window)) {
+  if (prefersReduced || !("IntersectionObserver" in window)) {
     nodes.forEach((el) => el.classList.add("is-visible"));
-    return;
+  } else {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.12 }
+    );
+    nodes.forEach((el) => observer.observe(el));
   }
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-visible");
-          observer.unobserve(entry.target);
-        }
-      }
+  // —— Product demo screenshot cycle ——
+  const demoImg = document.querySelector("[data-demo-img]");
+  const demoFrames = [
+    { src: "docs/screenshots/home.png", alt: "LUMORA home library grid" },
+    {
+      src: "docs/screenshots/search-nature-sunset.png",
+      alt: "Search results for a vacation-style query",
     },
-    { rootMargin: "0px 0px -8% 0px", threshold: 0.12 }
-  );
+    {
+      src: "docs/screenshots/search-black-dog.png",
+      alt: "Natural-language search results in LUMORA",
+    },
+  ];
+  if (demoImg && demoFrames.length && !prefersReduced) {
+    let i = 0;
+    setInterval(() => {
+      i = (i + 1) % demoFrames.length;
+      const frame = demoFrames[i];
+      demoImg.src = frame.src;
+      demoImg.alt = frame.alt;
+    }, 3200);
+  }
 
-  nodes.forEach((el) => observer.observe(el));
+  // —— Search playground ——
+  const chips = document.querySelectorAll(".play-chip");
+  const playImg = document.querySelector("[data-play-img]");
+  const playQuery = document.querySelector("[data-play-query]");
+  chips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      chips.forEach((c) => c.classList.remove("is-active"));
+      chip.classList.add("is-active");
+      const q = chip.getAttribute("data-query") || "";
+      const src = chip.getAttribute("data-img") || "";
+      if (playQuery) playQuery.textContent = q;
+      if (playImg && src) {
+        playImg.src = src;
+        playImg.alt = `Example results for “${q}”`;
+        playImg.classList.remove("play-flash");
+        void playImg.offsetWidth;
+        playImg.classList.add("play-flash");
+      }
+    });
+  });
+
+  // —— GitHub social proof (soft-fail) ——
+  const proof = document.getElementById("github-proof");
+  if (proof) {
+    const starsEl = proof.querySelector('[data-stat="stars"]');
+    const contribEl = proof.querySelector('[data-stat="contributors"]');
+    const downloadsEl = proof.querySelector('[data-stat="downloads"]');
+
+    const fmt = (n) => {
+      if (typeof n !== "number" || !Number.isFinite(n)) return null;
+      if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
+      return String(n);
+    };
+
+    fetch("https://api.github.com/repos/Anurag-error404/lumora", {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((repo) => {
+        if (!repo) return;
+        if (starsEl && typeof repo.stargazers_count === "number") {
+          starsEl.textContent = `★ ${fmt(repo.stargazers_count)}`;
+        }
+      })
+      .catch(() => {});
+
+    fetch("https://api.github.com/repos/Anurag-error404/lumora/contributors?per_page=1", {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then((r) => {
+        if (!r.ok || !contribEl) return null;
+        const link = r.headers.get("Link") || "";
+        const last = /[?&]page=(\d+)>;\s*rel="last"/.exec(link);
+        if (last) {
+          contribEl.textContent = `${last[1]} Contributors`;
+        } else {
+          return r.json().then((arr) => {
+            if (Array.isArray(arr) && arr.length) {
+              contribEl.textContent = `${arr.length} Contributor${arr.length === 1 ? "" : "s"}`;
+            }
+          });
+        }
+        return null;
+      })
+      .catch(() => {});
+
+    fetch("https://api.github.com/repos/Anurag-error404/lumora/releases?per_page=10", {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((releases) => {
+        if (!Array.isArray(releases) || !downloadsEl) return;
+        let total = 0;
+        for (const rel of releases) {
+          for (const asset of rel.assets || []) {
+            total += asset.download_count || 0;
+          }
+        }
+        if (total > 0) downloadsEl.textContent = `${fmt(total)} Downloads`;
+      })
+      .catch(() => {});
+  }
 })();

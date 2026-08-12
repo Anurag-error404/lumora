@@ -38,6 +38,8 @@
         <a href="install.html">Get started</a>
         <a href="guide.html" aria-current="page">Guide</a>
         <a href="plugins-guide.html">Plugins</a>
+        <a href="mylio-alternative.html">Compare</a>
+        <a href="blog/index.html">Blog</a>
         <a
           class="nav-cta"
           href="https://github.com/Anurag-error404/lumora"
@@ -54,10 +56,19 @@
       </nav>
     </header>
 
+    <a
+      class="star-sticky"
+      href="https://github.com/Anurag-error404/lumora"
+      rel="noopener noreferrer"
+      >★ Star on GitHub</a
+    >
+
     <main id="main" class="guide-layout">
       <aside class="guide-toc" aria-label="On this page">
         <p class="guide-toc-label">On this page</p>
         <ol>
+          <li><a href="#workflows">Workflows</a></li>
+          <li><a href="#cookbook">Search cookbook</a></li>
           <li><a href="#install">Install &amp; run</a></li>
           <li><a href="#import">Import library</a></li>
           <li><a href="#browse">Browse &amp; organise</a></li>
@@ -67,6 +78,7 @@
           <li><a href="#places">Places &amp; people</a></li>
           <li><a href="#vault">Encrypted vault</a></li>
           <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#faq">FAQ</a></li>
           <li><a href="#shortcuts">Shortcuts</a></li>
         </ol>
       </aside>
@@ -76,11 +88,56 @@
           <p class="guide-kicker">Documentation</p>
           <h1>LUMORA guide</h1>
           <p class="guide-lede">
-            How to run the desktop app, grow a local library, turn on optional
-            on-device models, and clean up duplicates — without sending photos
-            anywhere.
+            Task-first workflows for a local memory library — find receipts,
+            rediscover trips, clean duplicates — without sending photos anywhere.
           </p>
         </header>
+
+        <section id="workflows" class="guide-section reveal">
+          <h2>Workflows</h2>
+          <p>Users think in tasks. Not features.</p>
+
+          <h3>Find receipts</h3>
+          <ol class="workflow-flow">
+            <li>Enable OCR</li>
+            <li>Index library</li>
+            <li>Search: <code>receipt</code></li>
+          </ol>
+
+          <h3>Find vacation photos</h3>
+          <ol class="workflow-flow">
+            <li>Search: <code>beach sunset</code></li>
+            <li>Or try <code>family vacation</code> / <code>mountain hike</code></li>
+          </ol>
+
+          <h3>Remove duplicates</h3>
+          <ol class="workflow-flow">
+            <li>Open Duplicates</li>
+            <li>Review matches</li>
+            <li>Keep best version</li>
+          </ol>
+
+          <h3>Rediscover old memories</h3>
+          <ol class="workflow-flow">
+            <li>Open Memories</li>
+            <li>Browse events</li>
+            <li>Explore Timeline</li>
+          </ol>
+        </section>
+
+        <section id="cookbook" class="guide-section reveal">
+          <h2>Search cookbook</h2>
+          <p>Example natural-language queries (CLIP installed):</p>
+          <ul class="cookbook">
+            <li>dog running</li>
+            <li>birthday party</li>
+            <li>beach sunset</li>
+            <li>snow mountain</li>
+            <li>pizza</li>
+            <li>family picnic</li>
+            <li>wedding</li>
+          </ul>
+        </section>
 
         <section id="install" class="guide-section reveal">
           <h2>Install &amp; run</h2>
@@ -283,6 +340,49 @@ bun run tauri build    # release bundle</code></pre>
           </ul>
         </section>
 
+        <section id="faq" class="guide-section reveal">
+          <h2>FAQ</h2>
+          <div class="faq-list">
+            <details>
+              <summary>Is internet required?</summary>
+              <p>
+                Not for day-to-day use. You need the network to download the app
+                (and optional AI models). After that, indexing and search work
+                offline.
+              </p>
+            </details>
+            <details>
+              <summary>Can photos leave my device?</summary>
+              <p>
+                No. LUMORA indexes files in place. There is no cloud upload of
+                your photo library.
+              </p>
+            </details>
+            <details>
+              <summary>Does AI run locally?</summary>
+              <p>
+                Yes. CLIP, OCR, faces, and auto-tags run on-device via ONNX when
+                you install them.
+              </p>
+            </details>
+            <details>
+              <summary>Can AI be disabled?</summary>
+              <p>
+                Yes. Models are optional. You can skip install, or delete derived
+                data later from Settings → AI — originals are untouched.
+              </p>
+            </details>
+            <details>
+              <summary>How much RAM is required?</summary>
+              <p>
+                A modern CPU is enough for a basic library. Plan ~8GB RAM for OCR
+                comfort and ~16GB if you run face recognition heavily. See
+                <a href="install.html#requirements">system requirements</a>.
+              </p>
+            </details>
+          </div>
+        </section>
+
         <section id="shortcuts" class="guide-section reveal">
           <h2>Keyboard shortcuts</h2>
           <div class="guide-table-wrap">
@@ -367,7 +467,7 @@ bun run tauri build    # release bundle</code></pre>
     <footer class="site-footer">
       <div class="footer-brand">
         <span class="brand-name">LUMORA</span>
-        <span class="footer-tag">your memories your machine.</span>
+        <span class="footer-tag">Your memories. Your machine.</span>
       </div>
       <p class="footer-meta">
         MIT License ·
@@ -381,8 +481,18 @@ bun run tauri build    # release bundle</code></pre>
         ·
         <a href="plugins-guide.html">Plugins</a>
         ·
+        <a href="mylio-alternative.html">Compare</a>
+        ·
+        <a href="blog/index.html">Blog</a>
+        ·
+        <a href="roadmap.html">Roadmap</a>
+        ·
         <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
           >GitHub</a
+        >
+        ·
+        <a href="https://ko-fi.com/anuragerror404" rel="noopener noreferrer"
+          >Ko-fi</a
         >
       </p>
     </footer>
