@@ -162,6 +162,40 @@ fn spawn_wal_checkpoint(db_path: std::path::PathBuf) {
     });
 }
 
+/// Regroup memory cards off the UI path.
+///
+/// Grouping scans the library and takes seconds, so it never runs inside a
+/// command. This thread owns that work: it wakes on a queued rebuild (launch,
+/// import, or the Refresh button) and re-checks once every ~5 minutes for the
+/// day rollover that retires the "on this day" card.
+fn spawn_memories_builder(db_path: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let Ok(conn) = state::open_db(&db_path) else {
+            tracing::warn!("memories builder could not open the database");
+            return;
+        };
+        let mut ticks: u64 = 0;
+        loop {
+            std::thread::sleep(MEMORIES_BUILD_TICK);
+            ticks = ticks.wrapping_add(1);
+            if ticks % MEMORIES_DAY_CHECK_TICKS == 0 && memories::cache::built_before_today(&conn) {
+                memories::cache::mark_dirty();
+            }
+            if !memories::cache::take_dirty() {
+                continue;
+            }
+            match memories::cache::rebuild(&conn) {
+                Ok(cards) => tracing::info!(cards, "memories cache rebuilt"),
+                Err(e) => tracing::warn!(error = %e, "memories rebuild skipped"),
+            }
+        }
+    });
+}
+
+const MEMORIES_BUILD_TICK: Duration = Duration::from_secs(2);
+/// ~5 minutes of ticks.
+const MEMORIES_DAY_CHECK_TICKS: u64 = 150;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -275,6 +309,7 @@ pub fn run() {
                 Arc::clone(&indexer),
             );
             spawn_wal_checkpoint(state.paths.db_path.clone());
+            spawn_memories_builder(state.paths.db_path.clone());
 
             let watch_service =
                 Arc::new(watcher::WatcherService::new(state.paths.app_data.clone()));
@@ -399,6 +434,8 @@ pub fn run() {
             list_places,
             list_place_assets,
             list_memories,
+            memories_status,
+            rebuild_memories,
             get_memory,
             enrich_memory_prose,
             list_memory_assets,

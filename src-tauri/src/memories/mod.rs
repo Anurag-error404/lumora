@@ -1,11 +1,13 @@
 //! Memories — local clustering + ranking + metadata templates (+ v1.5 CLIP/captions).
 //!
-//! No LLM, no network, no persisted story table. A memory is a deterministic
-//! id + curated asset set + title/subtitle filled from dates / people / places.
+//! No LLM, no network. A memory is a deterministic id + curated asset set +
+//! title/subtitle filled from dates / people / places. Grouping is expensive,
+//! so [`cache`] stores the finished cards and the UI reads only those.
 //! v1.5 adds CLIP diversity ranking (when embeddings exist) and Florence captions
 //! as quotes. Optional Save as album creates a normal user album; memories never
 //! auto-create albums.
 
+pub mod cache;
 mod rank;
 pub mod prose;
 
@@ -126,16 +128,39 @@ fn diversified_ids(
 /// diversification: that loads an embedding per candidate and compares every
 /// candidate against every pick. `list_memory_assets` still diversifies the
 /// grid the card opens into, which is where the ordering is actually visible.
+///
+/// Screenshots are held back: they make a dull cover and their captions read
+/// as nonsense quotes ("a screenshot of a website with a list of names"). A
+/// memory made only of screenshots still gets one rather than showing nothing.
 fn top_ranked_ids(
     conn: &Connection,
     where_sql: &str,
     params: &[&dyn ToSql],
     take: usize,
 ) -> AppResult<Vec<String>> {
+    let not_screenshot = format!(
+        "NOT ({})",
+        crate::smart::SmartCollection::Screenshots.predicate()
+    );
+    let ids = ranked_ids(conn, where_sql, Some(&not_screenshot), params, take)?;
+    if ids.is_empty() {
+        return ranked_ids(conn, where_sql, None, params, take);
+    }
+    Ok(ids)
+}
+
+fn ranked_ids(
+    conn: &Connection,
+    where_sql: &str,
+    extra_sql: Option<&str>,
+    params: &[&dyn ToSql],
+    take: usize,
+) -> AppResult<Vec<String>> {
+    let extra = extra_sql.map(|e| format!(" AND ({e})")).unwrap_or_default();
     let sql = format!(
         "SELECT a.id
          FROM assets a
-         WHERE a.deleted_at IS NULL AND ({where_sql})
+         WHERE a.deleted_at IS NULL AND ({where_sql}){extra}
          ORDER BY {RANK_ORDER}
          LIMIT {take}"
     );
@@ -454,6 +479,16 @@ enum ParsedId {
     OnThisDay { month_day: String },
     Weekend { start: NaiveDate },
     PersonPlace { person_id: String, place: String },
+}
+
+impl ParsedId {
+    fn kind(&self) -> MemoryKind {
+        match self {
+            Self::OnThisDay { .. } => MemoryKind::OnThisDay,
+            Self::Weekend { .. } => MemoryKind::WeekendTrip,
+            Self::PersonPlace { .. } => MemoryKind::PersonPlace,
+        }
+    }
 }
 
 fn parse_memory_id(id: &str) -> AppResult<ParsedId> {
@@ -1265,6 +1300,99 @@ mod tests {
 
         assert_eq!(cover_of(true), cover_of(false));
         assert_eq!(cover_of(false).as_deref(), Some("s0"));
+    }
+
+    #[test]
+    #[ignore]
+    fn tmp_time_real_library() {
+        let conn = crate::state::open_db(std::path::Path::new(
+            "/tmp/lumora-perf/library.db",
+        ))
+        .unwrap();
+        crate::db::migrate(&conn).unwrap();
+        let t = std::time::Instant::now();
+        let n = cache::rebuild(&conn).unwrap();
+        println!("rebuild: {} cards in {:?}", n, t.elapsed());
+        let t = std::time::Instant::now();
+        let cards = cache::list(&conn, 30).unwrap();
+        println!("list: {} cards in {:?}", cards.len(), t.elapsed());
+        let t = std::time::Instant::now();
+        let built = list_memories(&conn, 30).unwrap();
+        println!("uncached build: {} cards in {:?}", built.len(), t.elapsed());
+        for c in cards.iter().take(4) {
+            println!("  {} | {} | {:?}", c.title, c.insight, c.cover_asset_id);
+        }
+    }
+
+    #[test]
+    fn cover_skips_screenshots_unless_thats_all_there_is() {
+        let today = Utc::now().date_naive();
+        let md = format!("{:02}-{:02}", today.month(), today.day());
+        let y = today.year();
+        let cover_of = |ids: [(&str, bool); 3]| {
+            let conn = setup();
+            for (i, (id, fav)) in ids.iter().enumerate() {
+                insert_asset(&conn, id, &format!("{}-{md}T12:0{i}:00Z", y - 1), *fav);
+            }
+            list_memories(&conn, 10)
+                .unwrap()
+                .into_iter()
+                .find(|m| m.kind == MemoryKind::OnThisDay)
+                .expect("on this day")
+                .cover_asset_id
+        };
+
+        // The favourited screenshot outranks both photos, and still loses.
+        assert_eq!(
+            cover_of([("screenshot-a", true), ("photo-b", false), ("photo-c", false)]).as_deref(),
+            Some("photo-c"),
+        );
+        // A day of nothing but screenshots keeps a cover rather than none.
+        assert_eq!(
+            cover_of([
+                ("screenshot-a", true),
+                ("screenshot-b", false),
+                ("screenshot-c", false)
+            ])
+            .as_deref(),
+            Some("screenshot-a"),
+        );
+    }
+
+    #[test]
+    fn cache_serves_cards_written_by_rebuild() {
+        let conn = setup();
+        let today = Utc::now().date_naive();
+        let md = format!("{:02}-{:02}", today.month(), today.day());
+        let y = today.year();
+        for i in 0..3 {
+            insert_asset(
+                &conn,
+                &format!("c{i}"),
+                &format!("{}-{md}T12:0{i}:00Z", y - 1),
+                i == 0,
+            );
+        }
+
+        // Nothing built yet: the page opens empty instead of grouping inline.
+        assert!(cache::list(&conn, 10).unwrap().is_empty());
+        assert!(cache::status(&conn).unwrap().built_at.is_none());
+
+        let built = cache::rebuild(&conn).unwrap();
+        assert!(built > 0, "seeded day should group into a card");
+
+        let cards = cache::list(&conn, 10).unwrap();
+        assert_eq!(cards.len(), built);
+        assert_eq!(cards[0].kind, MemoryKind::OnThisDay);
+        assert!(!cards[0].insight.is_empty(), "insight composed on read");
+
+        let status = cache::status(&conn).unwrap();
+        assert!(status.built_at.is_some());
+        assert_eq!(status.count, built as i64);
+
+        // Dismissing hides a card without paying for another rebuild.
+        dismiss_memory(&conn, &cards[0].id).unwrap();
+        assert_eq!(cache::list(&conn, 10).unwrap().len(), cards.len() - 1);
     }
 
     #[test]

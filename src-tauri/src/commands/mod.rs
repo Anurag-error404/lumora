@@ -220,6 +220,9 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>) -> AppResult<Impor
         }
     }
 
+    // New photos can form new memories; the builder regroups them off the UI path.
+    memories::cache::mark_dirty();
+
     // Newly imported photos may need CLIP embeddings / OCR / faces / places / tags.
     if let Some(state) = app.try_state::<AppState>() {
         state.embedder.kick();
@@ -2471,15 +2474,29 @@ pub fn list_place_assets(
 
 /// Curated Memories v1 cards (On this day / weekend trips / person + place).
 ///
-/// `async` so Tauri runs it off the main thread: a plain command blocks the
-/// event loop, which freezes the window while the cards are assembled.
+/// Reads the cards the background builder already grouped, so opening the page
+/// costs one indexed select. An empty result with `builtAt: null` from
+/// [`memories_status`] means "still grouping", not "no memories".
 #[tauri::command(async)]
 pub fn list_memories(
     state: State<'_, AppState>,
     limit: Option<u32>,
 ) -> AppResult<Vec<memories::MemorySummary>> {
     let limit = limit.unwrap_or(30);
-    state.with_db(|conn| memories::list_memories(conn, limit))
+    state.with_db(|conn| memories::cache::list(conn, limit))
+}
+
+/// Whether the background builder is still grouping memories.
+#[tauri::command(async)]
+pub fn memories_status(state: State<'_, AppState>) -> AppResult<memories::cache::MemoriesStatus> {
+    state.with_db(memories::cache::status)
+}
+
+/// Queue a regroup. Returns at once; the builder picks it up within a tick and
+/// `memories_status` reports `building` until the new cards land.
+#[tauri::command(async)]
+pub fn rebuild_memories() {
+    memories::cache::mark_dirty();
 }
 
 #[tauri::command]

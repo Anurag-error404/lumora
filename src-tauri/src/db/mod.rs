@@ -23,6 +23,7 @@ const MIGRATION_017: &str = include_str!("../../migrations/017_captions.sql");
 const MIGRATION_018: &str = include_str!("../../migrations/018_memory_prose.sql");
 const MIGRATION_019: &str = include_str!("../../migrations/019_dismissed_memories.sql");
 const MIGRATION_020: &str = include_str!("../../migrations/020_user_models.sql");
+const MIGRATION_021: &str = include_str!("../../migrations/021_memory_cache.sql");
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -355,6 +356,20 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         tracing::info!("applied migration 020_user_models");
     }
 
+    let current: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if current < 21 {
+        conn.execute_batch(MIGRATION_021)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (21)", [])?;
+        tracing::info!("applied migration 021_memory_cache");
+    }
+
     Ok(())
 }
 
@@ -514,7 +529,7 @@ mod tests {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
 
         // Phase 2 derived-data tables.
         assert!(tables.iter().any(|t| t == "ml_models"));
@@ -533,6 +548,8 @@ mod tests {
         assert!(tables.iter().any(|t| t == "memory_prose"));
         assert!(tables.iter().any(|t| t == "dismissed_memories"));
         assert!(tables.iter().any(|t| t == "ml_user_options"));
+        assert!(tables.iter().any(|t| t == "memory_cards"));
+        assert!(tables.iter().any(|t| t == "memory_cache_state"));
 
         let has_blur_score: i64 = conn
             .query_row(
@@ -548,6 +565,6 @@ mod tests {
         let version2: i64 = conn2
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version2, 20);
+        assert_eq!(version2, 21);
     }
 }

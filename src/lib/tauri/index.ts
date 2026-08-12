@@ -456,6 +456,15 @@ export type MemoryDetail = {
   assets: AssetSummary[];
 };
 
+/** Progress of the background grouping that fills the memories cache. */
+export type MemoriesStatus = {
+  /** A rebuild is running or queued — show a loader. */
+  building: boolean;
+  /** When the cards were last built; null means never. */
+  builtAt: string | null;
+  count: number;
+};
+
 export type PlacesProgress = {
   pending: number;
   done: number;
@@ -1179,6 +1188,9 @@ export const api = {
     invoke<AssetSummary[]>("list_place_assets", { label, limit, offset }),
   listMemories: (limit = 30) =>
     invoke<MemorySummary[]>("list_memories", { limit }),
+  memoriesStatus: () => invoke<MemoriesStatus>("memories_status"),
+  /** Queue a background regroup; poll `memoriesStatus` for completion. */
+  rebuildMemories: () => invoke<void>("rebuild_memories"),
   getMemory: (memoryId: string) =>
     invoke<MemoryDetail>("get_memory", {
       memoryId,

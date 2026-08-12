@@ -79,6 +79,12 @@ impl SmartCollection {
         }
     }
 
+    /// SQL predicate over `assets a`, so other features can filter by the same
+    /// definition (Memories skips screenshots when picking a cover).
+    pub fn predicate(self) -> String {
+        self.query().predicate
+    }
+
     fn query(self) -> CollectionQuery {
         match self {
             Self::Videos => CollectionQuery {

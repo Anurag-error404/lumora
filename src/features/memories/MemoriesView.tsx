@@ -31,32 +31,52 @@ function MemoryCover({ memory }: { memory: MemorySummary }) {
 /** Discover → Memories: curated local stories from dates, people, and places. */
 export function MemoriesView({
   memories,
+  loading,
+  building,
   onOpenMemory,
   onRefresh,
   onDeleteMemory,
 }: {
   memories: MemorySummary[];
+  /** First read of the cache hasn't returned yet. */
+  loading: boolean;
+  /** The background builder is grouping memories right now. */
+  building: boolean;
   onOpenMemory: (memoryId: string) => void;
   onRefresh: () => void;
   onDeleteMemory: (memoryId: string) => void;
 }) {
+  const pending = loading || building;
   return (
     <div className="memories-page">
       <PageHeader
         title="Memories"
         description="Stories assembled on this machine from your dates, people, and places — ranked with on-device CLIP when available, with optional offline prose."
         actions={
-          <button type="button" onClick={onRefresh}>
-            Refresh
+          <button type="button" onClick={onRefresh} disabled={pending}>
+            {building ? "Refreshing…" : "Refresh"}
           </button>
         }
       />
+      {pending && memories.length > 0 && (
+        <div className="memories-building" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Looking for new memories…
+        </div>
+      )}
       {memories.length === 0 ? (
-        <EmptyState
-          icon="sparkle"
-          title="No memories yet"
-          description="Photos from past years on this calendar day, weekend trips, and named people in places will appear here as your library grows."
-        />
+        pending ? (
+          <div className="developer-loading" role="status">
+            <span className="spinner" aria-hidden="true" />
+            Grouping your photos into memories…
+          </div>
+        ) : (
+          <EmptyState
+            icon="sparkle"
+            title="No memories yet"
+            description="Photos from past years on this calendar day, weekend trips, and named people in places will appear here as your library grows."
+          />
+        )
       ) : (
         <div className="memory-cover-grid">
           {memories.map((memory) => (
@@ -70,7 +90,7 @@ export function MemoriesView({
                 <div className="memory-cover-info">
                   <span className="memory-kind muted">{kindLabel(memory.kind)}</span>
                   <span className="memory-cover-name">{memory.title}</span>
-                  <span className={memory.prose || memory.quote ? "memory-prose" : "muted"}>
+                  <span className={memory.prose || memory.quote ? "memory-prose" : "muted memory-prose"}>
                     {memory.insight}
                   </span>
                 </div>

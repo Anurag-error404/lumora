@@ -145,7 +145,9 @@ export default function App() {
     activeMemory,
     setActiveMemory,
     openMemoryDetail,
-    refreshMemories,
+    rebuildMemories,
+    memoriesBuilding,
+    memoriesLoading,
     saveAsAlbum,
     dismissMemory,
     saving: savingMemoryAlbum,
@@ -1053,7 +1055,9 @@ export default function App() {
           ) : view === "memories" && !activeMemory ? (
             <MemoriesView
               memories={memories}
-              onRefresh={() => void refreshMemories()}
+              loading={memoriesLoading}
+              building={memoriesBuilding}
+              onRefresh={() => void rebuildMemories()}
               onOpenMemory={(memoryId) => {
                 setAssets([]);
                 void openMemoryDetail(memoryId);
