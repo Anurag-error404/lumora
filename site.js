@@ -162,4 +162,58 @@
       })
       .catch(() => {});
   }
+
+  // —— Click tracking (gtag / GA4) ——
+  // Docs TOC + CTAs; soft-fails if gtag isn't loaded yet.
+  const trackClick = (name, params) => {
+    if (typeof window.gtag !== "function") return;
+    window.gtag("event", name, params);
+  };
+
+  const clickLabel = (el) =>
+    (el.getAttribute("aria-label") || el.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest(
+      [
+        "a.btn",
+        "button.btn",
+        "button",
+        "a.nav-cta",
+        "a.star-sticky",
+        "a.platform-option",
+        ".guide-toc a",
+        ".play-chip",
+      ].join(",")
+    );
+    if (!el) return;
+
+    const page_path = location.pathname;
+    const link_text = clickLabel(el);
+    const link_url = el.getAttribute("href") || "";
+
+    if (el.matches(".guide-toc a")) {
+      trackClick("docs_nav", { link_text, link_url, page_path });
+      return;
+    }
+    if (el.matches(".play-chip")) {
+      trackClick("demo_chip", {
+        link_text: el.getAttribute("data-query") || link_text,
+        page_path,
+      });
+      return;
+    }
+
+    let name = "cta_click";
+    if (el.matches("a.platform-option") || el.classList.contains("btn-download") || el.id === "primary-download") {
+      name = "download_click";
+    } else if (el.matches("a.nav-cta, a.star-sticky")) {
+      name = "github_cta";
+    }
+
+    trackClick(name, { link_text, link_url, page_path });
+  });
 })();
