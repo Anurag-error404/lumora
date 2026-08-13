@@ -205,7 +205,7 @@ Switch backends in the model library; import a local ONNX for Auto-tags or Seman
 | Face recognition | ✅ | ✅ | ✅ |
 | Encrypted private vault | ✅ | ❌ | ❌ |
 
-Immich is excellent self-hosted software — it still needs a always-on server. Lumora is a **desktop app**: point it at folders on disk and stay offline.
+Immich is excellent self-hosted software — it still needs a always-on server. Lumora is a **desktop app**: point it at folders on disk and stay offline. Longer write-up: [Immich vs LUMORA](https://anurag-error404.github.io/lumora/blog/immich-vs-lumora.html).
 
 ---
 

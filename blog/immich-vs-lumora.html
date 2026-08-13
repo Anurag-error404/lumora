@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Immich vs LUMORA — self-hosted Google Photos energy versus a local desktop app. Architecture, setup, AI search, mobile, and who should pick which."
+    />
+    <meta name="theme-color" content="#2f6f5e" />
+    <link rel="icon" href="../favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="../Lumora-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
+    <title>Immich vs LUMORA — LUMORA Blog</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="../index.html" aria-label="LUMORA home">
+        <img class="brand-mark" src="../lumora-icon-tp.png" width="28" height="28" alt="" />
+        <span class="brand-name">LUMORA</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../download.html">Download</a>
+        <a href="../install.html">Get started</a>
+        <a href="../guide.html">Guide</a>
+        <a href="../plugins-guide.html">Plugins</a>
+        <a href="../mylio-alternative.html">Compare</a>
+        <a href="../blog/index.html" aria-current="page">Blog</a>
+        <a
+          class="nav-cta"
+          href="https://github.com/Anurag-error404/lumora"
+          rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+    <a
+      class="star-sticky"
+      href="https://github.com/Anurag-error404/lumora"
+      rel="noopener noreferrer"
+      >★ Star on GitHub</a
+    >
+    <main id="main">
+      <article class="blog-article">
+        <p class="alt-kicker"><a href="index.html">Blog</a></p>
+        <h1>Immich vs LUMORA</h1>
+        <p class="meta">
+          Self-hosted Google Photos energy versus a local desktop app — and how to
+          choose.
+        </p>
+
+        <p>
+          Immich and LUMORA get compared for the same reason: both are open source,
+          both keep photos off Google’s servers, and both ship AI search that feels
+          closer to Google Photos than a dumb folder browser. They are not the same
+          product category.
+        </p>
+        <p>
+          <strong>Immich</strong> is a self-hosted photo stack — server, database,
+          machine-learning workers, web UI, and excellent mobile apps. You run it
+          (usually with Docker) on a NAS, home lab, or VPS, then upload or sync
+          libraries into that always-on service.
+        </p>
+        <p>
+          <strong>LUMORA</strong> is a desktop app (Tauri). You install it on Mac,
+          Windows, or Linux, point it at folders that already exist on disk, and
+          optional models run on the same machine. There is no photo server to keep
+          healthy, no reverse proxy, and no requirement that a box stay online for
+          search to work.
+        </p>
+        <p>
+          If that framing already answers the question, jump to
+          <a href="#who-should-choose">who should choose which</a>. The rest of this
+          post is the honest comparison: architecture, day-two maintenance, AI,
+          mobile, privacy, and the feature gaps that matter in practice.
+        </p>
+
+        <figure>
+          <img
+            class="shot-inline"
+            src="../docs/screenshots/ai-settings.webp"
+            width="900"
+            height="560"
+            alt="LUMORA Settings → AI Features — optional on-device models"
+          />
+          <figcaption>
+            LUMORA’s AI is optional and on-device — install only what you need from
+            Settings.
+          </figcaption>
+        </figure>
+
+        <h2 id="architecture">Architecture in one sentence</h2>
+        <p>
+          Immich is a <em>service</em> you operate. LUMORA is an
+          <em>application</em> you open.
+        </p>
+        <p>
+          That single difference cascades into everything else: how you install,
+          whether your phone can upload overnight, what “offline” means, and how
+          much ops work lives between you and a working library.
+        </p>
+
+        <h2 id="comparison-table">Feature snapshot</h2>
+        <div class="compare-wrap">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th scope="col">Dimension</th>
+                <th scope="col">Immich</th>
+                <th scope="col">LUMORA</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Shape</th>
+                <td>Self-hosted server + clients</td>
+                <td>Native desktop app</td>
+              </tr>
+              <tr>
+                <th scope="row">Install path</th>
+                <td>Docker / Compose, then clients</td>
+                <td>Download installer · point at folders</td>
+              </tr>
+              <tr>
+                <th scope="row">Always-on host</th>
+                <td>Required for full experience</td>
+                <td>Not required</td>
+              </tr>
+              <tr>
+                <th scope="row">Offline after setup</th>
+                <td>Clients need the server reachable</td>
+                <td>Yes — library + optional AI stay local</td>
+              </tr>
+              <tr>
+                <th scope="row">Licence</th>
+                <td>AGPL-3.0</td>
+                <td>MIT</td>
+              </tr>
+              <tr>
+                <th scope="row">Semantic / AI search</th>
+                <td>Yes (server-side ML)</td>
+                <td>Yes (optional on-device CLIP)</td>
+              </tr>
+              <tr>
+                <th scope="row">Faces / people</th>
+                <td>Yes</td>
+                <td>Yes (optional InsightFace)</td>
+              </tr>
+              <tr>
+                <th scope="row">Mobile apps</th>
+                <td>First-class (backup / browse)</td>
+                <td>Desktop-first today</td>
+              </tr>
+              <tr>
+                <th scope="row">Multi-user / sharing</th>
+                <td>Built for household / users</td>
+                <td>Single-seat local library</td>
+              </tr>
+              <tr>
+                <th scope="row">Originals</th>
+                <td>In Immich storage / external libs</td>
+                <td>Stay where they already live</td>
+              </tr>
+              <tr>
+                <th scope="row">Encrypted private vault</th>
+                <td>Not a product focus</td>
+                <td>Locked folder (on-device keys)</td>
+              </tr>
+              <tr>
+                <th scope="row">Extensibility</th>
+                <td>Server jobs, APIs, ecosystem</td>
+                <td>Sandboxed JS plugins on disk</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="setup">Setup and day-two maintenance</h2>
+        <p>
+          Immich’s install story is familiar to self-hosters: Compose file, volumes,
+          reverse proxy (often Traefik or Caddy), TLS, backups of Postgres and asset
+          storage, upgrades that touch several containers, and a plan for when the
+          NAS sleeps or the VPS reboots. Once it is dialed in, the payoff is real —
+          phones upload in the background, the web UI is available from anywhere you
+          expose it, and machine learning runs on the host you sized for it.
+        </p>
+        <p>
+          LUMORA’s install story is a desktop release: grab the
+          <a href="../download.html">DMG / EXE / AppImage</a>, launch, import or watch
+          folders. Indexing builds a private SQLite index next to the app’s data;
+          originals are not relocated by import. Optional AI models download from
+          Settings when you ask for them — checksum-verified, never required for a
+          usable library.
+        </p>
+        <p>
+          Neither path is “free” of work. Immich’s work is operational (keep the
+          stack healthy). LUMORA’s work is local (disk space for thumbs and
+          embeddings, first-pass indexing time on large trees). Pick the kind of
+          work you are willing to own.
+        </p>
+
+        <h2 id="offline">What “offline” and “local” actually mean</h2>
+        <p>
+          Immich is local in the important sense that <em>you</em> host the data —
+          not Google. It is not offline in the laptop-on-a-plane sense unless you
+          also run the server on that same machine and keep it reachable. Phone apps
+          and the web UI are clients of that service.
+        </p>
+        <p>
+          LUMORA is local in the folder sense: the photos already on your SSD
+          <em>are</em> the library. After models are installed, semantic search,
+          OCR, and faces do not need the network. If the laptop sleeps, nothing
+          else has to stay awake for you to search tomorrow.
+        </p>
+
+        <h2 id="ai-search">AI search and intelligence</h2>
+        <p>
+          Both products chase the same user feeling: type what you remember, get
+          the right frames back.
+        </p>
+        <ul>
+          <li>
+            <strong>Immich</strong> runs ML as part of the server topology —
+            embeddings and related jobs consume host CPU/GPU on the box that holds
+            the library. Capability is excellent and improving quickly with the
+            Immich community.
+          </li>
+          <li>
+            <strong>LUMORA</strong> runs optional ONNX models on the desktop:
+            CLIP for semantic search, OCR (PaddleOCR by default), InsightFace for
+            people, MobileNet-class auto-tags, Florence-2 captions. Features are
+            toggles — the app stays useful with zero models installed.
+          </li>
+        </ul>
+        <p>
+          If you already have a GPU NAS sized for Immich’s workers, that hardware
+          advantage stays with Immich. If you want search on the same laptop that
+          holds the files — without standing up ML containers — LUMORA’s on-device
+          path is the shorter one. More on LUMORA’s blend of FTS5 and CLIP:
+          <a href="building-offline-ai-search.html">Building Offline AI Search</a>.
+        </p>
+
+        <h2 id="mobile">Mobile, sync, and multi-device</h2>
+        <p>
+          This is Immich’s clearest win for many households. Official mobile apps
+          make background backup and browse feel like Google Photos. Multiple
+          people can share a deployment. External libraries and partner sharing
+          cover common self-host scenarios.
+        </p>
+        <p>
+          LUMORA is desktop-first. Watched folders catch new files on the machine
+          (or volumes mounted there). There is no first-party phone backup client
+          today. If your primary need is “every phone in the house uploads nightly
+          to one private Google Photos replacement,” Immich is the better fit.
+        </p>
+
+        <h2 id="privacy">Privacy, vaults, and trust boundaries</h2>
+        <p>
+          Both keep you off Big Tech photo clouds when you self-host or stay local.
+          The remaining trust questions differ:
+        </p>
+        <ul>
+          <li>
+            Immich: you trust your own ops — updates, exposure of the web UI,
+            auth, and backups. Remote access is powerful and is also the surface
+            you must harden.
+          </li>
+          <li>
+            LUMORA: the attack surface is a local app and its plugin sandbox.
+            Plugins are folders on disk with no network by default. Sensitive items
+            can move into an encrypted
+            <a href="../index.html#vault">Locked folder</a> with on-device keys and
+            a recovery code — no hosted escrow.
+          </li>
+        </ul>
+
+        <figure>
+          <img
+            class="shot-inline"
+            src="../docs/screenshots/locked_folder.webp"
+            width="900"
+            height="527"
+            alt="LUMORA Locked folder unlock screen"
+          />
+          <figcaption>
+            LUMORA’s Locked folder — password or recovery code, keys stay on-device.
+          </figcaption>
+        </figure>
+
+        <h2 id="organisation">Organisation, cleanup, and plugins</h2>
+        <p>
+          Immich covers albums, people, explore-style discovery, and a growing set
+          of server-side workflows. Ecosystem scripts and the API fill many gaps.
+        </p>
+        <p>
+          LUMORA leans into desktop library craft: albums, tags, ratings, colour
+          labels, timeline, smart collections, Places on an offline map, duplicate
+          and blurry review with soft trash, and a
+          <a href="../plugins-guide.html">sandboxed JavaScript plugin host</a> for
+          rename / export / organise actions you can read and fork.
+        </p>
+
+        <h2 id="who-should-choose">Who should choose which</h2>
+        <p><strong>Choose Immich when you want:</strong></p>
+        <ul>
+          <li>A self-hosted Google Photos replacement with strong mobile apps</li>
+          <li>Multi-user access from phones, tablets, and browsers</li>
+          <li>An always-on NAS or home lab you already enjoy operating</li>
+          <li>Remote browse/upload as a first-class requirement</li>
+        </ul>
+        <p><strong>Choose LUMORA when you want:</strong></p>
+        <ul>
+          <li>A local desktop app — install, import, search — no Docker</li>
+          <li>Originals left in place on disk as the source of truth</li>
+          <li>Optional on-device AI that works offline after download</li>
+          <li>An encrypted Locked folder and MIT-licensed code you can audit</li>
+          <li>Plugins as folders, not server jobs</li>
+        </ul>
+        <p>
+          Plenty of people will run both: Immich for phone intake and household
+          sharing, LUMORA for a curated archive on a workstation. They are
+          complementary more often than they are rivals.
+        </p>
+
+        <h2 id="bottom-line">Bottom line</h2>
+        <p>
+          Immich is excellent self-hosted software. It still needs a server that
+          stays up. LUMORA is a desktop app: point it at folders, stay offline, and
+          keep optional intelligence on the same machine that holds the files.
+        </p>
+        <p>
+          Short landing page:
+          <a href="../immich-alternative.html">Immich alternative</a>. Try a build:
+          <a href="../download.html">Download LUMORA</a> ·
+          <a href="../install.html">Get started</a> ·
+          <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
+            >GitHub</a
+          >.
+        </p>
+
+        <p><a href="../download.html">Download LUMORA</a> · <a href="index.html">All posts</a></p>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <span class="brand-name">LUMORA</span>
+        <span class="footer-tag">Your memories. Your machine.</span>
+      </div>
+      <p class="footer-meta">
+        MIT License ·
+        <a href="../index.html">Home</a> ·
+        <a href="../download.html">Download</a> ·
+        <a href="../install.html">Get started</a> ·
+        <a href="../guide.html">Guide</a> ·
+        <a href="../plugins-guide.html">Plugins</a> ·
+        <a href="../mylio-alternative.html">Compare</a> ·
+        <a href="../blog/index.html">Blog</a> ·
+        <a href="../roadmap.html">Roadmap</a> ·
+        <a href="https://github.com/Anurag-error404/lumora" rel="noopener noreferrer"
+          >GitHub</a
+        >
+        ·
+        <a href="https://ko-fi.com/anuragerror404" rel="noopener noreferrer">Ko-fi</a>
+      </p>
+    </footer>
+    <script src="../site.js" defer></script>
+  </body>
+</html>
