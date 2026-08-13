@@ -184,6 +184,7 @@
         "button",
         "a.nav-cta",
         "a.star-sticky",
+        "a.footer-kofi",
         "a.platform-option",
         ".guide-toc a",
         ".play-chip",
@@ -208,7 +209,9 @@
     }
 
     let name = "cta_click";
-    if (el.matches("a.platform-option") || el.classList.contains("btn-download") || el.id === "primary-download") {
+    if (el.matches("a.footer-kofi")) {
+      name = "donate_click";
+    } else if (el.matches("a.platform-option") || el.classList.contains("btn-download") || el.id === "primary-download") {
       name = "download_click";
     } else if (el.matches("a.nav-cta, a.star-sticky")) {
       name = "github_cta";

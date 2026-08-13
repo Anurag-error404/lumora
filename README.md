@@ -21,6 +21,7 @@
   <a href="https://github.com/Anurag-error404/lumora/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-2f6f5e?style=flat-square" alt="Platform Support" /></a>
   <a href="https://github.com/Anurag-error404/lumora/graphs/contributors"><img src="https://img.shields.io/github/contributors/Anurag-error404/lumora?style=flat-square&color=2f6f5e" alt="Contributors" /></a>
   <a href="https://github.com/Anurag-error404/lumora/releases"><img src="https://img.shields.io/github/v/release/Anurag-error404/lumora?include_prereleases&label=releases&style=flat-square&color=2f6f5e" alt="Releases" /></a>
+  <a href="https://ko-fi.com/anuragerror404"><img src="https://img.shields.io/badge/Ko--fi-Support%20LUMORA-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" alt="Support on Ko-fi" /></a>
 </p>
 
 <p align="center">
@@ -39,6 +40,8 @@
   <a href="https://github.com/Anurag-error404/lumora/issues/new/choose">Report Bug</a>
   ·
   <a href="https://github.com/Anurag-error404/lumora/discussions">Discussions</a>
+  ·
+  <a href="https://ko-fi.com/anuragerror404"><strong>Support on Ko-fi</strong></a>
 </p>
 
 <p align="center">
@@ -238,12 +241,22 @@ Lumora is that bet: local-first by default, MIT-licensed, and useful with zero m
 
 ---
 
+## ☕ Support LUMORA
+
+LUMORA is free and MIT-licensed. If it helps you keep photos private and searchable, you can [support development on Ko-fi](https://ko-fi.com/anuragerror404).
+
+Donations are optional — they never unlock features, remove limits, or weaken privacy.
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/anuragerror404)
+
+---
+
 ## 🌐 Community
 
 - [Discussions](https://github.com/Anurag-error404/lumora/discussions) — questions & ideas
 - [Issues](https://github.com/Anurag-error404/lumora/issues) — bugs & feature requests
 - [Contributing](./CONTRIBUTING.md) — PRs welcome (no telemetry, no cloud inference for library content)
-- [Ko-fi](https://ko-fi.com/anuragerror404) — optional support; never unlocks features or weakens privacy
+- [Ko-fi](https://ko-fi.com/anuragerror404) — buy me a coffee if you want to help fund ongoing work
 
 ---
 
