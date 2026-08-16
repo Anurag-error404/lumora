@@ -7,6 +7,7 @@ export function Toolbar({
   query,
   onQueryChange,
   onSubmitSearch,
+  searching = false,
   recentSearches,
   onPickRecent,
   canUndo,
@@ -20,6 +21,7 @@ export function Toolbar({
   query: string;
   onQueryChange: (query: string) => void;
   onSubmitSearch: () => void;
+  searching?: boolean;
   recentSearches: SavedSearch[];
   onPickRecent: (query: string) => void;
   canUndo: boolean;
@@ -63,7 +65,10 @@ export function Toolbar({
 
   return (
     <div className="toolbar">
-      <div className="search-field" ref={rootRef}>
+      <div
+        className={searching ? "search-field is-searching" : "search-field"}
+        ref={rootRef}
+      >
         <Icon name="search" className="search-icon" />
         <input
           type="search"
@@ -71,6 +76,7 @@ export function Toolbar({
           aria-expanded={open && hints.length > 0}
           aria-controls={listId}
           aria-autocomplete="list"
+          aria-busy={searching}
           placeholder="Search — dog on a beach, or camera:iphone rating>3"
           value={query}
           onChange={(e) => {
@@ -106,6 +112,13 @@ export function Toolbar({
             }
           }}
         />
+        {searching ? (
+          <span
+            className="spinner search-spinner"
+            role="status"
+            aria-label="Searching"
+          />
+        ) : null}
         {open && hints.length > 0 && (
           <ul
             id={listId}

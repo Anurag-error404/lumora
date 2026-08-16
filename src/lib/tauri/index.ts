@@ -1003,6 +1003,13 @@ export const api = {
       album_id: albumId,
       asset_id: assetId,
     }),
+  removeAssetsFromAlbum: (albumId: string, assetIds: string[]) =>
+    invoke<number>("remove_assets_from_album", {
+      albumId,
+      assetIds,
+      album_id: albumId,
+      asset_ids: assetIds,
+    }),
   listAlbumAssets: (albumId: string, limit: number, offset: number) =>
     invoke<AssetSummary[]>("list_album_assets", {
       albumId,

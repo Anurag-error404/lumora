@@ -4,6 +4,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+use crate::albums;
 use crate::error::AppResult;
 use crate::models::{ActivityEntry, ExportRecord};
 use crate::trash;
@@ -297,6 +298,7 @@ pub fn apply_action(conn: &Connection, action: &HistoryAction) -> AppResult<()> 
                     params![album_id, asset_id],
                 )?;
             }
+            albums::sync_cover(conn, album_id)?;
         }
         HistoryAction::SetFavorites {
             asset_ids,

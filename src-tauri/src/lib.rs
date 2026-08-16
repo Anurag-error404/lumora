@@ -392,6 +392,7 @@ pub fn run() {
             add_to_album,
             add_assets_to_album,
             remove_from_album,
+            remove_assets_from_album,
             list_album_assets,
             timeline_months,
             list_assets_for_month,

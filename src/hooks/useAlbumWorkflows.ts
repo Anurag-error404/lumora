@@ -19,6 +19,7 @@ export function useAlbumWorkflows({
   selected,
   selectedIds,
   setSelected,
+  activeAlbum,
   setActiveAlbum,
   setView,
   setError,
@@ -33,6 +34,7 @@ export function useAlbumWorkflows({
   selected: Set<string>;
   selectedIds: string[];
   setSelected: Dispatch<SetStateAction<Set<string>>>;
+  activeAlbum: string | null;
   setActiveAlbum: Dispatch<SetStateAction<string | null>>;
   setView: Dispatch<SetStateAction<View>>;
   setError: Dispatch<SetStateAction<string | null>>;
@@ -212,6 +214,25 @@ export function useAlbumWorkflows({
     }
   }
 
+  async function removeSelectedFromAlbum() {
+    if (!activeAlbum || !selectedIds.length) return;
+    const album = albums.find((a) => a.id === activeAlbum);
+    try {
+      const count = await api.removeAssetsFromAlbum(activeAlbum, selectedIds);
+      clearSelection();
+      await refreshAlbums();
+      await refreshHistory();
+      await loadAssets();
+      setError(
+        count > 0
+          ? `Removed ${count} photo(s) from “${album?.name ?? "album"}”`
+          : `Those photos were not in “${album?.name ?? "this album"}”`,
+      );
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return {
     albumModal,
     setAlbumModal,
@@ -231,5 +252,6 @@ export function useAlbumWorkflows({
     openMoveAlbumModal,
     submitAlbumModal,
     moveToExistingAlbum,
+    removeSelectedFromAlbum,
   };
 }

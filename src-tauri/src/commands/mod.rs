@@ -1285,8 +1285,61 @@ pub fn remove_from_album(
             "DELETE FROM album_assets WHERE album_id=?1 AND asset_id=?2",
             params![album_id, asset_id],
         )?;
+        albums::sync_cover(conn, &album_id)?;
         Ok(())
     })
+}
+
+#[tauri::command]
+pub fn remove_assets_from_album(
+    state: State<'_, AppState>,
+    album_id: String,
+    asset_ids: Vec<String>,
+) -> AppResult<usize> {
+    if asset_ids.is_empty() {
+        return Ok(0);
+    }
+    let album_name: String = state.with_db(|conn| {
+        conn.query_row(
+            "SELECT name FROM albums WHERE id=?1",
+            params![album_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::msg("album not found"))
+    })?;
+    let removed = state.with_db(|conn| {
+        let mut removed = Vec::new();
+        for asset_id in &asset_ids {
+            let n = conn.execute(
+                "DELETE FROM album_assets WHERE album_id=?1 AND asset_id=?2",
+                params![album_id, asset_id],
+            )?;
+            if n > 0 {
+                removed.push(asset_id.clone());
+            }
+        }
+        albums::sync_cover(conn, &album_id)?;
+        Ok(removed)
+    })?;
+    let count = removed.len();
+    if count > 0 {
+        let detail = album_id.clone();
+        push_history(
+            &state,
+            "album",
+            format!("Removed {count} photo(s) from “{album_name}”"),
+            Some(&detail),
+            HistoryAction::AddToAlbum {
+                album_id: album_id.clone(),
+                asset_ids: removed.clone(),
+            },
+            HistoryAction::RemoveFromAlbum {
+                album_id,
+                asset_ids: removed,
+            },
+        )?;
+    }
+    Ok(count)
 }
 
 #[tauri::command]

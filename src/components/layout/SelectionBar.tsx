@@ -21,6 +21,7 @@ export function SelectionBar({
   onExportZip,
   onOptimize,
   onOpenMoveAlbum,
+  onRemoveFromAlbum,
   onMoveToLocked,
   onDelete,
   onSelectAllVisible,
@@ -41,6 +42,7 @@ export function SelectionBar({
   onExportZip: () => void;
   onOptimize: () => void;
   onOpenMoveAlbum: () => void;
+  onRemoveFromAlbum?: () => void;
   onMoveToLocked: () => void;
   onDelete: () => void;
   onSelectAllVisible: () => void;
@@ -121,6 +123,11 @@ export function SelectionBar({
             label="Move to album…"
             onClick={onOpenMoveAlbum}
           />
+          {onRemoveFromAlbum ? (
+            <button type="button" onClick={onRemoveFromAlbum}>
+              Remove from album
+            </button>
+          ) : null}
           <IconButton
             icon="lock"
             label="Move to Locked folder"
@@ -242,6 +249,17 @@ export function SelectionBar({
                   >
                     Remove from favourites
                   </button>
+                  {onRemoveFromAlbum ? (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        onRemoveFromAlbum();
+                      }}
+                    >
+                      Remove from this album
+                    </button>
+                  ) : null}
                   <div className="menu-group" role="group" aria-label="Rate selection">
                     <span className="menu-group-label">Rate</span>
                     <div className="menu-stars">

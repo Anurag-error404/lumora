@@ -383,7 +383,18 @@ button .nav-icon {
 
 .search-field input[type="search"] {
   padding-left: 2.85rem;
+  padding-right: 2.6rem;
   width: 100%;
+}
+
+.search-field.is-searching input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.search-spinner {
+  position: absolute;
+  right: 0.9rem;
+  pointer-events: none;
 }
 
 .search-hints {
@@ -1171,6 +1182,14 @@ button .nav-icon {
 
 .selection-bar .icon-btn.danger svg {
   fill: var(--danger);
+}
+
+.selection-bar > button:not(.icon-btn):not(.selection-plugin-btn) {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent-strong);
+  padding: 0.35rem 0.7rem;
+  white-space: nowrap;
 }
 
 .import-progress {
@@ -4400,6 +4419,10 @@ button .nav-icon {
   gap: 0.45rem;
 }
 
+.places-map-frame {
+  position: relative;
+}
+
 .places-map-svg {
   display: block;
   width: 100%;
@@ -4413,6 +4436,55 @@ button .nav-icon {
     radial-gradient(ellipse 70% 50% at 90% 80%, rgba(232, 196, 138, 0.12), transparent 50%),
     #c5d8e4;
   box-shadow: var(--shadow-1);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.places-map-svg.is-panning {
+  cursor: grabbing;
+}
+
+.places-map-svg:focus {
+  outline: none;
+}
+
+.places-map-svg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.places-map-controls {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.places-map-ctrl {
+  min-width: 2rem;
+  height: 1.85rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1;
+  box-shadow: var(--shadow-1);
+}
+
+.places-map-ctrl:hover {
+  background: var(--surface);
+}
+
+.places-map-ctrl-fit {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .places-map-ocean {

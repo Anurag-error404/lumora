@@ -58,6 +58,48 @@ pub fn ensure_cover(conn: &Connection, album_id: &str, asset_id: &str) -> AppRes
     Ok(())
 }
 
+/// If the stored cover is no longer in the album, pick another live member (or none).
+pub fn sync_cover(conn: &Connection, album_id: &str) -> AppResult<()> {
+    let cover: Option<String> = conn.query_row(
+        "SELECT cover_asset_id FROM albums WHERE id=?1",
+        params![album_id],
+        |r| r.get(0),
+    )?;
+    let cover_ok = match cover.as_deref() {
+        None | Some("") => false,
+        Some(id) => conn
+            .query_row(
+                "SELECT 1
+                 FROM album_assets aa
+                 JOIN assets a ON a.id = aa.asset_id AND a.deleted_at IS NULL
+                 WHERE aa.album_id=?1 AND aa.asset_id=?2",
+                params![album_id, id],
+                |_| Ok(()),
+            )
+            .is_ok(),
+    };
+    if cover_ok {
+        return Ok(());
+    }
+    let next: Option<String> = conn
+        .query_row(
+            "SELECT aa.asset_id
+             FROM album_assets aa
+             JOIN assets a ON a.id = aa.asset_id AND a.deleted_at IS NULL
+             WHERE aa.album_id=?1
+             ORDER BY COALESCE(a.captured_at, a.indexed_at) DESC
+             LIMIT 1",
+            params![album_id],
+            |r| r.get(0),
+        )
+        .ok();
+    conn.execute(
+        "UPDATE albums SET cover_asset_id=?1 WHERE id=?2",
+        params![next, album_id],
+    )?;
+    Ok(())
+}
+
 /// Add an asset to an existing case-insensitive named album, creating it first
 /// when needed. The first asset becomes its cover.
 pub fn ensure_named_album_with_asset(
@@ -175,5 +217,40 @@ mod tests {
             albums[0].cover_thumbnail_path.as_deref(),
             Some("/thumbs/cover.jpg")
         );
+    }
+
+    #[test]
+    fn sync_cover_replaces_cover_removed_from_album() {
+        let dir = tempdir().unwrap();
+        let conn = db::open_and_migrate(&dir.path().join("library.db")).unwrap();
+        seed_asset(&conn, "keep", false, Some("/thumbs/keep.jpg"));
+        seed_asset(&conn, "cover", false, Some("/thumbs/cover.jpg"));
+        conn.execute(
+            "INSERT INTO albums (id, name, cover_asset_id, created_at)
+             VALUES ('alb-1', 'Covered', 'cover', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        for asset_id in ["keep", "cover"] {
+            conn.execute(
+                "INSERT INTO album_assets (album_id, asset_id) VALUES ('alb-1', ?1)",
+                params![asset_id],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "DELETE FROM album_assets WHERE album_id='alb-1' AND asset_id='cover'",
+            [],
+        )
+        .unwrap();
+        sync_cover(&conn, "alb-1").unwrap();
+        let cover: String = conn
+            .query_row(
+                "SELECT cover_asset_id FROM albums WHERE id='alb-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cover, "keep");
     }
 }

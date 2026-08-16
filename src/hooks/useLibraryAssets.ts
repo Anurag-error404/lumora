@@ -67,17 +67,26 @@ export function useLibraryAssets({
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [smartCounts, setSmartCounts] = useState<SmartCounts | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [searchInFlight, setSearchInFlight] = useState(false);
   const loadingMoreRef = useRef(false);
+  const loadGenRef = useRef(0);
+  const queryRef = useRef(query);
+  queryRef.current = query;
   // Clear immediately; debounce non-empty typing so each keystroke isn't an IPC.
   const [searchQuery, setSearchQuery] = useState(query);
   useEffect(() => {
     if (!query.trim()) {
       setSearchQuery("");
+      setSearchInFlight(false);
       return;
     }
     const id = window.setTimeout(() => setSearchQuery(query), SEARCH_DEBOUNCE_MS);
+    setSearchInFlight(true);
+    loadGenRef.current += 1;
     return () => window.clearTimeout(id);
   }, [query]);
+  const searchPending =
+    Boolean(query.trim()) && query.trim() !== searchQuery.trim();
 
   const refreshStats = useCallback(async () => {
     try {
@@ -173,6 +182,16 @@ export function useLibraryAssets({
   );
 
   const loadAssets = useCallback(async () => {
+    const live = queryRef.current.trim();
+    if (live !== searchQuery.trim()) {
+      loadGenRef.current += 1;
+      setSearchInFlight(Boolean(live));
+      setSearchQuery(live);
+      return;
+    }
+    const gen = ++loadGenRef.current;
+    const isSearch = Boolean(searchQuery.trim());
+    if (isSearch) setSearchInFlight(true);
     try {
       setError(null);
       if (view === "activity") {
@@ -214,6 +233,7 @@ export function useLibraryAssets({
         return;
       }
       const rows = await fetchAssetPage(0);
+      if (gen !== loadGenRef.current) return;
       setAssets(rows);
       const pageSize = view === "memories" ? MEMORY_PAGE_SIZE : PAGE_SIZE;
       setHasMore(rows.length === pageSize);
@@ -224,10 +244,14 @@ export function useLibraryAssets({
         await refreshStats();
       }
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(String(e));
+    } finally {
+      if (gen === loadGenRef.current) setSearchInFlight(false);
     }
   }, [
     view,
+    searchQuery,
     activeMemory,
     fetchAssetPage,
     refreshStats,
@@ -285,6 +309,7 @@ export function useLibraryAssets({
     smartCounts,
     refreshStats,
     hasMore,
+    searching: Boolean(query.trim()) && (searchPending || searchInFlight),
     loadAssets,
     loadMoreAssets,
   };

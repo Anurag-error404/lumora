@@ -224,6 +224,7 @@ export default function App() {
     smartCounts,
     refreshStats,
     hasMore,
+    searching,
     loadAssets,
     loadMoreAssets,
   } = useLibraryAssets({
@@ -542,6 +543,7 @@ export default function App() {
     openMoveAlbumModal,
     submitAlbumModal,
     moveToExistingAlbum,
+    removeSelectedFromAlbum,
   } = useAlbumWorkflows({
     albums,
     refreshAlbums,
@@ -550,6 +552,7 @@ export default function App() {
     selected,
     selectedIds,
     setSelected,
+    activeAlbum,
     setActiveAlbum,
     setView,
     setError,
@@ -756,6 +759,7 @@ export default function App() {
           query={query}
           onQueryChange={setQuery}
           onSubmitSearch={() => void submitSearch()}
+          searching={searching}
           recentSearches={recentSearches}
           onPickRecent={runRecentSearch}
           canUndo={!!history?.canUndo}
@@ -804,6 +808,11 @@ export default function App() {
             onExportZip={() => void exportSelectedZip()}
             onOptimize={() => void optimizeSelected()}
             onOpenMoveAlbum={openMoveAlbumModal}
+            onRemoveFromAlbum={
+              view === "albums" && activeAlbum
+                ? () => void removeSelectedFromAlbum()
+                : undefined
+            }
             onMoveToLocked={() => void moveSelectionToLocked()}
             onDelete={() => void deleteSelected()}
             onSelectAllVisible={selectAllVisible}
@@ -840,6 +849,7 @@ export default function App() {
               }}
               onStartPicking={startPickingForAlbum}
               onOpenMoveAlbum={openMoveAlbumModal}
+              onRemoveFromAlbum={() => void removeSelectedFromAlbum()}
               onCreateLockedVault={createLockedVault}
               onAddToExistingVault={(album) =>
                 void moveAlbumToLocked(album.id, album.name)
@@ -1224,6 +1234,12 @@ export default function App() {
                 />
               )}
               {assets.length === 0 ? (
+            searching && query.trim() ? (
+              <div className="developer-loading" role="status" aria-live="polite">
+                <span className="spinner" aria-hidden="true" />
+                Searching…
+              </div>
+            ) : (
             <AssetEmptyState
               view={view}
               albums={albums}
@@ -1237,6 +1253,7 @@ export default function App() {
               onBrowseLibrary={() => setView("library")}
               onStartPicking={startPickingForAlbum}
             />
+            )
           ) : (
             <LibraryGrid
               assets={assets}

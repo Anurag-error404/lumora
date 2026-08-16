@@ -11,6 +11,7 @@ export function AlbumDetailHeader({
   onBack,
   onStartPicking,
   onOpenMoveAlbum,
+  onRemoveFromAlbum,
   onCreateLockedVault,
   onAddToExistingVault,
   onDeleteAlbum,
@@ -22,6 +23,7 @@ export function AlbumDetailHeader({
   onBack: () => void;
   onStartPicking: (album: Album) => void;
   onOpenMoveAlbum: () => void;
+  onRemoveFromAlbum: () => void;
   onCreateLockedVault: () => void;
   onAddToExistingVault: (album: Album) => void;
   onDeleteAlbum: (album: Album) => void;
@@ -63,9 +65,14 @@ export function AlbumDetailHeader({
                     Add photos from library
                   </button>
                   {hasSelection && (
-                    <button onClick={onOpenMoveAlbum}>
-                      Add selection to album…
-                    </button>
+                    <>
+                      <button type="button" onClick={onRemoveFromAlbum}>
+                        Remove from album
+                      </button>
+                      <button type="button" onClick={onOpenMoveAlbum}>
+                        Add selection to album…
+                      </button>
+                    </>
                   )}
                   <button
                     type="button"
