@@ -2983,9 +2983,11 @@ button .nav-icon {
   cursor: grabbing;
 }
 
+/* Definite size, not max-*: percentage max-height on the media below only
+   resolves against a parent with a definite height. */
 .viewer-zoom-layer {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3003,13 +3005,6 @@ button .nav-icon {
   height: auto;
   object-fit: contain;
   display: block;
-}
-
-.viewer-zoom-layer img,
-.viewer-zoom-layer .viewer-video {
-  /* Layer already constrains size; keep media from escaping fit box. */
-  max-width: min(100vw, 100%);
-  max-height: min(100vh, 100%);
 }
 
 .viewer-video {
