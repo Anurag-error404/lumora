@@ -3824,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "photovault-ai"
-version = "0.14.5"
+version = "0.14.6"
 dependencies = [
  "anyhow",
  "argon2",
