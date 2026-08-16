@@ -81,6 +81,16 @@
   }
 
   // —— Search playground ——
+  // Screenshots are keyed by chip query here rather than read from the markup,
+  // so whatever lands in img.src is always one of these literals.
+  const playShots = new Map([
+    ["black dog", "docs/screenshots/search-black-dog.webp"],
+    ["nature sunset", "docs/screenshots/search-nature-sunset.webp"],
+    ["Bird on tree", "docs/screenshots/search-bird-on-tree.webp"],
+    ["mountain hike", "docs/screenshots/search_mountain_hike.webp"],
+    ["receipt from 2026", "docs/screenshots/search_reciept_from_2026.webp"],
+    ["sports car", "docs/screenshots/search_sports_car.webp"],
+  ]);
   const chips = document.querySelectorAll(".play-chip");
   const playImg = document.querySelector("[data-play-img]");
   const playQuery = document.querySelector("[data-play-query]");
@@ -89,7 +99,7 @@
       chips.forEach((c) => c.classList.remove("is-active"));
       chip.classList.add("is-active");
       const q = chip.getAttribute("data-query") || "";
-      const src = chip.getAttribute("data-img") || "";
+      const src = playShots.get(q);
       if (playQuery) playQuery.textContent = q;
       if (playImg && src) {
         playImg.src = src;

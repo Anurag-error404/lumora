@@ -8,6 +8,8 @@
 //! and verifying that the wrapped MK decrypts (the AEAD tag authenticates it),
 //! so an incorrect password fails cleanly without a stored password hash.
 
+use std::mem::MaybeUninit;
+
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -45,21 +47,21 @@ impl Default for KdfParams {
     }
 }
 
-/// Fill a buffer with cryptographically secure random bytes.
-fn random_bytes(buf: &mut [u8]) -> AppResult<()> {
-    getrandom::fill(buf).map_err(|e| AppError::msg(format!("random source failed: {e}")))
+/// `N` cryptographically secure random bytes. Fills uninitialised memory, so a
+/// constant is never even momentarily present in a key, salt or nonce.
+fn random_array<const N: usize>() -> AppResult<[u8; N]> {
+    let mut buf = [MaybeUninit::<u8>::uninit(); N];
+    let filled = getrandom::fill_uninit(&mut buf)
+        .map_err(|e| AppError::msg(format!("random source failed: {e}")))?;
+    Ok(<[u8; N]>::try_from(&*filled).expect("fill_uninit fills the whole buffer"))
 }
 
 pub fn random_salt() -> AppResult<[u8; SALT_LEN]> {
-    let mut salt = [0u8; SALT_LEN];
-    random_bytes(&mut salt)?;
-    Ok(salt)
+    random_array()
 }
 
 pub fn random_master_key() -> AppResult<[u8; MASTER_KEY_LEN]> {
-    let mut key = [0u8; MASTER_KEY_LEN];
-    random_bytes(&mut key)?;
-    Ok(key)
+    random_array()
 }
 
 /// Derive the key-encryption key from a password + salt using Argon2id.
@@ -95,8 +97,7 @@ pub fn wrap_master_key(
     let cipher = cipher_for(&kek);
     kek.zeroize();
 
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    random_bytes(&mut nonce_bytes)?;
+    let nonce_bytes: [u8; NONCE_LEN] = random_array()?;
     let nonce = nonce_from(&nonce_bytes)?;
     let wrapped = cipher
         .encrypt(&nonce, master_key.as_slice())
@@ -121,22 +122,16 @@ pub fn unwrap_master_key(
     let mut plaintext = cipher
         .decrypt(&nonce, wrapped_key)
         .map_err(|_| AppError::msg("incorrect password"))?;
-    if plaintext.len() != MASTER_KEY_LEN {
-        plaintext.zeroize();
-        return Err(AppError::msg("corrupt vault: bad key length"));
-    }
-    let mut key = [0u8; MASTER_KEY_LEN];
-    key.copy_from_slice(&plaintext);
+    let key = <[u8; MASTER_KEY_LEN]>::try_from(&plaintext[..]);
     plaintext.zeroize();
-    Ok(key)
+    key.map_err(|_| AppError::msg("corrupt vault: bad key length"))
 }
 
 /// Generate a one-time recovery code, formatted in dash-separated groups of
 /// four (e.g. `4T9K-...`). The code itself is the secret: it is never stored,
 /// only a second copy of the master key wrapped under a key derived from it.
 pub fn generate_recovery_code() -> AppResult<String> {
-    let mut raw = [0u8; RECOVERY_BYTES];
-    random_bytes(&mut raw)?;
+    let mut raw: [u8; RECOVERY_BYTES] = random_array()?;
 
     // 160 bits is divisible by 5, so the encoding comes out even with no padding.
     let mut chars = Vec::with_capacity(RECOVERY_BYTES * 8 / 5);
@@ -177,8 +172,7 @@ pub fn normalize_recovery_code(input: &str) -> String {
 /// Encrypt file contents into a self-describing blob (`magic || nonce || ct`).
 pub fn encrypt_blob(master_key: &[u8; MASTER_KEY_LEN], plaintext: &[u8]) -> AppResult<Vec<u8>> {
     let cipher = cipher_for(master_key);
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    random_bytes(&mut nonce_bytes)?;
+    let nonce_bytes: [u8; NONCE_LEN] = random_array()?;
     let nonce = nonce_from(&nonce_bytes)?;
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
@@ -210,6 +204,14 @@ pub fn decrypt_blob(master_key: &[u8; MASTER_KEY_LEN], blob: &[u8]) -> AppResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn random_output_is_filled_and_distinct() {
+        let salt = random_salt().unwrap();
+        assert_ne!(salt, [0u8; SALT_LEN]);
+        assert_ne!(salt, random_salt().unwrap());
+        assert_ne!(random_master_key().unwrap(), [0u8; MASTER_KEY_LEN]);
+    }
 
     #[test]
     fn wrap_roundtrip_and_wrong_password() {
